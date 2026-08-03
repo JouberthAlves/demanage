@@ -1,6 +1,6 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 
-import { EXPENSE_CATEGORY_LABELS } from '@/data/seed';
+import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
 import { formatCurrency } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { ExpenseCategory } from '@/types/finance';
