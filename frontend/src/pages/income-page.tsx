@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -14,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import {
   Table,
   TableBody,
@@ -23,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/labels';
+import { useDeleteEntry, useEntries } from '@/hooks/use-entries';
 import { formatCurrency } from '@/lib/format';
 import { selectMonthlyIncome, useFinanceStore } from '@/stores/finance-store';
 import type { Income, IncomeType } from '@/types/finance';
@@ -34,8 +37,8 @@ const typeColors: Record<IncomeType, string> = {
 };
 
 export function IncomePage() {
-  const incomes = useFinanceStore((state) => state.incomes);
-  const removeIncome = useFinanceStore((state) => state.removeIncome);
+  const { data: incomes = [], isLoading, isError } = useEntries();
+  const removeEntry = useDeleteEntry();
   const total = useFinanceStore(selectMonthlyIncome);
 
   const [search, setSearch] = useState('');
@@ -63,9 +66,16 @@ export function IncomePage() {
     setDialogOpen(true);
   }
 
-  function handleDelete(id: string, name: string) {
-    removeIncome(id);
-    toast.success(`Entrada "${name}" removida`);
+  async function handleDelete(id: string, name: string) {
+    try {
+      await removeEntry.mutateAsync(id);
+      toast.success(`Entrada "${name}" removida`);
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível remover a entrada')
+        : 'Não foi possível remover a entrada';
+      toast.error(message);
+    }
   }
 
   return (
@@ -124,7 +134,22 @@ export function IncomePage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={5} className='h-24 text-center'>
+                  <Spinner className='mx-auto size-5' />
+                </TableCell>
+              </TableRow>
+            ) : isError ? (
+              <TableRow>
+                <TableCell
+                  colSpan={5}
+                  className='h-24 text-center text-destructive'
+                >
+                  Não foi possível carregar as entradas.
+                </TableCell>
+              </TableRow>
+            ) : filtered.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={5}
@@ -163,7 +188,8 @@ export function IncomePage() {
                       <Button
                         variant='ghost'
                         size='icon-sm'
-                        onClick={() => handleDelete(income.id, income.name)}
+                        disabled={removeEntry.isPending}
+                        onClick={() => void handleDelete(income.id, income.name)}
                       >
                         <Trash2 className='size-4' />
                       </Button>

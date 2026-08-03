@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -19,9 +20,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/labels';
+import { useCreateEntry, useUpdateEntry } from '@/hooks/use-entries';
 import { parseCurrencyInput } from '@/lib/format';
-import { useFinanceStore } from '@/stores/finance-store';
 import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
 
 type IncomeFormDialogProps = {
@@ -51,9 +53,10 @@ export function IncomeFormDialog({
   onOpenChange,
   income,
 }: IncomeFormDialogProps) {
-  const addIncome = useFinanceStore((state) => state.addIncome);
-  const updateIncome = useFinanceStore((state) => state.updateIncome);
+  const createEntry = useCreateEntry();
+  const updateEntry = useUpdateEntry();
   const [form, setForm] = useState<FormState>(emptyForm);
+  const submitting = createEntry.isPending || updateEntry.isPending;
 
   useEffect(() => {
     if (!open) return;
@@ -72,7 +75,7 @@ export function IncomeFormDialog({
     setForm(emptyForm);
   }, [income, open]);
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
     const amount = parseCurrencyInput(form.amount);
@@ -86,18 +89,24 @@ export function IncomeFormDialog({
       amount,
       type: form.type,
       frequency: form.frequency,
-      date: form.frequency === 'unica' ? form.date || undefined : undefined,
+      date: form.frequency === 'unica' ? form.date || null : null,
     };
 
-    if (income) {
-      updateIncome(income.id, payload);
-      toast.success('Entrada atualizada');
-    } else {
-      addIncome(payload);
-      toast.success('Entrada cadastrada');
+    try {
+      if (income) {
+        await updateEntry.mutateAsync({ id: income.id, payload });
+        toast.success('Entrada atualizada');
+      } else {
+        await createEntry.mutateAsync(payload);
+        toast.success('Entrada cadastrada');
+      }
+      onOpenChange(false);
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível salvar a entrada')
+        : 'Não foi possível salvar a entrada';
+      toast.error(message);
     }
-
-    onOpenChange(false);
   }
 
   return (
@@ -112,8 +121,11 @@ export function IncomeFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className='space-y-4'>
-          <div className='space-y-2'>
+        <form
+          onSubmit={(event) => void handleSubmit(event)}
+          className='flex flex-col gap-4'
+        >
+          <div className='flex flex-col gap-2'>
             <Label htmlFor='income-name'>Nome</Label>
             <Input
               id='income-name'
@@ -126,7 +138,7 @@ export function IncomeFormDialog({
             />
           </div>
 
-          <div className='space-y-2'>
+          <div className='flex flex-col gap-2'>
             <Label htmlFor='income-amount'>Valor</Label>
             <Input
               id='income-amount'
@@ -143,16 +155,18 @@ export function IncomeFormDialog({
           </div>
 
           <div className='grid grid-cols-2 gap-3'>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label>Tipo</Label>
               <Select
                 value={form.type}
-                onValueChange={(value) =>
-                  setForm((current) => ({
-                    ...current,
-                    type: value as IncomeType,
-                  }))
-                }
+                onValueChange={(value) => {
+                  if (value) {
+                    setForm((current) => ({
+                      ...current,
+                      type: value as IncomeType,
+                    }));
+                  }
+                }}
               >
                 <SelectTrigger className='rounded-lg'>
                   <SelectValue />
@@ -166,16 +180,18 @@ export function IncomeFormDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label>Frequência</Label>
               <Select
                 value={form.frequency}
-                onValueChange={(value) =>
-                  setForm((current) => ({
-                    ...current,
-                    frequency: value as IncomeFrequency,
-                  }))
-                }
+                onValueChange={(value) => {
+                  if (value) {
+                    setForm((current) => ({
+                      ...current,
+                      frequency: value as IncomeFrequency,
+                    }));
+                  }
+                }}
               >
                 <SelectTrigger className='rounded-lg'>
                   <SelectValue />
@@ -194,7 +210,7 @@ export function IncomeFormDialog({
           </div>
 
           {form.frequency === 'unica' ? (
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label htmlFor='income-date'>Data</Label>
               <Input
                 id='income-date'
@@ -217,10 +233,12 @@ export function IncomeFormDialog({
               variant='outline'
               className='rounded-lg'
               onClick={() => onOpenChange(false)}
+              disabled={submitting}
             >
               Cancelar
             </Button>
-            <Button type='submit' className='rounded-lg'>
+            <Button type='submit' className='rounded-lg' disabled={submitting}>
+              {submitting ? <Spinner data-icon='inline-start' /> : null}
               Salvar
             </Button>
           </DialogFooter>

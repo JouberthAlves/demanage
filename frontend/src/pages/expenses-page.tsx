@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -14,6 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import {
   Table,
   TableBody,
@@ -23,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
+import { useDeleteExpense, useExpenses } from '@/hooks/use-expenses';
 import { formatCurrency } from '@/lib/format';
 import { selectMonthlyExpenses, useFinanceStore } from '@/stores/finance-store';
 import type { ExpenseCategory, RecurringExpense } from '@/types/finance';
@@ -35,9 +38,9 @@ const categoryColors: Record<ExpenseCategory, string> = {
 };
 
 export function ExpensesPage() {
-  const expenses = useFinanceStore((state) => state.expenses);
+  const { data: expenses = [], isLoading, isError } = useExpenses();
   const cards = useFinanceStore((state) => state.profile.cards);
-  const removeExpense = useFinanceStore((state) => state.removeExpense);
+  const removeExpense = useDeleteExpense();
   const total = useFinanceStore(selectMonthlyExpenses);
 
   const [search, setSearch] = useState('');
@@ -66,9 +69,16 @@ export function ExpensesPage() {
     setDialogOpen(true);
   }
 
-  function handleDelete(id: string, name: string) {
-    removeExpense(id);
-    toast.success(`Despesa "${name}" removida`);
+  async function handleDelete(id: string, name: string) {
+    try {
+      await removeExpense.mutateAsync(id);
+      toast.success(`Despesa "${name}" removida`);
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível remover a despesa')
+        : 'Não foi possível remover a despesa';
+      toast.error(message);
+    }
   }
 
   return (
@@ -128,7 +138,22 @@ export function ExpensesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.length === 0 ? (
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={6} className='h-24 text-center'>
+                  <Spinner className='mx-auto size-5' />
+                </TableCell>
+              </TableRow>
+            ) : isError ? (
+              <TableRow>
+                <TableCell
+                  colSpan={6}
+                  className='h-24 text-center text-destructive'
+                >
+                  Não foi possível carregar as despesas.
+                </TableCell>
+              </TableRow>
+            ) : filtered.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={6}
@@ -175,7 +200,10 @@ export function ExpensesPage() {
                         <Button
                           variant='ghost'
                           size='icon-sm'
-                          onClick={() => handleDelete(expense.id, expense.name)}
+                          disabled={removeExpense.isPending}
+                          onClick={() =>
+                            void handleDelete(expense.id, expense.name)
+                          }
                         >
                           <Trash2 className='size-4' />
                         </Button>

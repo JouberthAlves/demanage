@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -12,8 +13,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
+import { useCreateCard, useUpdateCard } from '@/hooks/use-cards';
 import { parseCurrencyInput } from '@/lib/format';
-import { useFinanceStore } from '@/stores/finance-store';
 import type { Card } from '@/types/finance';
 
 type CardFormDialogProps = {
@@ -41,9 +43,10 @@ export function CardFormDialog({
   onOpenChange,
   card,
 }: CardFormDialogProps) {
-  const addCard = useFinanceStore((state) => state.addCard);
-  const updateCard = useFinanceStore((state) => state.updateCard);
+  const createCard = useCreateCard();
+  const updateCard = useUpdateCard();
   const [form, setForm] = useState<FormState>(emptyForm);
+  const submitting = createCard.isPending || updateCard.isPending;
 
   useEffect(() => {
     if (!open) return;
@@ -61,7 +64,7 @@ export function CardFormDialog({
     setForm(emptyForm);
   }, [card, open]);
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
     if (!form.name.trim()) {
@@ -71,20 +74,26 @@ export function CardFormDialog({
 
     const payload = {
       name: form.name.trim(),
-      limit: form.limit ? parseCurrencyInput(form.limit) : undefined,
-      closingDay: form.closingDay ? Number(form.closingDay) : undefined,
-      dueDay: form.dueDay ? Number(form.dueDay) : undefined,
+      limit: form.limit ? parseCurrencyInput(form.limit) : null,
+      closingDay: form.closingDay ? Number(form.closingDay) : null,
+      dueDay: form.dueDay ? Number(form.dueDay) : null,
     };
 
-    if (card) {
-      updateCard(card.id, payload);
-      toast.success('Cartão atualizado');
-    } else {
-      addCard(payload);
-      toast.success('Cartão adicionado');
+    try {
+      if (card) {
+        await updateCard.mutateAsync({ id: card.id, payload });
+        toast.success('Cartão atualizado');
+      } else {
+        await createCard.mutateAsync(payload);
+        toast.success('Cartão adicionado');
+      }
+      onOpenChange(false);
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível salvar o cartão')
+        : 'Não foi possível salvar o cartão';
+      toast.error(message);
     }
-
-    onOpenChange(false);
   }
 
   return (
@@ -97,8 +106,11 @@ export function CardFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className='space-y-4'>
-          <div className='space-y-2'>
+        <form
+          onSubmit={(event) => void handleSubmit(event)}
+          className='flex flex-col gap-4'
+        >
+          <div className='flex flex-col gap-2'>
             <Label htmlFor='card-name'>Nome</Label>
             <Input
               id='card-name'
@@ -111,7 +123,7 @@ export function CardFormDialog({
             />
           </div>
 
-          <div className='space-y-2'>
+          <div className='flex flex-col gap-2'>
             <Label htmlFor='card-limit'>Limite</Label>
             <Input
               id='card-limit'
@@ -128,7 +140,7 @@ export function CardFormDialog({
           </div>
 
           <div className='grid grid-cols-2 gap-3'>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label htmlFor='card-closing'>Fechamento</Label>
               <Input
                 id='card-closing'
@@ -145,7 +157,7 @@ export function CardFormDialog({
                 className='rounded-lg'
               />
             </div>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label htmlFor='card-due'>Vencimento</Label>
               <Input
                 id='card-due'
@@ -170,10 +182,12 @@ export function CardFormDialog({
               variant='outline'
               className='rounded-lg'
               onClick={() => onOpenChange(false)}
+              disabled={submitting}
             >
               Cancelar
             </Button>
-            <Button type='submit' className='rounded-lg'>
+            <Button type='submit' className='rounded-lg' disabled={submitting}>
+              {submitting ? <Spinner data-icon='inline-start' /> : null}
               Salvar
             </Button>
           </DialogFooter>

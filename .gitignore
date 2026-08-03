@@ -3,3 +3,11 @@ dist/
 .env
 *.log
 .DS_Store
+
+# Agent tooling (symlinks break git add on Windows)
+.claude/
+.agents/
+.windsurf/
+**/.claude/
+**/.agents/
+**/.windsurf/

@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -19,8 +20,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
+import { useCreateExpense, useUpdateExpense } from '@/hooks/use-expenses';
 import { parseCurrencyInput } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { ExpenseCategory, RecurringExpense } from '@/types/finance';
@@ -55,9 +58,10 @@ export function ExpenseFormDialog({
   expense,
 }: ExpenseFormDialogProps) {
   const cards = useFinanceStore((state) => state.profile.cards);
-  const addExpense = useFinanceStore((state) => state.addExpense);
-  const updateExpense = useFinanceStore((state) => state.updateExpense);
+  const createExpense = useCreateExpense();
+  const updateExpense = useUpdateExpense();
   const [form, setForm] = useState<FormState>(emptyForm);
+  const submitting = createExpense.isPending || updateExpense.isPending;
 
   useEffect(() => {
     if (!open) return;
@@ -77,7 +81,7 @@ export function ExpenseFormDialog({
     setForm(emptyForm);
   }, [expense, open]);
 
-  function handleSubmit(event: React.FormEvent) {
+  async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
 
     const amount = parseCurrencyInput(form.amount);
@@ -91,20 +95,26 @@ export function ExpenseFormDialog({
       amount,
       category: form.category,
       frequency: 'mensal' as const,
-      cardId: form.cardId === 'none' ? undefined : form.cardId,
-      dueDay: form.dueDay ? Number(form.dueDay) : undefined,
-      notes: form.notes.trim() || undefined,
+      cardId: form.cardId === 'none' ? null : form.cardId,
+      dueDay: form.dueDay ? Number(form.dueDay) : null,
+      notes: form.notes.trim() || null,
     };
 
-    if (expense) {
-      updateExpense(expense.id, payload);
-      toast.success('Despesa atualizada');
-    } else {
-      addExpense(payload);
-      toast.success('Despesa cadastrada');
+    try {
+      if (expense) {
+        await updateExpense.mutateAsync({ id: expense.id, payload });
+        toast.success('Despesa atualizada');
+      } else {
+        await createExpense.mutateAsync(payload);
+        toast.success('Despesa cadastrada');
+      }
+      onOpenChange(false);
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível salvar a despesa')
+        : 'Não foi possível salvar a despesa';
+      toast.error(message);
     }
-
-    onOpenChange(false);
   }
 
   return (
@@ -119,8 +129,11 @@ export function ExpenseFormDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className='space-y-4'>
-          <div className='space-y-2'>
+        <form
+          onSubmit={(event) => void handleSubmit(event)}
+          className='flex flex-col gap-4'
+        >
+          <div className='flex flex-col gap-2'>
             <Label htmlFor='expense-name'>Nome</Label>
             <Input
               id='expense-name'
@@ -134,7 +147,7 @@ export function ExpenseFormDialog({
           </div>
 
           <div className='grid grid-cols-2 gap-3'>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label htmlFor='expense-amount'>Valor</Label>
               <Input
                 id='expense-amount'
@@ -149,7 +162,7 @@ export function ExpenseFormDialog({
                 className='rounded-lg'
               />
             </div>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label htmlFor='expense-due'>Dia vencimento</Label>
               <Input
                 id='expense-due'
@@ -170,7 +183,7 @@ export function ExpenseFormDialog({
           </div>
 
           <div className='grid grid-cols-2 gap-3'>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label>Categoria</Label>
               <Select
                 value={form.category}
@@ -195,13 +208,15 @@ export function ExpenseFormDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className='space-y-2'>
+            <div className='flex flex-col gap-2'>
               <Label>Cartão</Label>
               <Select
                 value={form.cardId}
-                onValueChange={(value) =>
-                  setForm((current) => ({ ...current, cardId: value }))
-                }
+                onValueChange={(value) => {
+                  if (value) {
+                    setForm((current) => ({ ...current, cardId: value }));
+                  }
+                }}
               >
                 <SelectTrigger className='rounded-lg'>
                   <SelectValue placeholder='Opcional' />
@@ -218,7 +233,7 @@ export function ExpenseFormDialog({
             </div>
           </div>
 
-          <div className='space-y-2'>
+          <div className='flex flex-col gap-2'>
             <Label htmlFor='expense-notes'>Observações</Label>
             <Textarea
               id='expense-notes'
@@ -240,10 +255,12 @@ export function ExpenseFormDialog({
               variant='outline'
               className='rounded-lg'
               onClick={() => onOpenChange(false)}
+              disabled={submitting}
             >
               Cancelar
             </Button>
-            <Button type='submit' className='rounded-lg'>
+            <Button type='submit' className='rounded-lg' disabled={submitting}>
+              {submitting ? <Spinner data-icon='inline-start' /> : null}
               Salvar
             </Button>
           </DialogFooter>

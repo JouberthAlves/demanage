@@ -2,8 +2,15 @@ import { Outlet } from 'react-router';
 
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AppTopbar } from '@/components/layout/app-topbar';
+import { useCards } from '@/hooks/use-cards';
+import { useEntries } from '@/hooks/use-entries';
+import { useExpenses } from '@/hooks/use-expenses';
 
 export function AppLayout() {
+  useCards();
+  useEntries();
+  useExpenses();
+
   return (
     <div className='flex min-h-screen bg-background text-foreground'>
       <AppSidebar />

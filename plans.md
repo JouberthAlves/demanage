@@ -50,7 +50,8 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 ## P2+ — Backlog (não fazer sem pedido explícito)
 
-- [x] ~~Auth / login real~~ — JWT em cookie httpOnly; `POST /auth/register|login|logout`, `GET /auth/me`; telas `/login` e `/register` (shadcn Field/Card); rotas do app protegidas. Financeiro ainda no Zustand/localStorage.
-- [ ] API CRUD Express + Prisma (`User`, `Card`, `Expense`, `Entry`)
-- [ ] Frontend: trocar Zustand/localStorage pela API
+- [x] ~~Auth / login real~~ — JWT em cookie httpOnly; `POST /auth/register|login|logout`, `GET /auth/me`; telas `/login` e `/register` (shadcn Field/Card); rotas do app protegidas.
+- [x] ~~API CRUD Express + Prisma~~ — `Entry`, `Expense`, `Card` (GET/POST/PATCH/DELETE). Perfil (`User` name/salary) ainda local.
+- [x] ~~Frontend: trocar Zustand/localStorage pela API~~ — Entradas, Despesas e Cartões na API; nome/salário/notas do perfil ainda no Zustand.
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
+

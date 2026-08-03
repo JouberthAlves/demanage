@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
@@ -7,6 +8,7 @@ import { CardFormDialog } from '@/components/profile/card-form-dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Spinner } from '@/components/ui/spinner';
 import {
   Table,
   TableBody,
@@ -16,14 +18,16 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
+import { useCards, useDeleteCard } from '@/hooks/use-cards';
 import { formatCurrency, parseCurrencyInput } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { Card } from '@/types/finance';
 
 export function ProfilePage() {
+  const { isLoading: cardsLoading, isError: cardsError } = useCards();
   const profile = useFinanceStore((state) => state.profile);
   const updateProfile = useFinanceStore((state) => state.updateProfile);
-  const removeCard = useFinanceStore((state) => state.removeCard);
+  const removeCard = useDeleteCard();
 
   const [name, setName] = useState(profile.name);
   const [salary, setSalary] = useState(
@@ -59,9 +63,16 @@ export function ProfilePage() {
     setDialogOpen(true);
   }
 
-  function handleDeleteCard(id: string, cardName: string) {
-    removeCard(id);
-    toast.success(`Cartão "${cardName}" removido`);
+  async function handleDeleteCard(id: string, cardName: string) {
+    try {
+      await removeCard.mutateAsync(id);
+      toast.success(`Cartão "${cardName}" removido`);
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível remover o cartão')
+        : 'Não foi possível remover o cartão';
+      toast.error(message);
+    }
   }
 
   return (
@@ -142,7 +153,22 @@ export function ProfilePage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {profile.cards.length === 0 ? (
+              {cardsLoading ? (
+                <TableRow>
+                  <TableCell colSpan={5} className='h-24 text-center'>
+                    <Spinner className='mx-auto size-5' />
+                  </TableCell>
+                </TableRow>
+              ) : cardsError ? (
+                <TableRow>
+                  <TableCell
+                    colSpan={5}
+                    className='h-24 text-center text-destructive'
+                  >
+                    Não foi possível carregar os cartões.
+                  </TableCell>
+                </TableRow>
+              ) : profile.cards.length === 0 ? (
                 <TableRow>
                   <TableCell
                     colSpan={5}
@@ -176,7 +202,10 @@ export function ProfilePage() {
                         <Button
                           variant='ghost'
                           size='icon-sm'
-                          onClick={() => handleDeleteCard(card.id, card.name)}
+                          disabled={removeCard.isPending}
+                          onClick={() =>
+                            void handleDeleteCard(card.id, card.name)
+                          }
                         >
                           <Trash2 className='size-4' />
                         </Button>
