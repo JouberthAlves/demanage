@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { financeSeed } from '@/data/seed';
+import { createId } from '@/lib/format';
 import type {
   Card,
   FinanceState,
@@ -9,7 +9,6 @@ import type {
   Profile,
   RecurringExpense,
 } from '@/types/finance';
-import { createId } from '@/lib/format';
 
 type FinanceActions = {
   updateProfile: (patch: Partial<Omit<Profile, 'cards'>>) => void;
@@ -25,15 +24,27 @@ type FinanceActions = {
   addIncome: (income: Omit<Income, 'id'>) => void;
   updateIncome: (id: string, patch: Partial<Omit<Income, 'id'>>) => void;
   removeIncome: (id: string) => void;
-  resetToSeed: () => void;
+  clearAll: () => void;
 };
 
 export type FinanceStore = FinanceState & FinanceActions;
 
+const emptyFinanceState: FinanceState = {
+  profile: {
+    name: '',
+    salary: 0,
+    notes: undefined,
+    cards: [],
+  },
+  expenses: [],
+  incomes: [],
+  history: [],
+};
+
 export const useFinanceStore = create<FinanceStore>()(
   persist(
     (set) => ({
-      ...financeSeed,
+      ...emptyFinanceState,
 
       updateProfile: (patch) =>
         set((state) => ({
@@ -103,10 +114,10 @@ export const useFinanceStore = create<FinanceStore>()(
           incomes: state.incomes.filter((income) => income.id !== id),
         })),
 
-      resetToSeed: () => set({ ...financeSeed }),
+      clearAll: () => set({ ...emptyFinanceState }),
     }),
     {
-      name: 'demanage-finance',
+      name: 'demanage-finance-v2',
     },
   ),
 );

@@ -22,7 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/seed';
+import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/labels';
 import { formatCurrency } from '@/lib/format';
 import { selectMonthlyIncome, useFinanceStore } from '@/stores/finance-store';
 import type { Income, IncomeType } from '@/types/finance';

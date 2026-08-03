@@ -20,14 +20,25 @@ export function IncomeExpenseAreaChart() {
   const currentIncome = useFinanceStore(selectMonthlyIncome);
   const currentExpense = useFinanceStore(selectMonthlyExpenses);
 
-  const data = history.map((item, index) => {
-    const isLast = index === history.length - 1;
-    return {
-      label: formatMonthLabel(item.month),
-      income: isLast ? currentIncome : item.income,
-      expense: isLast ? currentExpense : item.expense,
-    };
-  });
+  const currentMonth = new Date().toISOString().slice(0, 7);
+
+  const data =
+    history.length === 0
+      ? [
+          {
+            label: formatMonthLabel(currentMonth),
+            income: currentIncome,
+            expense: currentExpense,
+          },
+        ]
+      : history.map((item, index) => {
+          const isLast = index === history.length - 1;
+          return {
+            label: formatMonthLabel(item.month),
+            income: isLast ? currentIncome : item.income,
+            expense: isLast ? currentExpense : item.expense,
+          };
+        });
 
   return (
     <div className='h-72 w-full'>

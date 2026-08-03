@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/seed';
+import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/labels';
 import { parseCurrencyInput } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';

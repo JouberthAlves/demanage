@@ -20,7 +20,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { EXPENSE_CATEGORY_LABELS } from '@/data/seed';
+import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
 import { parseCurrencyInput } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { ExpenseCategory, RecurringExpense } from '@/types/finance';

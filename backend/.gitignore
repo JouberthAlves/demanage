@@ -24,3 +24,4 @@ src/generated
 
 # Coverage
 coverage
+/src/generated/prisma

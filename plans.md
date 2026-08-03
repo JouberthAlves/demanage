@@ -26,7 +26,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 ### Schema e banco
 
-- [ ] **Prisma schema** — Criar `backend/prisma/schema.prisma` com models `User`, `Card`, `Expense`, `Entry` + `DATABASE_URL` no `backend/.env.example`. PostgreSQL; IDs `cuid()`; timestamps; relações com `userId`. **Não** rodar migrate/db push a menos que o usuário peça.
+- [x] **Prisma schema** — Criar `backend/prisma/schema.prisma` com models `User`, `Card`, `Expense`, `Entry` + `DATABASE_URL` no `backend/.env.example`. PostgreSQL; IDs `cuid()`; timestamps; relações com `userId`.
 
   Detalhe dos models:
   - **User**: `id`, `name`, `email` (unique), `passwordHash`, `salary`, `notes?`, relations
@@ -34,7 +34,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
   - **Expense**: `id`, `userId`, `cardId?`, `name`, `amount`, `category` (assinatura\|parcela\|divida\|outro), `frequency` (mensal), `dueDay?`, `notes?`
   - **Entry**: `id`, `userId`, `name`, `amount`, `type` (salario\|freelance\|outro), `frequency` (mensal\|unica), `date?`
 
-- [ ] **`[HUMAN]` Docker / DB** — Subir PostgreSQL (Docker Compose ou outro), configurar `DATABASE_URL`, rodar `prisma migrate` / `generate` quando quiser. **IA só orienta**; não sobe o DB sozinha.
+- [x] **`[HUMAN]` Docker / DB** — Subir PostgreSQL (Docker Compose ou outro), configurar `DATABASE_URL`, rodar `prisma migrate` / `generate` quando quiser. **IA só orienta**; não sobe o DB sozinha.
 
 ---
 
@@ -50,7 +50,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 ## P2+ — Backlog (não fazer sem pedido explícito)
 
-- [ ] Auth / login real (usar `email` + `passwordHash` do `User`)
+- [x] ~~Auth / login real~~ — JWT em cookie httpOnly; `POST /auth/register|login|logout`, `GET /auth/me`; telas `/login` e `/register` (shadcn Field/Card); rotas do app protegidas. Financeiro ainda no Zustand/localStorage.
 - [ ] API CRUD Express + Prisma (`User`, `Card`, `Expense`, `Entry`)
 - [ ] Frontend: trocar Zustand/localStorage pela API
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
