@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-import { createId } from '@/lib/format';
 import type {
   Card,
   FinanceState,
@@ -12,18 +11,9 @@ import type {
 
 type FinanceActions = {
   updateProfile: (patch: Partial<Omit<Profile, 'cards'>>) => void;
-  addCard: (card: Omit<Card, 'id'>) => void;
-  updateCard: (id: string, patch: Partial<Omit<Card, 'id'>>) => void;
-  removeCard: (id: string) => void;
-  addExpense: (expense: Omit<RecurringExpense, 'id'>) => void;
-  updateExpense: (
-    id: string,
-    patch: Partial<Omit<RecurringExpense, 'id'>>,
-  ) => void;
-  removeExpense: (id: string) => void;
-  addIncome: (income: Omit<Income, 'id'>) => void;
-  updateIncome: (id: string, patch: Partial<Omit<Income, 'id'>>) => void;
-  removeIncome: (id: string) => void;
+  setCards: (cards: Card[]) => void;
+  setExpenses: (expenses: RecurringExpense[]) => void;
+  setIncomes: (incomes: Income[]) => void;
   clearAll: () => void;
 };
 
@@ -51,73 +41,28 @@ export const useFinanceStore = create<FinanceStore>()(
           profile: { ...state.profile, ...patch },
         })),
 
-      addCard: (card) =>
+      setCards: (cards) =>
         set((state) => ({
-          profile: {
-            ...state.profile,
-            cards: [...state.profile.cards, { ...card, id: createId('card') }],
-          },
+          profile: { ...state.profile, cards },
         })),
 
-      updateCard: (id, patch) =>
-        set((state) => ({
-          profile: {
-            ...state.profile,
-            cards: state.profile.cards.map((card) =>
-              card.id === id ? { ...card, ...patch } : card,
-            ),
-          },
-        })),
+      setExpenses: (expenses) => set({ expenses }),
 
-      removeCard: (id) =>
-        set((state) => ({
-          profile: {
-            ...state.profile,
-            cards: state.profile.cards.filter((card) => card.id !== id),
-          },
-          expenses: state.expenses.map((expense) =>
-            expense.cardId === id ? { ...expense, cardId: undefined } : expense,
-          ),
-        })),
-
-      addExpense: (expense) =>
-        set((state) => ({
-          expenses: [...state.expenses, { ...expense, id: createId('exp') }],
-        })),
-
-      updateExpense: (id, patch) =>
-        set((state) => ({
-          expenses: state.expenses.map((expense) =>
-            expense.id === id ? { ...expense, ...patch } : expense,
-          ),
-        })),
-
-      removeExpense: (id) =>
-        set((state) => ({
-          expenses: state.expenses.filter((expense) => expense.id !== id),
-        })),
-
-      addIncome: (income) =>
-        set((state) => ({
-          incomes: [...state.incomes, { ...income, id: createId('inc') }],
-        })),
-
-      updateIncome: (id, patch) =>
-        set((state) => ({
-          incomes: state.incomes.map((income) =>
-            income.id === id ? { ...income, ...patch } : income,
-          ),
-        })),
-
-      removeIncome: (id) =>
-        set((state) => ({
-          incomes: state.incomes.filter((income) => income.id !== id),
-        })),
+      setIncomes: (incomes) => set({ incomes }),
 
       clearAll: () => set({ ...emptyFinanceState }),
     }),
     {
-      name: 'demanage-finance-v2',
+      name: 'demanage-finance-v3',
+      partialize: (state) => ({
+        profile: {
+          name: state.profile.name,
+          salary: state.profile.salary,
+          notes: state.profile.notes,
+          cards: [],
+        },
+        history: state.history,
+      }),
     },
   ),
 );
