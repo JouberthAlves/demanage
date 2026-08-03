@@ -1,7 +1,14 @@
 import { create } from 'zustand';
 
 import { api } from '@/lib/api';
+import { useFinanceStore } from '@/stores/finance-store';
 import type { AuthUser } from '@/types/auth';
+
+type UpdateProfileInput = {
+  name?: string;
+  salary?: number;
+  notes?: string | null;
+};
 
 type AuthState = {
   user: AuthUser | null;
@@ -15,6 +22,7 @@ type AuthState = {
     email: string,
     password: string,
   ) => Promise<AuthUser>;
+  updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
   logout: () => Promise<void>;
 };
 
@@ -76,10 +84,21 @@ export const useAuthStore = create<AuthState>((set) => ({
     return data.user;
   },
 
+  updateProfile: async (input) => {
+    const { data } = await api.patch<{ user: AuthUser }>('/auth/me', input);
+    set({
+      user: data.user,
+      isAuthenticated: true,
+      isLoading: false,
+    });
+    return data.user;
+  },
+
   logout: async () => {
     try {
       await api.post('/auth/logout');
     } finally {
+      useFinanceStore.getState().clearAll();
       set({
         user: null,
         isAuthenticated: false,

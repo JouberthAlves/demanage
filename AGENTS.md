@@ -79,10 +79,10 @@ frontend/src/
 
 ## Dados (fase atual)
 
-- Store: `useFinanceStore` em `stores/finance-store.ts`
-- Persistência: `localStorage` chave `demanage-finance`
-- Labels: `data/labels.ts` (estado inicial vazio no finance-store)
-- Sem chamadas de API de domínio ainda (ver `plans.md` para DB/API)
+- Auth: `useAuthStore` — nome/salário/notas via `/auth/*` (sem localStorage)
+- Domínio: Entradas/Despesas/Cartões via API; cache em `useFinanceStore` (sem persist)
+- Labels: `data/labels.ts`
+- Boas-vindas usam `user.name` da sessão
 
 ## Como rodar
 

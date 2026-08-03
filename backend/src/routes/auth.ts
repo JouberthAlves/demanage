@@ -107,4 +107,41 @@ authRoutes.get('/auth/me', requireAuth, async (req, res) => {
   return res.json({ user: req.user });
 });
 
+authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
+  try {
+    const { name, salary, notes } = req.body as {
+      name?: string;
+      salary?: number;
+      notes?: string | null;
+    };
+
+    if (name !== undefined && !name.trim()) {
+      return res.status(400).json({ error: 'Nome não pode ser vazio' });
+    }
+
+    if (
+      salary !== undefined &&
+      (typeof salary !== 'number' || !Number.isFinite(salary) || salary < 0)
+    ) {
+      return res.status(400).json({ error: 'Salário inválido' });
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.user!.id },
+      data: {
+        ...(name !== undefined ? { name: name.trim() } : {}),
+        ...(salary !== undefined ? { salary } : {}),
+        ...(notes !== undefined
+          ? { notes: notes?.trim() ? notes.trim() : null }
+          : {}),
+      },
+    });
+
+    return res.json({ user: toPublicUser(user) });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Erro ao atualizar perfil' });
+  }
+});
+
 export default authRoutes;

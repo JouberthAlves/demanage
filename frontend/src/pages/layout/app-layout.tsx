@@ -16,8 +16,11 @@ export function AppLayout() {
       <AppSidebar />
       <div className='flex min-w-0 flex-1 flex-col'>
         <AppTopbar />
-        <main className='flex-1 px-6 py-6 md:px-8'>
-          <Outlet />
+        <main className='relative flex-1 px-6 py-6 md:px-8'>
+          <div className='pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,184,0,0.04),transparent_35%)]' />
+          <div className='relative w-full'>
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

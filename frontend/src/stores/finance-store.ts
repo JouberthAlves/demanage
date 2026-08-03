@@ -1,16 +1,13 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
 
 import type {
   Card,
   FinanceState,
   Income,
-  Profile,
   RecurringExpense,
 } from '@/types/finance';
 
 type FinanceActions = {
-  updateProfile: (patch: Partial<Omit<Profile, 'cards'>>) => void;
   setCards: (cards: Card[]) => void;
   setExpenses: (expenses: RecurringExpense[]) => void;
   setIncomes: (incomes: Income[]) => void;
@@ -21,9 +18,6 @@ export type FinanceStore = FinanceState & FinanceActions;
 
 const emptyFinanceState: FinanceState = {
   profile: {
-    name: '',
-    salary: 0,
-    notes: undefined,
     cards: [],
   },
   expenses: [],
@@ -31,41 +25,35 @@ const emptyFinanceState: FinanceState = {
   history: [],
 };
 
-export const useFinanceStore = create<FinanceStore>()(
-  persist(
-    (set) => ({
-      ...emptyFinanceState,
+const LEGACY_STORAGE_KEYS = [
+  'demanage-finance',
+  'demanage-finance-v2',
+  'demanage-finance-v3',
+];
 
-      updateProfile: (patch) =>
-        set((state) => ({
-          profile: { ...state.profile, ...patch },
-        })),
+function clearLegacyStorage() {
+  if (typeof window === 'undefined') return;
+  for (const key of LEGACY_STORAGE_KEYS) {
+    window.localStorage.removeItem(key);
+  }
+}
 
-      setCards: (cards) =>
-        set((state) => ({
-          profile: { ...state.profile, cards },
-        })),
+clearLegacyStorage();
 
-      setExpenses: (expenses) => set({ expenses }),
+export const useFinanceStore = create<FinanceStore>((set) => ({
+  ...emptyFinanceState,
 
-      setIncomes: (incomes) => set({ incomes }),
+  setCards: (cards) =>
+    set((state) => ({
+      profile: { ...state.profile, cards },
+    })),
 
-      clearAll: () => set({ ...emptyFinanceState }),
-    }),
-    {
-      name: 'demanage-finance-v3',
-      partialize: (state) => ({
-        profile: {
-          name: state.profile.name,
-          salary: state.profile.salary,
-          notes: state.profile.notes,
-          cards: [],
-        },
-        history: state.history,
-      }),
-    },
-  ),
-);
+  setExpenses: (expenses) => set({ expenses }),
+
+  setIncomes: (incomes) => set({ incomes }),
+
+  clearAll: () => set({ ...emptyFinanceState }),
+}));
 
 export function selectMonthlyIncome(state: FinanceState) {
   return state.incomes

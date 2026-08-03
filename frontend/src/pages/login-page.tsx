@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
+import { AuthShell } from '@/components/layout/auth-shell';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -72,10 +73,16 @@ export function LoginPage() {
   }
 
   return (
-    <div className='flex min-h-screen items-center justify-center bg-background px-4'>
-      <Card className='w-full max-w-md' size='sm'>
+    <AuthShell>
+      <div className='mb-6 text-center'>
+        <div className='mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-primary text-sm font-bold text-primary-foreground'>
+          dM
+        </div>
+        <p className='text-sm text-muted-foreground'>deManage</p>
+      </div>
+      <Card className='w-full border-border bg-card/60 backdrop-blur' size='sm'>
         <CardHeader>
-          <CardTitle>Entrar no deManage</CardTitle>
+          <CardTitle>Entrar</CardTitle>
           <CardDescription>
             Acesse sua conta para continuar gerenciando suas finanças.
           </CardDescription>
@@ -124,6 +131,6 @@ export function LoginPage() {
           </FieldDescription>
         </CardFooter>
       </Card>
-    </div>
+    </AuthShell>
   );
 }

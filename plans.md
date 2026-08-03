@@ -40,18 +40,14 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 ## P1 — Frontend
 
-- [ ] **`[HUMAN]` Renovar o frontend** — Redesign / polish visual do app. **IA NÃO conclui esta tarefa.** Orientar o usuário com:
-  - Arquivos-chave: `frontend/src/global.css`, `components/layout/`, `pages/`
-  - Estilo alvo: dark `#0b0b0b`, CTA branco, gráficos neon âmbar/verde
-  - Seguir `CODING_STYLE.md`
-  - Entregar checklist e parar — o humano faz as mudanças
+- [x] ~~**Renovar o frontend**~~ — Polish visual (pedido explícito): hero/panels, dashboard, despesas, entradas, perfil, layout e auth. Cores de cartão estáveis (`lib/card-tone.ts`) compartilhadas entre perfil e gráfico radial.
 
 ---
 
 ## P2+ — Backlog (não fazer sem pedido explícito)
 
 - [x] ~~Auth / login real~~ — JWT em cookie httpOnly; `POST /auth/register|login|logout`, `GET /auth/me`; telas `/login` e `/register` (shadcn Field/Card); rotas do app protegidas.
-- [x] ~~API CRUD Express + Prisma~~ — `Entry`, `Expense`, `Card` (GET/POST/PATCH/DELETE). Perfil (`User` name/salary) ainda local.
-- [x] ~~Frontend: trocar Zustand/localStorage pela API~~ — Entradas, Despesas e Cartões na API; nome/salário/notas do perfil ainda no Zustand.
+- [x] ~~API CRUD Express + Prisma~~ — `Entry`, `Expense`, `Card` (GET/POST/PATCH/DELETE). Perfil via `PATCH /auth/me`.
+- [x] ~~Frontend: trocar Zustand/localStorage pela API~~ — Entradas, Despesas, Cartões e perfil na API; finance store sem persist.
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 
