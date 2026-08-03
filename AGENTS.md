@@ -2,11 +2,21 @@
 
 Guia rápido para agents (e humanos) se situarem neste repositório.
 
+## Obrigatório: planos (`plans.md`)
+
+**Antes de qualquer implementação**, leia [`plans.md`](./plans.md).
+
+1. Consulte o roadmap e as prioridades (P0 → P1 → P2+).
+2. **Pergunte / confirme** qual etapa o usuário quer fazer agora — não avance sozinho para outra feature.
+3. Se o item tiver prefixo **`[HUMAN]`**: **não implemente**; apenas oriente o usuário e pare.
+4. Ao concluir a etapa pedida, atualize `plans.md`: marque `- [x]` (não apague o histórico).
+5. Não implemente itens de backlog (P2+) sem pedido explícito do usuário.
+
 ## O que é
 
 **deManage** é um app pessoal de gestão de despesas mensais (pt-BR, moeda BRL).
 
-Fase atual: **UI completa + dados locais**. Sem login/auth e sem API de domínio ainda.
+Fase atual: **UI completa + dados locais**. Sem login/auth e sem API de domínio ainda. Próximos passos estão em [`plans.md`](./plans.md).
 
 ## Estrutura
 
@@ -15,6 +25,7 @@ deManage/
   frontend/     # React 19 + Vite + TypeScript + Tailwind 4 + shadcn + Zustand
   backend/      # Express + TypeScript (esqueleto; GET /health)
   AGENTS.md     # este arquivo
+  plans.md      # roadmap de features (consultar sempre)
   CODING_STYLE.md
   .cursor/rules/
 ```
@@ -36,7 +47,7 @@ Espelha o padrão `frontend/` + `backend/` usado em outros apps do autor (ex.: r
 
 ## Stack (backend)
 
-Express 5 + TypeScript. Por enquanto só `GET /health`. Pronto para receber auth/API na fase 2.
+Express 5 + TypeScript. Por enquanto só `GET /health`. Pronto para receber auth/API conforme `plans.md`.
 
 ## Rotas da UI
 
@@ -66,12 +77,12 @@ frontend/src/
   global.css             # tema dark preto + neon
 ```
 
-## Dados (fase 1)
+## Dados (fase atual)
 
 - Store: `useFinanceStore` em `stores/finance-store.ts`
 - Persistência: `localStorage` chave `demanage-finance`
 - Seed: `data/seed.ts`
-- Sem chamadas de API de domínio ainda
+- Sem chamadas de API de domínio ainda (ver `plans.md` para DB/API)
 
 ## Como rodar
 
@@ -95,12 +106,10 @@ cd backend && pnpm install && pnpm dev
 6. Preferir componentes **shadcn** já no projeto; deps alinhadas ao stack existente.
 7. **Nunca** reintroduzir `@crediari`, `accounts-client`, SSO ou auth corporativa.
 
-## Fora do escopo (ainda)
-
-Auth/login, Prisma/DB, sync multi-device, notificações, exportação.
-
 ## Checklist antes de entregar
 
+- [ ] `plans.md` consultado; etapa alinhada com o pedido do usuário
+- [ ] Se a feature foi concluída, `plans.md` atualizado (`- [x]`)
 - [ ] Código no estilo de `CODING_STYLE.md` (aspas simples + `;`)
 - [ ] Tipagem TypeScript ok (`pnpm exec tsc -b` no frontend)
 - [ ] Sem segredos / pacotes corporativos

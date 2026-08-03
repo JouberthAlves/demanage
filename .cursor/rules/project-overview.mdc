@@ -1,13 +1,20 @@
 ---
-description: Visão geral do deManage para agents — leia AGENTS.md
+description: Visão geral do deManage — leia AGENTS.md e plans.md
 alwaysApply: true
 ---
 
 # deManage — contexto do projeto
 
-Antes de implementar, leia [`AGENTS.md`](../../AGENTS.md) e [`CODING_STYLE.md`](../../CODING_STYLE.md).
+Antes de implementar:
 
-- App pessoal de despesas: `frontend/` (React/Vite) + `backend/` (Express esqueleto).
-- Fase 1: UI + Zustand/localStorage; sem login; sem `@crediari` / `accounts-client`.
-- Estilo: aspas simples + ponto e vírgula em todo TS/TSX.
-- Visual: dark neon (âmbar/verde); UI pt-BR; BRL.
+1. Leia [`AGENTS.md`](../../AGENTS.md)
+2. Leia [`plans.md`](../../plans.md) e siga **a etapa que o usuário pedir**
+3. Leia [`CODING_STYLE.md`](../../CODING_STYLE.md)
+
+Regras:
+
+- Não avance sozinho para outra feature do roadmap.
+- Itens `[HUMAN]`: só orientar; não implementar.
+- Ao concluir uma etapa, marque `- [x]` em `plans.md`.
+- App: `frontend/` + `backend/`; sem `@crediari` / `accounts-client`.
+- Estilo: aspas simples + ponto e vírgula; dark neon; pt-BR; BRL.

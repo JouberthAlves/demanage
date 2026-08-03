@@ -42,6 +42,7 @@ API em `http://localhost:8888` (`GET /health`)
 ## Docs para agents
 
 - [`AGENTS.md`](./AGENTS.md) — visão geral do projeto
+- [`plans.md`](./plans.md) — roadmap de features (agents consultam sempre)
 - [`CODING_STYLE.md`](./CODING_STYLE.md) — aspas simples + ponto e vírgula
 
 ```bash
