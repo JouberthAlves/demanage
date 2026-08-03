@@ -33,6 +33,11 @@ export function getInitials(name: string) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
 }
 
+export function getFirstName(name: string) {
+  const first = name.trim().split(/\s+/).filter(Boolean)[0];
+  return first || 'bem-vindo';
+}
+
 export function createId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }

@@ -29,18 +29,29 @@ export function AppTopbar() {
   }
 
   return (
-    <header className='flex h-14 shrink-0 items-center justify-between border-b border-border px-6 md:px-8'>
-      <div className='text-sm font-medium tracking-tight text-foreground'>
-        deManage
+    <header className='flex h-14 shrink-0 items-center justify-between border-b border-border bg-background/80 px-6 backdrop-blur md:px-8'>
+      <div className='space-y-0.5'>
+        <div className='text-sm font-semibold tracking-tight text-foreground'>
+          deManage
+        </div>
+        <p className='hidden text-xs text-muted-foreground sm:block'>
+          Gestão de despesas mensais
+        </p>
       </div>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant='ghost' size='icon-sm' className='rounded-full'>
-            <Avatar className='size-8'>
-              <AvatarFallback className='bg-accent text-xs text-foreground'>
+          <Button
+            variant='ghost'
+            className='h-9 gap-2 rounded-full border border-border bg-card/40 px-2 pr-3'
+          >
+            <Avatar className='size-7'>
+              <AvatarFallback className='bg-accent text-[11px] text-foreground'>
                 {getInitials(displayName)}
               </AvatarFallback>
             </Avatar>
+            <span className='hidden max-w-32 truncate text-sm sm:inline'>
+              {displayName}
+            </span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align='end' className='w-56'>

@@ -7,40 +7,9 @@ import {
   Tooltip,
 } from 'recharts';
 
+import { getCardTone } from '@/lib/card-tone';
 import { formatCurrency, formatPercent } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
-
-function hexToRgb(hex: string) {
-  const value = hex.replace('#', '');
-  return {
-    r: Number.parseInt(value.slice(0, 2), 16),
-    g: Number.parseInt(value.slice(2, 4), 16),
-    b: Number.parseInt(value.slice(4, 6), 16),
-  };
-}
-
-function mixHex(from: string, to: string, amount: number) {
-  const start = hexToRgb(from);
-  const end = hexToRgb(to);
-  const t = Math.min(1, Math.max(0, amount));
-  const channel = (a: number, b: number) => Math.round(a + (b - a) * t);
-  const toHex = (n: number) => n.toString(16).padStart(2, '0');
-
-  return `#${toHex(channel(start.r, end.r))}${toHex(channel(start.g, end.g))}${toHex(channel(start.b, end.b))}`;
-}
-
-/** Verde → lima → âmbar conforme sobe o %; vermelho se estourar. */
-function commitmentColor(percent: number) {
-  if (percent >= 100) return '#F43F5E';
-
-  const t = Math.min(1, Math.max(0, percent / 100));
-
-  if (t < 0.5) {
-    return mixHex('#34D399', '#A3E635', t / 0.5);
-  }
-
-  return mixHex('#A3E635', '#FFB800', (t - 0.5) / 0.5);
-}
 
 export function CardCommitmentChart() {
   const cards = useFinanceStore((state) => state.profile.cards);
@@ -53,21 +22,24 @@ export function CardCommitmentChart() {
         .filter((expense) => expense.cardId === card.id)
         .reduce((sum, expense) => sum + expense.amount, 0);
       const percent = (committed / (card.limit as number)) * 100;
+      const tone = getCardTone(card);
 
       return {
+        id: card.id,
         name: card.name,
         percent: Number(percent.toFixed(1)),
-        display: Math.min(percent, 100),
+        display: Math.min(Math.max(percent, 0), 100),
         committed,
         limit: card.limit as number,
-        fill: commitmentColor(percent),
+        fill: tone.fill,
       };
     });
 
   if (data.length === 0) {
     return (
       <div className='flex h-72 items-center justify-center text-sm text-muted-foreground'>
-        Cadastre cartões com limite e vincule despesas para ver o comprometimento.
+        Cadastre cartões com limite e vincule despesas para ver o
+        comprometimento.
       </div>
     );
   }
@@ -82,7 +54,7 @@ export function CardCommitmentChart() {
           <RadialBarChart
             cx='50%'
             cy='50%'
-            innerRadius='35%'
+            innerRadius='48%'
             outerRadius='100%'
             data={data}
             startAngle={90}
@@ -93,10 +65,9 @@ export function CardCommitmentChart() {
               dataKey='display'
               background={{ fill: 'rgba(255,255,255,0.06)' }}
               cornerRadius={6}
-              clockWise
             >
               {data.map((entry) => (
-                <Cell key={entry.name} fill={entry.fill} />
+                <Cell key={entry.id} fill={entry.fill} />
               ))}
             </RadialBar>
             <Tooltip
@@ -125,8 +96,8 @@ export function CardCommitmentChart() {
           </RadialBarChart>
         </ResponsiveContainer>
         <div className='pointer-events-none absolute inset-0 flex flex-col items-center justify-center'>
-          <span className='text-xs text-muted-foreground'>Média</span>
-          <span className='text-sm font-semibold'>
+          <span className='text-sm text-muted-foreground'>Média</span>
+          <span className='text-lg font-semibold tabular-nums'>
             {formatPercent(average / 100)}
           </span>
         </div>
@@ -135,7 +106,7 @@ export function CardCommitmentChart() {
       <div className='w-full space-y-2'>
         {data.map((item) => (
           <div
-            key={item.name}
+            key={item.id}
             className='flex items-center justify-between text-sm'
           >
             <div className='flex items-center gap-2'>
