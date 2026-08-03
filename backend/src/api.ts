@@ -1,9 +1,9 @@
-import { Router } from 'express'
+import { Router } from 'express';
 
-import healthRoutes from './routes/health'
+import healthRoutes from './routes/health';
 
-const api = Router()
+const api = Router();
 
-api.use(healthRoutes)
+api.use(healthRoutes);
 
-export default api
+export default api;

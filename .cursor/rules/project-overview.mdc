@@ -1,0 +1,13 @@
+---
+description: Visão geral do deManage para agents — leia AGENTS.md
+alwaysApply: true
+---
+
+# deManage — contexto do projeto
+
+Antes de implementar, leia [`AGENTS.md`](../../AGENTS.md) e [`CODING_STYLE.md`](../../CODING_STYLE.md).
+
+- App pessoal de despesas: `frontend/` (React/Vite) + `backend/` (Express esqueleto).
+- Fase 1: UI + Zustand/localStorage; sem login; sem `@crediari` / `accounts-client`.
+- Estilo: aspas simples + ponto e vírgula em todo TS/TSX.
+- Visual: dark neon (âmbar/verde); UI pt-BR; BRL.

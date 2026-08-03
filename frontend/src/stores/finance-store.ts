@@ -1,34 +1,34 @@
-import { create } from "zustand"
-import { persist } from "zustand/middleware"
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
-import { financeSeed } from "@/data/seed"
+import { financeSeed } from '@/data/seed';
 import type {
   Card,
   FinanceState,
   Income,
   Profile,
   RecurringExpense,
-} from "@/types/finance"
-import { createId } from "@/lib/format"
+} from '@/types/finance';
+import { createId } from '@/lib/format';
 
 type FinanceActions = {
-  updateProfile: (patch: Partial<Omit<Profile, "cards">>) => void
-  addCard: (card: Omit<Card, "id">) => void
-  updateCard: (id: string, patch: Partial<Omit<Card, "id">>) => void
-  removeCard: (id: string) => void
-  addExpense: (expense: Omit<RecurringExpense, "id">) => void
+  updateProfile: (patch: Partial<Omit<Profile, 'cards'>>) => void;
+  addCard: (card: Omit<Card, 'id'>) => void;
+  updateCard: (id: string, patch: Partial<Omit<Card, 'id'>>) => void;
+  removeCard: (id: string) => void;
+  addExpense: (expense: Omit<RecurringExpense, 'id'>) => void;
   updateExpense: (
     id: string,
-    patch: Partial<Omit<RecurringExpense, "id">>,
-  ) => void
-  removeExpense: (id: string) => void
-  addIncome: (income: Omit<Income, "id">) => void
-  updateIncome: (id: string, patch: Partial<Omit<Income, "id">>) => void
-  removeIncome: (id: string) => void
-  resetToSeed: () => void
-}
+    patch: Partial<Omit<RecurringExpense, 'id'>>,
+  ) => void;
+  removeExpense: (id: string) => void;
+  addIncome: (income: Omit<Income, 'id'>) => void;
+  updateIncome: (id: string, patch: Partial<Omit<Income, 'id'>>) => void;
+  removeIncome: (id: string) => void;
+  resetToSeed: () => void;
+};
 
-export type FinanceStore = FinanceState & FinanceActions
+export type FinanceStore = FinanceState & FinanceActions;
 
 export const useFinanceStore = create<FinanceStore>()(
   persist(
@@ -44,7 +44,7 @@ export const useFinanceStore = create<FinanceStore>()(
         set((state) => ({
           profile: {
             ...state.profile,
-            cards: [...state.profile.cards, { ...card, id: createId("card") }],
+            cards: [...state.profile.cards, { ...card, id: createId('card') }],
           },
         })),
 
@@ -71,10 +71,7 @@ export const useFinanceStore = create<FinanceStore>()(
 
       addExpense: (expense) =>
         set((state) => ({
-          expenses: [
-            ...state.expenses,
-            { ...expense, id: createId("exp") },
-          ],
+          expenses: [...state.expenses, { ...expense, id: createId('exp') }],
         })),
 
       updateExpense: (id, patch) =>
@@ -91,7 +88,7 @@ export const useFinanceStore = create<FinanceStore>()(
 
       addIncome: (income) =>
         set((state) => ({
-          incomes: [...state.incomes, { ...income, id: createId("inc") }],
+          incomes: [...state.incomes, { ...income, id: createId('inc') }],
         })),
 
       updateIncome: (id, patch) =>
@@ -109,29 +106,29 @@ export const useFinanceStore = create<FinanceStore>()(
       resetToSeed: () => set({ ...financeSeed }),
     }),
     {
-      name: "demanage-finance",
+      name: 'demanage-finance',
     },
   ),
-)
+);
 
 export function selectMonthlyIncome(state: FinanceState) {
   return state.incomes
-    .filter((income) => income.frequency === "mensal")
-    .reduce((sum, income) => sum + income.amount, 0)
+    .filter((income) => income.frequency === 'mensal')
+    .reduce((sum, income) => sum + income.amount, 0);
 }
 
 export function selectMonthlyExpenses(state: FinanceState) {
-  return state.expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  return state.expenses.reduce((sum, expense) => sum + expense.amount, 0);
 }
 
 export function selectAverageMonthlyExpense(state: FinanceState) {
-  if (state.history.length === 0) return selectMonthlyExpenses(state)
-  const total = state.history.reduce((sum, item) => sum + item.expense, 0)
-  return total / state.history.length
+  if (state.history.length === 0) return selectMonthlyExpenses(state);
+  const total = state.history.reduce((sum, item) => sum + item.expense, 0);
+  return total / state.history.length;
 }
 
 export function selectRecurringShare(state: FinanceState) {
-  const income = selectMonthlyIncome(state)
-  if (income <= 0) return 0
-  return selectMonthlyExpenses(state) / income
+  const income = selectMonthlyIncome(state);
+  if (income <= 0) return 0;
+  return selectMonthlyExpenses(state) / income;
 }

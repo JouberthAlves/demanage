@@ -38,3 +38,13 @@ API em `http://localhost:8888` (`GET /health`)
 - UI dark neon (Dashboard, Perfil, Despesas, Entradas)
 - Dados locais via Zustand + localStorage
 - Sem login/auth (fase 2)
+
+## Docs para agents
+
+- [`AGENTS.md`](./AGENTS.md) — visão geral do projeto
+- [`CODING_STYLE.md`](./CODING_STYLE.md) — aspas simples + ponto e vírgula
+
+```bash
+cd frontend && pnpm format
+cd backend && pnpm format
+```

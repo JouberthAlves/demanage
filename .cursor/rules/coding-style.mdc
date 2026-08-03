@@ -1,0 +1,27 @@
+---
+description: Estilo de código TS/TSX — aspas simples e ponto e vírgula
+globs: "**/*.{ts,tsx,js,jsx}"
+alwaysApply: true
+---
+
+# Estilo de digitação
+
+Siga [`CODING_STYLE.md`](../../CODING_STYLE.md).
+
+## Obrigatório
+
+- Aspas **simples** (`'...'`) sempre que possível.
+- **Ponto e vírgula** (`;`) no final de cada statement.
+- Named exports; arquivos kebab-case; alias `@/` no frontend.
+
+```ts
+// ✅
+import { formatCurrency } from '@/lib/format';
+const title = 'Dashboard';
+
+// ❌
+import { formatCurrency } from "@/lib/format"
+const title = "Dashboard"
+```
+
+Ao editar um arquivo, deixe-o consistente com este estilo (ou rode `pnpm format` na pasta).

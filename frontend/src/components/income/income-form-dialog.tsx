@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
-import { toast } from "sonner"
+import { useEffect, useState } from 'react';
+import { toast } from 'sonner';
 
-import { Button } from "@/components/ui/button"
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -9,79 +9,76 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
-import {
-  INCOME_FREQUENCY_LABELS,
-  INCOME_TYPE_LABELS,
-} from "@/data/seed"
-import { parseCurrencyInput } from "@/lib/format"
-import { useFinanceStore } from "@/stores/finance-store"
-import type { Income, IncomeFrequency, IncomeType } from "@/types/finance"
+} from '@/components/ui/select';
+import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/seed';
+import { parseCurrencyInput } from '@/lib/format';
+import { useFinanceStore } from '@/stores/finance-store';
+import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
 
 type IncomeFormDialogProps = {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  income: Income | null
-}
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  income: Income | null;
+};
 
 type FormState = {
-  name: string
-  amount: string
-  type: IncomeType
-  frequency: IncomeFrequency
-  date: string
-}
+  name: string;
+  amount: string;
+  type: IncomeType;
+  frequency: IncomeFrequency;
+  date: string;
+};
 
 const emptyForm: FormState = {
-  name: "",
-  amount: "",
-  type: "salario",
-  frequency: "mensal",
-  date: "",
-}
+  name: '',
+  amount: '',
+  type: 'salario',
+  frequency: 'mensal',
+  date: '',
+};
 
 export function IncomeFormDialog({
   open,
   onOpenChange,
   income,
 }: IncomeFormDialogProps) {
-  const addIncome = useFinanceStore((state) => state.addIncome)
-  const updateIncome = useFinanceStore((state) => state.updateIncome)
-  const [form, setForm] = useState<FormState>(emptyForm)
+  const addIncome = useFinanceStore((state) => state.addIncome);
+  const updateIncome = useFinanceStore((state) => state.updateIncome);
+  const [form, setForm] = useState<FormState>(emptyForm);
 
   useEffect(() => {
-    if (!open) return
+    if (!open) return;
 
     if (income) {
       setForm({
         name: income.name,
-        amount: String(income.amount).replace(".", ","),
+        amount: String(income.amount).replace('.', ','),
         type: income.type,
         frequency: income.frequency,
-        date: income.date ?? "",
-      })
-      return
+        date: income.date ?? '',
+      });
+      return;
     }
 
-    setForm(emptyForm)
-  }, [income, open])
+    setForm(emptyForm);
+  }, [income, open]);
 
   function handleSubmit(event: React.FormEvent) {
-    event.preventDefault()
+    event.preventDefault();
 
-    const amount = parseCurrencyInput(form.amount)
+    const amount = parseCurrencyInput(form.amount);
     if (!form.name.trim() || amount <= 0) {
-      toast.error("Informe nome e um valor válido")
-      return
+      toast.error('Informe nome e um valor válido');
+      return;
     }
 
     const payload = {
@@ -89,50 +86,50 @@ export function IncomeFormDialog({
       amount,
       type: form.type,
       frequency: form.frequency,
-      date: form.frequency === "unica" ? form.date || undefined : undefined,
-    }
+      date: form.frequency === 'unica' ? form.date || undefined : undefined,
+    };
 
     if (income) {
-      updateIncome(income.id, payload)
-      toast.success("Entrada atualizada")
+      updateIncome(income.id, payload);
+      toast.success('Entrada atualizada');
     } else {
-      addIncome(payload)
-      toast.success("Entrada cadastrada")
+      addIncome(payload);
+      toast.success('Entrada cadastrada');
     }
 
-    onOpenChange(false)
+    onOpenChange(false);
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="rounded-xl sm:max-w-md">
+      <DialogContent className='rounded-xl sm:max-w-md'>
         <DialogHeader>
           <DialogTitle>
-            {income ? "Editar entrada" : "Nova entrada"}
+            {income ? 'Editar entrada' : 'Nova entrada'}
           </DialogTitle>
           <DialogDescription>
             Cadastre fontes de renda mensais ou únicas.
           </DialogDescription>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="income-name">Nome</Label>
+        <form onSubmit={handleSubmit} className='space-y-4'>
+          <div className='space-y-2'>
+            <Label htmlFor='income-name'>Nome</Label>
             <Input
-              id="income-name"
+              id='income-name'
               value={form.name}
               onChange={(event) =>
                 setForm((current) => ({ ...current, name: event.target.value }))
               }
-              placeholder="Ex: Salário"
-              className="rounded-lg"
+              placeholder='Ex: Salário'
+              className='rounded-lg'
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="income-amount">Valor</Label>
+          <div className='space-y-2'>
+            <Label htmlFor='income-amount'>Valor</Label>
             <Input
-              id="income-amount"
+              id='income-amount'
               value={form.amount}
               onChange={(event) =>
                 setForm((current) => ({
@@ -140,13 +137,13 @@ export function IncomeFormDialog({
                   amount: event.target.value,
                 }))
               }
-              placeholder="0,00"
-              className="rounded-lg"
+              placeholder='0,00'
+              className='rounded-lg'
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2">
+          <div className='grid grid-cols-2 gap-3'>
+            <div className='space-y-2'>
               <Label>Tipo</Label>
               <Select
                 value={form.type}
@@ -157,7 +154,7 @@ export function IncomeFormDialog({
                   }))
                 }
               >
-                <SelectTrigger className="rounded-lg">
+                <SelectTrigger className='rounded-lg'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -169,7 +166,7 @@ export function IncomeFormDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
+            <div className='space-y-2'>
               <Label>Frequência</Label>
               <Select
                 value={form.frequency}
@@ -180,7 +177,7 @@ export function IncomeFormDialog({
                   }))
                 }
               >
-                <SelectTrigger className="rounded-lg">
+                <SelectTrigger className='rounded-lg'>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -196,12 +193,12 @@ export function IncomeFormDialog({
             </div>
           </div>
 
-          {form.frequency === "unica" ? (
-            <div className="space-y-2">
-              <Label htmlFor="income-date">Data</Label>
+          {form.frequency === 'unica' ? (
+            <div className='space-y-2'>
+              <Label htmlFor='income-date'>Data</Label>
               <Input
-                id="income-date"
-                type="date"
+                id='income-date'
+                type='date'
                 value={form.date}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -209,26 +206,26 @@ export function IncomeFormDialog({
                     date: event.target.value,
                   }))
                 }
-                className="rounded-lg"
+                className='rounded-lg'
               />
             </div>
           ) : null}
 
           <DialogFooter>
             <Button
-              type="button"
-              variant="outline"
-              className="rounded-lg"
+              type='button'
+              variant='outline'
+              className='rounded-lg'
               onClick={() => onOpenChange(false)}
             >
               Cancelar
             </Button>
-            <Button type="submit" className="rounded-lg">
+            <Button type='submit' className='rounded-lg'>
               Salvar
             </Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
-  )
+  );
 }

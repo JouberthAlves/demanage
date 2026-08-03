@@ -8,7 +8,8 @@
     "dev": "tsx watch -r tsconfig-paths/register src/server.ts",
     "build": "tsc",
     "lint": "eslint . --ext .ts",
-    "lint:fix": "eslint . --ext .ts --fix"
+    "lint:fix": "eslint . --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.{ts,js}\""
   },
   "_moduleAliases": {
     "@": "./src"
@@ -40,6 +41,7 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-simple-import-sort": "^12.1.1",
     "globals": "^16.4.0",
+    "prettier": "^3.9.6",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.20.6",
     "typescript-eslint": "^8.46.2"

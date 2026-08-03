@@ -1,6 +1,10 @@
 import { NextFunction, Request, Response } from 'express';
 
-export async function requestLogger(req: Request, res: Response, next: NextFunction) {
+export async function requestLogger(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+) {
   const { default: chalk } = await import('chalk');
   const start = process.hrtime();
 
@@ -23,15 +27,19 @@ export async function requestLogger(req: Request, res: Response, next: NextFunct
     const method = chalk.blue(req.method);
     const url = chalk.cyan(req.originalUrl);
     const status =
-      res.statusCode >= 500 ? chalk.red(res.statusCode) :
-        res.statusCode >= 400 ? chalk.yellow(res.statusCode) :
-          chalk.green(res.statusCode);
+      res.statusCode >= 500
+        ? chalk.red(res.statusCode)
+        : res.statusCode >= 400
+          ? chalk.yellow(res.statusCode)
+          : chalk.green(res.statusCode);
 
     const duration = chalk.gray(`${durationMs}ms`);
-    const ip = chalk.magenta(req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip);
+    const ip = chalk.magenta(
+      req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip,
+    );
 
     console.log(`${time} ${ip} - ${method} ${url} ${status} - ${duration}`);
   });
 
   next();
-};
+}

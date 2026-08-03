@@ -5,8 +5,8 @@ export const BRAND_ASCII = `
  | (_| |  __/ |  | | (_| | | | | (_| | (_| |  __/
   \\__,_|\\___|_|  |_|\\__,_|_| |_|\\__,_|\\__, |\\___|
                                       |___/       
-`
+`;
 
 export function printBrand() {
-  console.log(`%c${BRAND_ASCII}`, "color: #FFB800; font-family: monospace;")
+  console.log(`%c${BRAND_ASCII}`, 'color: #FFB800; font-family: monospace;');
 }
