@@ -1,4 +1,5 @@
 import { isAxiosError } from 'axios';
+import { useQueryClient } from '@tanstack/react-query';
 import { CreditCard, Plus, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
@@ -7,17 +8,20 @@ import { PageHeader } from '@/components/layout/page-header';
 import { CardFormDialog } from '@/components/profile/card-form-dialog';
 import { CreditCardTile } from '@/components/profile/credit-card-tile';
 import { Button } from '@/components/ui/button';
+import { CurrencyInput } from '@/components/ui/currency-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { useCards, useDeleteCard } from '@/hooks/use-cards';
-import { formatCurrency, parseCurrencyInput } from '@/lib/format';
+import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
+import { formatBrlInputValue, formatCurrency, parseCurrencyInput } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { Card } from '@/types/finance';
 
 export function ProfilePage() {
+  const queryClient = useQueryClient();
   const { isLoading: cardsLoading, isError: cardsError } = useCards();
   const user = useAuthStore((state) => state.user);
   const updateProfile = useAuthStore((state) => state.updateProfile);
@@ -27,7 +31,7 @@ export function ProfilePage() {
 
   const [name, setName] = useState(user?.name ?? '');
   const [salary, setSalary] = useState(
-    String(user?.salary ?? 0).replace('.', ','),
+    user?.salary ? formatBrlInputValue(user.salary) : '',
   );
   const [notes, setNotes] = useState(user?.notes ?? '');
   const [saving, setSaving] = useState(false);
@@ -36,7 +40,7 @@ export function ProfilePage() {
 
   useEffect(() => {
     setName(user?.name ?? '');
-    setSalary(String(user?.salary ?? 0).replace('.', ','));
+    setSalary(user?.salary ? formatBrlInputValue(user.salary) : '');
     setNotes(user?.notes ?? '');
   }, [user?.name, user?.salary, user?.notes]);
 
@@ -67,12 +71,15 @@ export function ProfilePage() {
     event.preventDefault();
     setSaving(true);
 
+    const nextSalary = parseCurrencyInput(salary);
+
     try {
       await updateProfile({
         name: name.trim() || 'Usuário',
-        salary: parseCurrencyInput(salary),
+        salary: nextSalary,
         notes: notes.trim() || null,
       });
+      await queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
       toast.success('Perfil atualizado');
     } catch (err) {
       const message = isAxiosError(err)
@@ -183,11 +190,10 @@ export function ProfilePage() {
             </div>
             <div className='space-y-2'>
               <Label htmlFor='profile-salary'>Salário mensal</Label>
-              <Input
+              <CurrencyInput
                 id='profile-salary'
                 value={salary}
-                onChange={(event) => setSalary(event.target.value)}
-                placeholder='0,00'
+                onValueChange={setSalary}
                 className='rounded-lg'
               />
             </div>

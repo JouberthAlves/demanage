@@ -42,11 +42,24 @@ export function createId(prefix: string) {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+/** Exibe número como `1.234,56` para inputs monetários. */
+export function formatBrlInputValue(value: number) {
+  if (!Number.isFinite(value)) return '';
+  return value.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+/** Máscara BRL enquanto digita (centavos). */
+export function maskBrlInput(raw: string) {
+  const digits = raw.replace(/\D/g, '').slice(0, 15);
+  if (!digits) return '';
+  return formatBrlInputValue(Number(digits) / 100);
+}
+
 export function parseCurrencyInput(value: string) {
-  const normalized = value
-    .replace(/[^\d,.-]/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.');
-  const parsed = Number(normalized);
-  return Number.isFinite(parsed) ? parsed : 0;
+  const digits = value.replace(/\D/g, '');
+  if (!digits) return 0;
+  return Number(digits) / 100;
 }

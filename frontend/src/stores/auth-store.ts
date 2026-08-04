@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 
 import { api } from '@/lib/api';
-import { useFinanceStore } from '@/stores/finance-store';
 import type { AuthUser } from '@/types/auth';
 
 type UpdateProfileInput = {
@@ -85,7 +84,11 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   updateProfile: async (input) => {
-    const { data } = await api.patch<{ user: AuthUser }>('/auth/me', input);
+    const { data } = await api.patch<{ user: AuthUser }>('/auth/me', {
+      name: input.name,
+      salary: input.salary,
+      notes: input.notes,
+    });
     set({
       user: data.user,
       isAuthenticated: true,
@@ -98,6 +101,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       await api.post('/auth/logout');
     } finally {
+      const { useFinanceStore } = await import('@/stores/finance-store');
       useFinanceStore.getState().clearAll();
       set({
         user: null,

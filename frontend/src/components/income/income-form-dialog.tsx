@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { CurrencyInput } from '@/components/ui/currency-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -23,7 +24,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/labels';
 import { useCreateEntry, useUpdateEntry } from '@/hooks/use-entries';
-import { parseCurrencyInput } from '@/lib/format';
+import { formatBrlInputValue, parseCurrencyInput } from '@/lib/format';
 import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
 
 type IncomeFormDialogProps = {
@@ -64,7 +65,7 @@ export function IncomeFormDialog({
     if (income) {
       setForm({
         name: income.name,
-        amount: String(income.amount).replace('.', ','),
+        amount: formatBrlInputValue(income.amount),
         type: income.type,
         frequency: income.frequency,
         date: income.date ?? '',
@@ -140,16 +141,12 @@ export function IncomeFormDialog({
 
           <div className='flex flex-col gap-2'>
             <Label htmlFor='income-amount'>Valor</Label>
-            <Input
+            <CurrencyInput
               id='income-amount'
               value={form.amount}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  amount: event.target.value,
-                }))
+              onValueChange={(amount) =>
+                setForm((current) => ({ ...current, amount }))
               }
-              placeholder='0,00'
               className='rounded-lg'
             />
           </div>
