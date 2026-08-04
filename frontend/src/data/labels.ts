@@ -16,6 +16,15 @@ export const INCOME_TYPE_LABELS: Record<Income['type'], string> = {
   outro: 'Outro',
 };
 
+/** Tipos que o usuário pode cadastrar em Entradas (salário vem do perfil). */
+export const CREATABLE_INCOME_TYPE_LABELS: Record<
+  Exclude<Income['type'], 'salario'>,
+  string
+> = {
+  freelance: 'Freelance',
+  outro: 'Outro',
+};
+
 export const INCOME_FREQUENCY_LABELS: Record<Income['frequency'], string> = {
   mensal: 'Mensal',
   unica: 'Única',

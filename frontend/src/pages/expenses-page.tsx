@@ -77,6 +77,18 @@ export function ExpensesPage() {
     setDialogOpen(true);
   }
 
+  async function handlePay(id: string, name: string) {
+    try {
+      await removeExpense.mutateAsync(id);
+      toast.success(`"${name}" marcada como paga`);
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível marcar como paga')
+        : 'Não foi possível marcar como paga';
+      toast.error(message);
+    }
+  }
+
   async function handleDelete(id: string, name: string) {
     try {
       await removeExpense.mutateAsync(id);
@@ -164,7 +176,7 @@ export function ExpensesPage() {
                 <TableHead>Cartão</TableHead>
                 <TableHead>Vencimento</TableHead>
                 <TableHead className='text-right'>Valor</TableHead>
-                <TableHead className='w-24 text-right'>Ações</TableHead>
+                <TableHead className='w-40 text-right'>Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -237,12 +249,25 @@ export function ExpensesPage() {
                       <TableCell className='text-right'>
                         <div className='flex justify-end gap-1'>
                           <Button
-                            variant='ghost'
-                            size='icon-sm'
-                            onClick={() => openEdit(expense)}
+                            variant='secondary'
+                            size='sm'
+                            className='rounded-lg'
+                            disabled={removeExpense.isPending}
+                            onClick={() =>
+                              void handlePay(expense.id, expense.name)
+                            }
                           >
-                            <Pencil className='size-4' />
+                            Pago
                           </Button>
+                          {!expense.isInvoice ? (
+                            <Button
+                              variant='ghost'
+                              size='icon-sm'
+                              onClick={() => openEdit(expense)}
+                            >
+                              <Pencil className='size-4' />
+                            </Button>
+                          ) : null}
                           <Button
                             variant='ghost'
                             size='icon-sm'

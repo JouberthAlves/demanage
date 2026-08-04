@@ -10,6 +10,7 @@ export type ApiExpense = {
   cardId: string | null;
   dueDay: number | null;
   notes: string | null;
+  isInvoice?: boolean;
 };
 
 export type ExpensePayload = {
@@ -32,6 +33,7 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     cardId: expense.cardId ?? undefined,
     dueDay: expense.dueDay ?? undefined,
     notes: expense.notes ?? undefined,
+    isInvoice: Boolean(expense.isInvoice),
   };
 }
 

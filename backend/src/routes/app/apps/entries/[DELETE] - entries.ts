@@ -22,6 +22,12 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Entrada não encontrada' });
     }
 
+    if (existing.type === 'salario') {
+      return res.status(400).json({
+        error: 'O salário é gerenciado pela aba Perfil',
+      });
+    }
+
     await prisma.entry.delete({ where: { id } });
 
     return res.status(204).send();

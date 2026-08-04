@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+import { serializeCard } from '@/lib/card-billing';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -18,7 +19,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       orderBy: { createdAt: 'desc' },
     });
 
-    return res.json(cards);
+    return res.json(cards.map(serializeCard));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });

@@ -19,7 +19,10 @@ export function CardCommitmentChart() {
     .filter((card) => card.limit != null && card.limit > 0)
     .map((card) => {
       const committed = expenses
-        .filter((expense) => expense.cardId === card.id)
+        .filter(
+          (expense) =>
+            expense.cardId === card.id && !expense.isInvoice,
+        )
         .reduce((sum, expense) => sum + expense.amount, 0);
       const percent = (committed / (card.limit as number)) * 100;
       const tone = getCardTone(card);
@@ -27,6 +30,7 @@ export function CardCommitmentChart() {
       return {
         id: card.id,
         name: card.name,
+        expired: Boolean(card.expired),
         percent: Number(percent.toFixed(1)),
         display: Math.min(Math.max(percent, 0), 100),
         committed,
@@ -114,7 +118,12 @@ export function CardCommitmentChart() {
                 className='size-2.5 rounded-sm'
                 style={{ backgroundColor: item.fill }}
               />
-              <span className='text-muted-foreground'>{item.name}</span>
+              <span className='text-muted-foreground'>
+                {item.name}
+                {item.expired ? (
+                  <span className='ml-1 text-rose-400'>(vencido)</span>
+                ) : null}
+              </span>
             </div>
             <span className='font-medium'>
               {formatPercent(item.percent / 100)}

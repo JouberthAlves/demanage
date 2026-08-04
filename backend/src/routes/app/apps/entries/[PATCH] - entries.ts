@@ -22,7 +22,19 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Entrada não encontrada' });
     }
 
+    if (existing.type === 'salario') {
+      return res.status(400).json({
+        error: 'O salário é gerenciado pela aba Perfil',
+      });
+    }
+
     const { name, amount, type, frequency, date } = req.body;
+
+    if (type === 'salario') {
+      return res.status(400).json({
+        error: 'O salário é cadastrado pela aba Perfil',
+      });
+    }
 
     const entry = await prisma.entry.update({
       where: { id },

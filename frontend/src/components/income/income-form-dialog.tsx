@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/labels';
+import { INCOME_FREQUENCY_LABELS, CREATABLE_INCOME_TYPE_LABELS } from '@/data/labels';
 import { useCreateEntry, useUpdateEntry } from '@/hooks/use-entries';
 import { formatBrlInputValue, parseCurrencyInput } from '@/lib/format';
 import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
@@ -36,7 +36,7 @@ type IncomeFormDialogProps = {
 type FormState = {
   name: string;
   amount: string;
-  type: IncomeType;
+  type: Exclude<IncomeType, 'salario'>;
   frequency: IncomeFrequency;
   date: string;
 };
@@ -44,7 +44,7 @@ type FormState = {
 const emptyForm: FormState = {
   name: '',
   amount: '',
-  type: 'salario',
+  type: 'freelance',
   frequency: 'mensal',
   date: '',
 };
@@ -63,6 +63,12 @@ export function IncomeFormDialog({
     if (!open) return;
 
     if (income) {
+      if (income.type === 'salario') {
+        onOpenChange(false);
+        toast.error('O salário é gerenciado na aba Perfil');
+        return;
+      }
+
       setForm({
         name: income.name,
         amount: formatBrlInputValue(income.amount),
@@ -74,7 +80,7 @@ export function IncomeFormDialog({
     }
 
     setForm(emptyForm);
-  }, [income, open]);
+  }, [income, open, onOpenChange]);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -157,10 +163,10 @@ export function IncomeFormDialog({
               <Select
                 value={form.type}
                 onValueChange={(value) => {
-                  if (value) {
+                  if (value === 'freelance' || value === 'outro') {
                     setForm((current) => ({
                       ...current,
-                      type: value as IncomeType,
+                      type: value,
                     }));
                   }
                 }}
@@ -169,11 +175,13 @@ export function IncomeFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(INCOME_TYPE_LABELS).map(([value, label]) => (
-                    <SelectItem key={value} value={value}>
-                      {label}
-                    </SelectItem>
-                  ))}
+                  {Object.entries(CREATABLE_INCOME_TYPE_LABELS).map(
+                    ([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ),
+                  )}
                 </SelectContent>
               </Select>
             </div>

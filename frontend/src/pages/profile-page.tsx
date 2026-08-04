@@ -47,7 +47,7 @@ export function ProfilePage() {
   const committedByCard = useMemo(() => {
     const map = new Map<string, number>();
     for (const expense of expenses) {
-      if (!expense.cardId) continue;
+      if (!expense.cardId || expense.isInvoice) continue;
       map.set(expense.cardId, (map.get(expense.cardId) ?? 0) + expense.amount);
     }
     return map;

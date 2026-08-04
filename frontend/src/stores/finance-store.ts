@@ -62,7 +62,9 @@ export function selectMonthlyIncome(state: FinanceState) {
 }
 
 export function selectMonthlyExpenses(state: FinanceState) {
-  return state.expenses.reduce((sum, expense) => sum + expense.amount, 0);
+  return state.expenses
+    .filter((expense) => !expense.cardId || expense.isInvoice)
+    .reduce((sum, expense) => sum + expense.amount, 0);
 }
 
 export function selectAverageMonthlyExpense(state: FinanceState) {

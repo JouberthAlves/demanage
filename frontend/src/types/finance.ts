@@ -3,7 +3,9 @@ export type Card = {
   name: string;
   limit?: number;
   closingDay?: number;
-  dueDay?: number;
+  expiresAt?: string;
+  lastInvoicedOn?: string;
+  expired?: boolean;
 };
 
 export type Profile = {
@@ -21,6 +23,7 @@ export type RecurringExpense = {
   cardId?: string;
   dueDay?: number;
   notes?: string;
+  isInvoice?: boolean;
 };
 
 export type IncomeType = 'salario' | 'freelance' | 'outro';

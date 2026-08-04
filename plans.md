@@ -50,5 +50,6 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 - [x] ~~API CRUD Express + Prisma~~ — `Entry`, `Expense`, `Card` (GET/POST/PATCH/DELETE). Perfil via `PATCH /auth/me` (salva `salary` e sincroniza entrada mensal "Salário").
 - [x] ~~Frontend: trocar Zustand/localStorage pela API~~ — Entradas, Despesas, Cartões e perfil na API; finance store sem persist.
 - [x] ~~Inputs monetários BRL~~ — máscara `R$ 1.234,56` em perfil, despesas, entradas e cartões.
+- [x] ~~Fatura de cartão + validade~~ — fechamento gera `Fatura do cartão {nome}`; validade MM/AA com renovar; botão Pago; aviso ao remover cartão.
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 

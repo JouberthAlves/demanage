@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
+import { CurrencyInput } from '@/components/ui/currency-input';
 import {
   Dialog,
   DialogContent,
@@ -11,12 +12,19 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { CurrencyInput } from '@/components/ui/currency-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { useCreateCard, useUpdateCard } from '@/hooks/use-cards';
-import { formatBrlInputValue, parseCurrencyInput } from '@/lib/format';
+import {
+  formatBrlInputValue,
+  formatCardExpiry,
+  applyCardExpiryInput,
+  maskClosingDayInput,
+  normalizeClosingDayInput,
+  parseCardExpiryInput,
+  parseCurrencyInput,
+} from '@/lib/format';
 import type { Card } from '@/types/finance';
 
 type CardFormDialogProps = {
@@ -29,14 +37,14 @@ type FormState = {
   name: string;
   limit: string;
   closingDay: string;
-  dueDay: string;
+  expiresAt: string;
 };
 
 const emptyForm: FormState = {
   name: '',
   limit: '',
   closingDay: '',
-  dueDay: '',
+  expiresAt: '',
 };
 
 export function CardFormDialog({
@@ -55,10 +63,11 @@ export function CardFormDialog({
     if (card) {
       setForm({
         name: card.name,
-        limit:
-          card.limit != null ? formatBrlInputValue(card.limit) : '',
-        closingDay: card.closingDay ? String(card.closingDay) : '',
-        dueDay: card.dueDay ? String(card.dueDay) : '',
+        limit: card.limit != null ? formatBrlInputValue(card.limit) : '',
+        closingDay: card.closingDay
+          ? String(card.closingDay).padStart(2, '0')
+          : '',
+        expiresAt: formatCardExpiry(card.expiresAt),
       });
       return;
     }
@@ -74,11 +83,27 @@ export function CardFormDialog({
       return;
     }
 
+    let expiresAt: string | null = null;
+    if (form.expiresAt.trim()) {
+      const parsed = parseCardExpiryInput(form.expiresAt);
+      if (!parsed) {
+        toast.error('Validade inválida. Use MM/AA');
+        return;
+      }
+      expiresAt = parsed.toISOString();
+    }
+
+    const closingNormalized = normalizeClosingDayInput(form.closingDay);
+    if (form.closingDay.trim() && !closingNormalized) {
+      toast.error('Fechamento inválido. Use um dia entre 01 e 31');
+      return;
+    }
+
     const payload = {
       name: form.name.trim(),
       limit: form.limit ? parseCurrencyInput(form.limit) : null,
-      closingDay: form.closingDay ? Number(form.closingDay) : null,
-      dueDay: form.dueDay ? Number(form.dueDay) : null,
+      closingDay: closingNormalized ? Number(closingNormalized) : null,
+      expiresAt,
     };
 
     try {
@@ -104,7 +129,7 @@ export function CardFormDialog({
         <DialogHeader>
           <DialogTitle>{card ? 'Editar cartão' : 'Novo cartão'}</DialogTitle>
           <DialogDescription>
-            Cadastre limite, fechamento e vencimento.
+            Fechamento da fatura e validade do cartão (MM/AA).
           </DialogDescription>
         </DialogHeader>
 
@@ -142,33 +167,42 @@ export function CardFormDialog({
               <Label htmlFor='card-closing'>Fechamento</Label>
               <Input
                 id='card-closing'
-                type='number'
-                min={1}
-                max={31}
+                inputMode='numeric'
+                maxLength={2}
                 value={form.closingDay}
                 onChange={(event) =>
                   setForm((current) => ({
                     ...current,
-                    closingDay: event.target.value,
+                    closingDay: maskClosingDayInput(event.target.value),
                   }))
                 }
+                onBlur={() =>
+                  setForm((current) => ({
+                    ...current,
+                    closingDay: normalizeClosingDayInput(current.closingDay),
+                  }))
+                }
+                placeholder='05'
                 className='rounded-lg'
               />
             </div>
             <div className='flex flex-col gap-2'>
-              <Label htmlFor='card-due'>Vencimento</Label>
+              <Label htmlFor='card-expiry'>Validade</Label>
               <Input
-                id='card-due'
-                type='number'
-                min={1}
-                max={31}
-                value={form.dueDay}
-                onChange={(event) =>
+                id='card-expiry'
+                inputMode='numeric'
+                value={form.expiresAt}
+                onChange={(event) => {
+                  const result = applyCardExpiryInput(event.target.value);
+                  if (result.error) {
+                    toast.error(result.error);
+                  }
                   setForm((current) => ({
                     ...current,
-                    dueDay: event.target.value,
-                  }))
-                }
+                    expiresAt: result.value,
+                  }));
+                }}
+                placeholder='MM/AA'
                 className='rounded-lg'
               />
             </div>

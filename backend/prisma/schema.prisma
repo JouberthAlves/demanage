@@ -44,16 +44,17 @@ model User {
 }
 
 model Card {
-  id         String    @id @default(uuid())
-  userId     String
-  name       String
-  limit      Decimal?  @db.Decimal(12, 2)
-  closingDay Int?
-  dueDay     Int?
-  createdAt  DateTime  @default(now())
-  updatedAt  DateTime  @updatedAt
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expenses   Expense[]
+  id             String    @id @default(uuid())
+  userId         String
+  name           String
+  limit          Decimal?  @db.Decimal(12, 2)
+  closingDay     Int?
+  expiresAt      DateTime?
+  lastInvoicedOn DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses       Expense[]
 
   @@index([userId])
 }
@@ -68,6 +69,7 @@ model Expense {
   frequency ExpenseFrequency @default(mensal)
   dueDay    Int?
   notes     String?
+  isInvoice Boolean          @default(false)
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
