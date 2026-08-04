@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { CurrencyInput } from '@/components/ui/currency-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -24,7 +25,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
 import { useCreateExpense, useUpdateExpense } from '@/hooks/use-expenses';
-import { parseCurrencyInput } from '@/lib/format';
+import { formatBrlInputValue, parseCurrencyInput } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { ExpenseCategory, RecurringExpense } from '@/types/finance';
 
@@ -69,7 +70,7 @@ export function ExpenseFormDialog({
     if (expense) {
       setForm({
         name: expense.name,
-        amount: String(expense.amount).replace('.', ','),
+        amount: formatBrlInputValue(expense.amount),
         category: expense.category,
         cardId: expense.cardId ?? 'none',
         dueDay: expense.dueDay ? String(expense.dueDay) : '',
@@ -149,16 +150,12 @@ export function ExpenseFormDialog({
           <div className='grid grid-cols-2 gap-3'>
             <div className='flex flex-col gap-2'>
               <Label htmlFor='expense-amount'>Valor</Label>
-              <Input
+              <CurrencyInput
                 id='expense-amount'
                 value={form.amount}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    amount: event.target.value,
-                  }))
+                onValueChange={(amount) =>
+                  setForm((current) => ({ ...current, amount }))
                 }
-                placeholder='0,00'
                 className='rounded-lg'
               />
             </div>

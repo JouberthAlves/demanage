@@ -47,7 +47,8 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 ## P2+ — Backlog (não fazer sem pedido explícito)
 
 - [x] ~~Auth / login real~~ — JWT em cookie httpOnly; `POST /auth/register|login|logout`, `GET /auth/me`; telas `/login` e `/register` (shadcn Field/Card); rotas do app protegidas.
-- [x] ~~API CRUD Express + Prisma~~ — `Entry`, `Expense`, `Card` (GET/POST/PATCH/DELETE). Perfil via `PATCH /auth/me`.
+- [x] ~~API CRUD Express + Prisma~~ — `Entry`, `Expense`, `Card` (GET/POST/PATCH/DELETE). Perfil via `PATCH /auth/me` (salva `salary` e sincroniza entrada mensal "Salário").
 - [x] ~~Frontend: trocar Zustand/localStorage pela API~~ — Entradas, Despesas, Cartões e perfil na API; finance store sem persist.
+- [x] ~~Inputs monetários BRL~~ — máscara `R$ 1.234,56` em perfil, despesas, entradas e cartões.
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 

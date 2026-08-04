@@ -111,7 +111,7 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
   try {
     const { name, salary, notes } = req.body as {
       name?: string;
-      salary?: number;
+      salary?: number | string;
       notes?: string | null;
     };
 
@@ -119,22 +119,64 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Nome não pode ser vazio' });
     }
 
-    if (
-      salary !== undefined &&
-      (typeof salary !== 'number' || !Number.isFinite(salary) || salary < 0)
-    ) {
-      return res.status(400).json({ error: 'Salário inválido' });
+    let salaryValue: number | undefined;
+    if (salary !== undefined) {
+      salaryValue = typeof salary === 'string' ? Number(salary) : salary;
+      if (!Number.isFinite(salaryValue) || salaryValue < 0) {
+        return res.status(400).json({ error: 'Salário inválido' });
+      }
     }
 
-    const user = await prisma.user.update({
-      where: { id: req.user!.id },
-      data: {
-        ...(name !== undefined ? { name: name.trim() } : {}),
-        ...(salary !== undefined ? { salary } : {}),
-        ...(notes !== undefined
-          ? { notes: notes?.trim() ? notes.trim() : null }
-          : {}),
-      },
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+
+    const user = await prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
+        where: { id: userId },
+        data: {
+          ...(name !== undefined ? { name: name.trim() } : {}),
+          ...(salaryValue !== undefined ? { salary: salaryValue } : {}),
+          ...(notes !== undefined
+            ? { notes: notes?.trim() ? notes.trim() : null }
+            : {}),
+        },
+      });
+
+      if (salaryValue !== undefined) {
+        const salaryEntry = await tx.entry.findFirst({
+          where: {
+            userId,
+            type: 'salario',
+            frequency: 'mensal',
+            name: 'Salário',
+          },
+        });
+
+        if (salaryValue > 0) {
+          if (salaryEntry) {
+            await tx.entry.update({
+              where: { id: salaryEntry.id },
+              data: { amount: salaryValue },
+            });
+          } else {
+            await tx.entry.create({
+              data: {
+                userId,
+                name: 'Salário',
+                amount: salaryValue,
+                type: 'salario',
+                frequency: 'mensal',
+              },
+            });
+          }
+        } else if (salaryEntry) {
+          await tx.entry.delete({ where: { id: salaryEntry.id } });
+        }
+      }
+
+      return updatedUser;
     });
 
     return res.json({ user: toPublicUser(user) });

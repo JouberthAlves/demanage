@@ -11,11 +11,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { CurrencyInput } from '@/components/ui/currency-input';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { useCreateCard, useUpdateCard } from '@/hooks/use-cards';
-import { parseCurrencyInput } from '@/lib/format';
+import { formatBrlInputValue, parseCurrencyInput } from '@/lib/format';
 import type { Card } from '@/types/finance';
 
 type CardFormDialogProps = {
@@ -54,7 +55,8 @@ export function CardFormDialog({
     if (card) {
       setForm({
         name: card.name,
-        limit: card.limit != null ? String(card.limit).replace('.', ',') : '',
+        limit:
+          card.limit != null ? formatBrlInputValue(card.limit) : '',
         closingDay: card.closingDay ? String(card.closingDay) : '',
         dueDay: card.dueDay ? String(card.dueDay) : '',
       });
@@ -125,16 +127,12 @@ export function CardFormDialog({
 
           <div className='flex flex-col gap-2'>
             <Label htmlFor='card-limit'>Limite</Label>
-            <Input
+            <CurrencyInput
               id='card-limit'
               value={form.limit}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  limit: event.target.value,
-                }))
+              onValueChange={(limit) =>
+                setForm((current) => ({ ...current, limit }))
               }
-              placeholder='0,00'
               className='rounded-lg'
             />
           </div>
