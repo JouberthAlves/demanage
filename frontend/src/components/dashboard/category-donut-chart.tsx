@@ -15,10 +15,12 @@ const COLORS: Record<ExpenseCategory, string> = {
 export function CategoryDonutChart() {
   const expenses = useFinanceStore((state) => state.expenses);
 
-  const grouped = expenses.reduce<Record<string, number>>((acc, expense) => {
-    acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
-    return acc;
-  }, {});
+  const grouped = expenses
+    .filter((expense) => !expense.cardId || expense.isInvoice)
+    .reduce<Record<string, number>>((acc, expense) => {
+      acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
+      return acc;
+    }, {});
 
   const data = Object.entries(grouped).map(([category, value]) => ({
     name: EXPENSE_CATEGORY_LABELS[category as ExpenseCategory],

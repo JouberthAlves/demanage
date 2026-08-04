@@ -32,6 +32,12 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       if (!card) {
         return res.status(400).json({ error: 'Cartão inválido' });
       }
+
+      if (card.expiresAt && card.expiresAt.getTime() < Date.now()) {
+        return res.status(400).json({
+          error: 'Cartão vencido. Renove a validade no Perfil.',
+        });
+      }
     }
 
     const expense = await prisma.expense.create({

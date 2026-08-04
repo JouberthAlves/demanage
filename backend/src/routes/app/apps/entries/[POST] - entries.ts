@@ -21,6 +21,12 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    if (type === 'salario') {
+      return res.status(400).json({
+        error: 'O salário é cadastrado pela aba Perfil',
+      });
+    }
+
     const entry = await prisma.entry.create({
       data: {
         userId,

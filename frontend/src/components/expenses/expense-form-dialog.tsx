@@ -220,13 +220,20 @@ export function ExpenseFormDialog({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value='none'>Nenhum</SelectItem>
-                  {cards.map((card) => (
-                    <SelectItem key={card.id} value={card.id}>
-                      {card.name}
-                    </SelectItem>
-                  ))}
+                  {cards
+                    .filter((card) => !card.expired)
+                    .map((card) => (
+                      <SelectItem key={card.id} value={card.id}>
+                        {card.name}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
+              {cards.some((card) => card.expired) ? (
+                <p className='text-xs text-muted-foreground'>
+                  Cartões vencidos não podem receber novas despesas.
+                </p>
+              ) : null}
             </div>
           </div>
 

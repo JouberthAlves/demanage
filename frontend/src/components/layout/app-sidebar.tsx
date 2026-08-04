@@ -1,5 +1,6 @@
 import { LayoutDashboard, Receipt, TrendingUp, UserRound } from 'lucide-react';
 import { NavLink } from 'react-router';
+import logo from '../../../public/favicon.svg';
 
 import {
   Tooltip,
@@ -17,9 +18,9 @@ const navItems = [
 
 export function AppSidebar() {
   return (
-    <aside className='sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center border-r border-border bg-card/20 py-5'>
-      <div className='mb-6 flex size-10 items-center justify-center rounded-xl bg-primary text-sm font-bold text-primary-foreground'>
-        dM
+    <aside className='sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center border-r border-border bg-card/20 pb-5'>
+      <div className='flex items-center justify-center w-full'>
+        <img src={logo} alt='logo' className=' mt-4 size-10 border-b w-full' />
       </div>
       <nav className='flex flex-1 flex-col items-center gap-2'>
         {navItems.map((item) => {

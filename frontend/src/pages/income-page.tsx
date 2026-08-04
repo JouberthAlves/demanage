@@ -213,25 +213,31 @@ export function IncomePage() {
                       {formatCurrency(income.amount)}
                     </TableCell>
                     <TableCell className='text-right'>
-                      <div className='flex justify-end gap-1'>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          onClick={() => openEdit(income)}
-                        >
-                          <Pencil className='size-4' />
-                        </Button>
-                        <Button
-                          variant='ghost'
-                          size='icon-sm'
-                          disabled={removeEntry.isPending}
-                          onClick={() =>
-                            void handleDelete(income.id, income.name)
-                          }
-                        >
-                          <Trash2 className='size-4' />
-                        </Button>
-                      </div>
+                      {income.type === 'salario' ? (
+                        <span className='text-xs text-muted-foreground'>
+                          Perfil
+                        </span>
+                      ) : (
+                        <div className='flex justify-end gap-1'>
+                          <Button
+                            variant='ghost'
+                            size='icon-sm'
+                            onClick={() => openEdit(income)}
+                          >
+                            <Pencil className='size-4' />
+                          </Button>
+                          <Button
+                            variant='ghost'
+                            size='icon-sm'
+                            disabled={removeEntry.isPending}
+                            onClick={() =>
+                              void handleDelete(income.id, income.name)
+                            }
+                          >
+                            <Trash2 className='size-4' />
+                          </Button>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))

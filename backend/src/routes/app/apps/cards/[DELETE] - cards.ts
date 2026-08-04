@@ -22,7 +22,18 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Cartão não encontrado' });
     }
 
-    await prisma.card.delete({ where: { id } });
+    await prisma.$transaction(async (tx) => {
+      await tx.expense.deleteMany({
+        where: { userId, cardId: id, isInvoice: true },
+      });
+
+      await tx.expense.updateMany({
+        where: { userId, cardId: id, isInvoice: false },
+        data: { cardId: null },
+      });
+
+      await tx.card.delete({ where: { id } });
+    });
 
     return res.status(204).send();
   } catch (err) {

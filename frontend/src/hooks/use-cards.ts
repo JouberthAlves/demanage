@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
 
+import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
 import {
   createCard,
   deleteCard,
   listCards,
+  processCardBilling,
   updateCard,
   type CardPayload,
 } from '@/lib/cards-api';
@@ -14,10 +16,17 @@ export const CARDS_QUERY_KEY = ['cards'] as const;
 
 export function useCards() {
   const setCards = useFinanceStore((state) => state.setCards);
+  const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: CARDS_QUERY_KEY,
-    queryFn: listCards,
+    queryFn: async () => {
+      const billing = await processCardBilling();
+      if (billing.createdCount > 0) {
+        void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
+      }
+      return listCards();
+    },
   });
 
   useEffect(() => {
@@ -64,7 +73,7 @@ export function useDeleteCard() {
     mutationFn: (id: string) => deleteCard(id),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY });
-      void queryClient.invalidateQueries({ queryKey: ['expenses'] });
+      void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
     },
   });
 }
