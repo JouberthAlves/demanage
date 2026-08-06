@@ -3,11 +3,13 @@ import { Router } from 'express';
 import {
   clearAuthCookie,
   comparePassword,
+  getSalaryReceiveDay,
   hashPassword,
   setAuthCookie,
   signAuthToken,
   toPublicUser,
 } from '@/lib/auth';
+import { parseReceiveDay } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -54,7 +56,7 @@ authRoutes.post('/auth/register', async (req, res) => {
     const token = signAuthToken(user.id);
     setAuthCookie(res, token);
 
-    return res.status(201).json({ user: toPublicUser(user) });
+    return res.status(201).json({ user: toPublicUser(user, null) });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Erro ao registrar' });
@@ -90,8 +92,9 @@ authRoutes.post('/auth/login', async (req, res) => {
 
     const token = signAuthToken(user.id);
     setAuthCookie(res, token);
+    const salaryReceiveDay = await getSalaryReceiveDay(user.id);
 
-    return res.json({ user: toPublicUser(user) });
+    return res.json({ user: toPublicUser(user, salaryReceiveDay) });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Erro ao entrar' });
@@ -104,15 +107,27 @@ authRoutes.post('/auth/logout', (_req, res) => {
 });
 
 authRoutes.get('/auth/me', requireAuth, async (req, res) => {
-  return res.json({ user: req.user });
+  const userId = req.user?.id;
+  if (!userId) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+
+  const salaryReceiveDay = await getSalaryReceiveDay(userId);
+  return res.json({
+    user: {
+      ...req.user,
+      salaryReceiveDay,
+    },
+  });
 });
 
 authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
   try {
-    const { name, salary, notes } = req.body as {
+    const { name, salary, notes, salaryReceiveDay } = req.body as {
       name?: string;
       salary?: number | string;
       notes?: string | null;
+      salaryReceiveDay?: number | string | null;
     };
 
     if (name !== undefined && !name.trim()) {
@@ -124,6 +139,17 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
       salaryValue = typeof salary === 'string' ? Number(salary) : salary;
       if (!Number.isFinite(salaryValue) || salaryValue < 0) {
         return res.status(400).json({ error: 'Salário inválido' });
+      }
+    }
+
+    let receiveDayValue: number | null | undefined;
+    if (salaryReceiveDay !== undefined) {
+      try {
+        receiveDayValue = parseReceiveDay(salaryReceiveDay);
+      } catch {
+        return res.status(400).json({
+          error: 'Dia de recebimento do salário inválido (1-31)',
+        });
       }
     }
 
@@ -144,7 +170,10 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
         },
       });
 
-      if (salaryValue !== undefined) {
+      const shouldSyncSalaryEntry =
+        salaryValue !== undefined || receiveDayValue !== undefined;
+
+      if (shouldSyncSalaryEntry) {
         const salaryEntry = await tx.entry.findFirst({
           where: {
             userId,
@@ -154,20 +183,39 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
           },
         });
 
-        if (salaryValue > 0) {
+        const nextSalary =
+          salaryValue !== undefined
+            ? salaryValue
+            : Number(updatedUser.salary);
+        const nextReceiveDay =
+          receiveDayValue !== undefined
+            ? receiveDayValue
+            : (salaryEntry?.receiveDay ?? null);
+
+        if (nextSalary > 0) {
+          if (nextReceiveDay == null) {
+            throw new Error('MISSING_SALARY_RECEIVE_DAY');
+          }
+
           if (salaryEntry) {
             await tx.entry.update({
               where: { id: salaryEntry.id },
-              data: { amount: salaryValue },
+              data: {
+                amount: nextSalary,
+                receiveDay: nextReceiveDay,
+                endsAt: null,
+              },
             });
           } else {
             await tx.entry.create({
               data: {
                 userId,
                 name: 'Salário',
-                amount: salaryValue,
+                amount: nextSalary,
                 type: 'salario',
                 frequency: 'mensal',
+                receiveDay: nextReceiveDay,
+                endsAt: null,
               },
             });
           }
@@ -179,8 +227,14 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
       return updatedUser;
     });
 
-    return res.json({ user: toPublicUser(user) });
+    const nextSalaryReceiveDay = await getSalaryReceiveDay(userId);
+    return res.json({ user: toPublicUser(user, nextSalaryReceiveDay) });
   } catch (error) {
+    if (error instanceof Error && error.message === 'MISSING_SALARY_RECEIVE_DAY') {
+      return res.status(400).json({
+        error: 'Informe o dia em que recebe o salário (1-31)',
+      });
+    }
     console.error(error);
     return res.status(500).json({ error: 'Erro ao atualizar perfil' });
   }

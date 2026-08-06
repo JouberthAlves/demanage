@@ -3,6 +3,7 @@ export type AuthUser = {
   name: string;
   email: string;
   salary: number;
+  salaryReceiveDay: number | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;

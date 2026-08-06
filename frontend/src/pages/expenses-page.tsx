@@ -26,9 +26,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
+import {
+  BUILTIN_EXPENSE_CATEGORY_LABELS,
+  EXPENSE_FREQUENCY_LABELS,
+  expenseTypeLabel,
+  tagBadgeStyle,
+} from '@/data/labels';
+import { useCustomTags } from '@/hooks/use-custom-tags';
 import { useDeleteExpense, useExpenses } from '@/hooks/use-expenses';
 import { getCardTone } from '@/lib/card-tone';
+import {
+  expenseContributionThisMonth,
+  isExpenseDebitedThisMonth,
+} from '@/lib/expense-schedule';
 import { formatCurrency } from '@/lib/format';
 import { selectMonthlyExpenses, useFinanceStore } from '@/stores/finance-store';
 import type { ExpenseCategory, RecurringExpense } from '@/types/finance';
@@ -42,6 +52,7 @@ const categoryColors: Record<ExpenseCategory, string> = {
 
 export function ExpensesPage() {
   const { data: expenses = [], isLoading, isError } = useExpenses();
+  const { data: customTags = [] } = useCustomTags('expense');
   const cards = useFinanceStore((state) => state.profile.cards);
   const removeExpense = useDeleteExpense();
   const total = useFinanceStore(selectMonthlyExpenses);
@@ -57,13 +68,20 @@ export function ExpensesPage() {
         .toLowerCase()
         .includes(search.toLowerCase());
       const matchesCategory =
-        category === 'all' || expense.category === category;
+        category === 'all' ||
+        (category.startsWith('tag:')
+          ? expense.customTagId === category.slice(4)
+          : expense.category === category && !expense.customTagId);
       return matchesSearch && matchesCategory;
     });
   }, [expenses, search, category]);
 
   const filteredTotal = useMemo(
-    () => filtered.reduce((sum, expense) => sum + expense.amount, 0),
+    () =>
+      filtered.reduce(
+        (sum, expense) => sum + expenseContributionThisMonth(expense),
+        0,
+      ),
     [filtered],
   );
 
@@ -118,11 +136,11 @@ export function ExpensesPage() {
       <PageHero
         eyebrow='Recorrências'
         title={`${expenses.length} despesa${expenses.length === 1 ? '' : 's'}`}
-        description='Acompanhe o total mensal e filtre por categoria ou nome.'
+        description='O saldo do mês só conta despesas a partir do dia de desconto.'
       >
         <div className='grid gap-3 sm:grid-cols-2'>
           <div className='rounded-xl border border-border bg-black/25 p-4'>
-            <p className='text-xs text-muted-foreground'>Total / mês</p>
+            <p className='text-xs text-muted-foreground'>Já no saldo / mês</p>
             <p className='mt-2 text-2xl font-semibold text-neon-amber'>
               {formatCurrency(total)}
             </p>
@@ -158,9 +176,16 @@ export function ExpensesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value='all'>Todas</SelectItem>
-              {Object.entries(EXPENSE_CATEGORY_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
+              {Object.entries(BUILTIN_EXPENSE_CATEGORY_LABELS).map(
+                ([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ),
+              )}
+              {customTags.map((tag) => (
+                <SelectItem key={tag.id} value={`tag:${tag.id}`}>
+                  {tag.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -173,8 +198,10 @@ export function ExpensesPage() {
               <TableRow className='hover:bg-transparent'>
                 <TableHead>Nome</TableHead>
                 <TableHead>Categoria</TableHead>
+                <TableHead>Frequência</TableHead>
                 <TableHead>Cartão</TableHead>
-                <TableHead>Vencimento</TableHead>
+                <TableHead>Desconto</TableHead>
+                <TableHead>Término</TableHead>
                 <TableHead className='text-right'>Valor</TableHead>
                 <TableHead className='w-40 text-right'>Ações</TableHead>
               </TableRow>
@@ -182,14 +209,14 @@ export function ExpensesPage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className='h-28 text-center'>
+                  <TableCell colSpan={8} className='h-28 text-center'>
                     <Spinner className='mx-auto size-5' />
                   </TableCell>
                 </TableRow>
               ) : isError ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={8}
                     className='h-28 text-center text-destructive'
                   >
                     Não foi possível carregar as despesas.
@@ -197,7 +224,7 @@ export function ExpensesPage() {
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className='h-40'>
+                  <TableCell colSpan={8} className='h-40'>
                     <div className='flex flex-col items-center justify-center gap-2 text-center'>
                       <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-amber/10'>
                         <Receipt className='size-6 text-neon-amber' />
@@ -213,19 +240,39 @@ export function ExpensesPage() {
                 filtered.map((expense) => {
                   const card = cards.find((item) => item.id === expense.cardId);
                   const tone = card ? getCardTone(card) : null;
+                  const debited = isExpenseDebitedThisMonth(expense);
 
                   return (
                     <TableRow key={expense.id}>
                       <TableCell className='font-medium'>
                         {expense.name}
+                        {expense.frequency !== 'unica' &&
+                        !expense.isInvoice &&
+                        !debited ? (
+                          <span className='mt-0.5 block text-xs text-muted-foreground'>
+                            Aguardando dia {expense.dueDay ?? '—'}
+                          </span>
+                        ) : null}
                       </TableCell>
                       <TableCell>
-                        <Badge
-                          variant='outline'
-                          className={categoryColors[expense.category]}
-                        >
-                          {EXPENSE_CATEGORY_LABELS[expense.category]}
-                        </Badge>
+                        {expense.customTag ? (
+                          <Badge
+                            variant='outline'
+                            style={tagBadgeStyle(expense.customTag.color)}
+                          >
+                            {expense.customTag.name}
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant='outline'
+                            className={categoryColors[expense.category]}
+                          >
+                            {expenseTypeLabel(expense)}
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {EXPENSE_FREQUENCY_LABELS[expense.frequency]}
                       </TableCell>
                       <TableCell>
                         {card ? (
@@ -241,7 +288,23 @@ export function ExpensesPage() {
                         )}
                       </TableCell>
                       <TableCell className='text-muted-foreground'>
-                        {expense.dueDay ? `Dia ${expense.dueDay}` : '—'}
+                        {expense.frequency === 'unica'
+                          ? expense.registeredAt
+                            ? expense.registeredAt
+                                .split('-')
+                                .reverse()
+                                .join('/')
+                            : 'Hoje'
+                          : expense.dueDay
+                            ? `Dia ${String(expense.dueDay).padStart(2, '0')}`
+                            : '—'}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {expense.frequency === 'unica' || expense.isInvoice
+                          ? '—'
+                          : expense.endsAt
+                            ? expense.endsAt.split('-').reverse().join('/')
+                            : '—'}
                       </TableCell>
                       <TableCell className='text-right font-semibold'>
                         {formatCurrency(expense.amount)}

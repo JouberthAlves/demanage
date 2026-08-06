@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
+import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
+import { parseEndsAt, parseReceiveDay } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
+
+const VALID_FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 const router = Router();
 
@@ -22,8 +26,21 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Despesa não encontrada' });
     }
 
-    const { name, amount, category, frequency, cardId, dueDay, notes } =
-      req.body;
+    const {
+      name,
+      amount,
+      category,
+      frequency,
+      cardId,
+      dueDay,
+      endsAt,
+      notes,
+      customTagId,
+    } = req.body;
+
+    if (frequency !== undefined && !VALID_FREQUENCIES.has(frequency)) {
+      return res.status(400).json({ error: 'Frequência inválida' });
+    }
 
     if (cardId) {
       const card = await prisma.card.findFirst({
@@ -35,6 +52,69 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
+    let resolvedCustomTagId: string | null | undefined;
+    if (customTagId !== undefined) {
+      try {
+        resolvedCustomTagId = await resolveCustomTagId({
+          userId,
+          scope: 'expense',
+          customTagId,
+        });
+      } catch {
+        return res.status(400).json({ error: 'Tipo personalizado inválido' });
+      }
+    }
+
+    const nextCategory = category ?? existing.category;
+    const nextFrequency = frequency ?? existing.frequency;
+    const nextCustomTagId =
+      resolvedCustomTagId !== undefined
+        ? resolvedCustomTagId
+        : existing.customTagId;
+
+    if (nextCustomTagId && nextCategory !== 'outro') {
+      return res.status(400).json({
+        error: 'Tipos personalizados devem usar category=outro',
+      });
+    }
+
+    let resolvedDueDay: number | null | undefined;
+    let resolvedEndsAt: Date | null | undefined;
+
+    try {
+      if (nextFrequency === 'unica') {
+        resolvedDueDay = null;
+        resolvedEndsAt = null;
+      } else {
+        if (dueDay !== undefined) {
+          resolvedDueDay = parseReceiveDay(dueDay);
+          if (resolvedDueDay == null) {
+            return res.status(400).json({
+              error: 'Informe o dia em que será descontado (1-31)',
+            });
+          }
+        } else if (existing.dueDay == null && !existing.isInvoice) {
+          return res.status(400).json({
+            error: 'Informe o dia em que será descontado (1-31)',
+          });
+        }
+
+        if (endsAt !== undefined) {
+          resolvedEndsAt = parseEndsAt(endsAt);
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INVALID_RECEIVE_DAY') {
+        return res.status(400).json({
+          error: 'Dia de desconto inválido (1-31)',
+        });
+      }
+      if (error instanceof Error && error.message === 'INVALID_ENDS_AT') {
+        return res.status(400).json({ error: 'Data de término inválida' });
+      }
+      throw error;
+    }
+
     const expense = await prisma.expense.update({
       where: { id },
       data: {
@@ -43,9 +123,14 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         ...(category !== undefined ? { category } : {}),
         ...(frequency !== undefined ? { frequency } : {}),
         ...(cardId !== undefined ? { cardId: cardId || null } : {}),
-        ...(dueDay !== undefined ? { dueDay: dueDay || null } : {}),
+        ...(resolvedDueDay !== undefined ? { dueDay: resolvedDueDay } : {}),
+        ...(resolvedEndsAt !== undefined ? { endsAt: resolvedEndsAt } : {}),
         ...(notes !== undefined ? { notes: notes || null } : {}),
+        ...(resolvedCustomTagId !== undefined
+          ? { customTagId: resolvedCustomTagId }
+          : {}),
       },
+      include: { customTag: { select: customTagSelect } },
     });
 
     return res.json(expense);

@@ -15,7 +15,13 @@ import { Spinner } from '@/components/ui/spinner';
 import { Textarea } from '@/components/ui/textarea';
 import { useCards, useDeleteCard } from '@/hooks/use-cards';
 import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
-import { formatBrlInputValue, formatCurrency, parseCurrencyInput } from '@/lib/format';
+import {
+  formatBrlInputValue,
+  formatCurrency,
+  maskClosingDayInput,
+  normalizeClosingDayInput,
+  parseCurrencyInput,
+} from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { Card } from '@/types/finance';
@@ -33,6 +39,11 @@ export function ProfilePage() {
   const [salary, setSalary] = useState(
     user?.salary ? formatBrlInputValue(user.salary) : '',
   );
+  const [salaryReceiveDay, setSalaryReceiveDay] = useState(
+    user?.salaryReceiveDay
+      ? String(user.salaryReceiveDay).padStart(2, '0')
+      : '05',
+  );
   const [notes, setNotes] = useState(user?.notes ?? '');
   const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -41,8 +52,13 @@ export function ProfilePage() {
   useEffect(() => {
     setName(user?.name ?? '');
     setSalary(user?.salary ? formatBrlInputValue(user.salary) : '');
+    setSalaryReceiveDay(
+      user?.salaryReceiveDay
+        ? String(user.salaryReceiveDay).padStart(2, '0')
+        : '05',
+    );
     setNotes(user?.notes ?? '');
-  }, [user?.name, user?.salary, user?.notes]);
+  }, [user?.name, user?.salary, user?.salaryReceiveDay, user?.notes]);
 
   const committedByCard = useMemo(() => {
     const map = new Map<string, number>();
@@ -72,11 +88,27 @@ export function ProfilePage() {
     setSaving(true);
 
     const nextSalary = parseCurrencyInput(salary);
+    const normalizedReceiveDay = normalizeClosingDayInput(salaryReceiveDay);
+    const nextReceiveDay = normalizedReceiveDay
+      ? Number(normalizedReceiveDay)
+      : NaN;
+
+    if (
+      nextSalary > 0 &&
+      (!Number.isInteger(nextReceiveDay) ||
+        nextReceiveDay < 1 ||
+        nextReceiveDay > 31)
+    ) {
+      toast.error('Informe o dia em que recebe o salário (01-31)');
+      setSaving(false);
+      return;
+    }
 
     try {
       await updateProfile({
         name: name.trim() || 'Usuário',
         salary: nextSalary,
+        salaryReceiveDay: nextSalary > 0 ? nextReceiveDay : null,
         notes: notes.trim() || null,
       });
       await queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
@@ -196,6 +228,28 @@ export function ProfilePage() {
                 onValueChange={setSalary}
                 className='rounded-lg'
               />
+            </div>
+            <div className='space-y-2 sm:col-span-2 sm:max-w-xs'>
+              <Label htmlFor='profile-salary-day'>Quando recebe</Label>
+              <Input
+                id='profile-salary-day'
+                inputMode='numeric'
+                maxLength={2}
+                value={salaryReceiveDay}
+                onChange={(event) =>
+                  setSalaryReceiveDay(maskClosingDayInput(event.target.value))
+                }
+                onBlur={() =>
+                  setSalaryReceiveDay(
+                    normalizeClosingDayInput(salaryReceiveDay),
+                  )
+                }
+                placeholder='05'
+                className='rounded-lg'
+              />
+              <p className='text-xs text-muted-foreground'>
+                Dia do mês em que o salário entra no saldo.
+              </p>
             </div>
           </div>
 

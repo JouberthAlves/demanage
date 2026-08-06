@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import type { CookieOptions, Response } from 'express';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 
+import { prisma } from '@/lib/prisma';
 import type { PublicUser } from '@/types/auth';
 import { JWT_EXPIRES_IN, JWT_SECRET, NODE_ENV } from '@/utils/var';
 
@@ -57,14 +58,32 @@ export function clearAuthCookie(res: Response) {
   });
 }
 
-export function toPublicUser(user: User): PublicUser {
+export function toPublicUser(
+  user: User,
+  salaryReceiveDay: number | null = null,
+): PublicUser {
   return {
     id: user.id,
     name: user.name,
     email: user.email,
     salary: Number(user.salary),
+    salaryReceiveDay,
     notes: user.notes,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt,
   };
+}
+
+export async function getSalaryReceiveDay(userId: string) {
+  const salaryEntry = await prisma.entry.findFirst({
+    where: {
+      userId,
+      type: 'salario',
+      frequency: 'mensal',
+      name: 'Salário',
+    },
+    select: { receiveDay: true },
+  });
+
+  return salaryEntry?.receiveDay ?? null;
 }

@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 
-import { customTagSelect } from '@/lib/custom-tag';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -14,13 +13,20 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    const expenses = await prisma.expense.findMany({
-      where: { userId },
-      include: { customTag: { select: customTagSelect } },
-      orderBy: { createdAt: 'desc' },
+    const scope = req.query.scope;
+
+    if (scope !== 'expense' && scope !== 'income') {
+      return res.status(400).json({
+        error: 'Query obrigatória: scope=expense|income',
+      });
+    }
+
+    const tags = await prisma.customTag.findMany({
+      where: { userId, scope },
+      orderBy: { name: 'asc' },
     });
 
-    return res.json(expenses);
+    return res.json(tags);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });

@@ -16,6 +16,8 @@ enum ExpenseCategory {
 
 enum ExpenseFrequency {
   mensal
+  semanal
+  unica
 }
 
 enum EntryType {
@@ -26,21 +28,28 @@ enum EntryType {
 
 enum EntryFrequency {
   mensal
+  semanal
   unica
 }
 
+enum CustomTagScope {
+  expense
+  income
+}
+
 model User {
-  id           String    @id @default(uuid())
+  id           String      @id @default(uuid())
   name         String
-  email        String    @unique
+  email        String      @unique
   passwordHash String
-  salary       Decimal   @default(0) @db.Decimal(12, 2)
+  salary       Decimal     @default(0) @db.Decimal(12, 2)
   notes        String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   cards        Card[]
   expenses     Expense[]
   entries      Entry[]
+  customTags   CustomTag[]
 }
 
 model Card {
@@ -59,37 +68,66 @@ model Card {
   @@index([userId])
 }
 
-model Expense {
-  id        String           @id @default(uuid())
-  userId    String
-  cardId    String?
-  name      String
-  amount    Decimal          @db.Decimal(12, 2)
-  category  ExpenseCategory
-  frequency ExpenseFrequency @default(mensal)
-  dueDay    Int?
-  notes     String?
-  isInvoice Boolean          @default(false)
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  card      Card?            @relation(fields: [cardId], references: [id], onDelete: SetNull)
-
-  @@index([userId])
-  @@index([cardId])
-}
-
-model Entry {
+model CustomTag {
   id        String         @id @default(uuid())
   userId    String
+  scope     CustomTagScope
   name      String
-  amount    Decimal        @db.Decimal(12, 2)
-  type      EntryType
-  frequency EntryFrequency
-  date      DateTime?
+  color     String
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
   user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses  Expense[]
+  entries   Entry[]
+
+  @@unique([userId, scope, name])
+  @@index([userId, scope])
+}
+
+model Expense {
+  id          String           @id @default(uuid())
+  userId      String
+  cardId      String?
+  customTagId String?
+  name        String
+  amount      Decimal          @db.Decimal(12, 2)
+  category    ExpenseCategory
+  frequency   ExpenseFrequency @default(mensal)
+  /// Dia do mês em que a despesa entra no saldo (1-31). Null em despesas únicas.
+  dueDay      Int?
+  /// Data em que a recorrência deixa de valer. Null = sem término.
+  endsAt      DateTime?
+  notes       String?
+  isInvoice   Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card        Card?            @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  customTag   CustomTag?       @relation(fields: [customTagId], references: [id], onDelete: SetNull)
 
   @@index([userId])
+  @@index([cardId])
+  @@index([customTagId])
+}
+
+model Entry {
+  id          String         @id @default(uuid())
+  userId      String
+  customTagId String?
+  name        String
+  amount      Decimal        @db.Decimal(12, 2)
+  type        EntryType
+  frequency   EntryFrequency
+  /// Dia do mês em que a entrada entra no saldo (1-31). Null em entradas únicas.
+  receiveDay  Int?
+  /// Data em que a recorrência deixa de valer. Null = sem término (ex.: salário).
+  endsAt      DateTime?
+  date        DateTime?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customTag   CustomTag?     @relation(fields: [customTagId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([customTagId])
 }

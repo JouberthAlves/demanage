@@ -28,7 +28,7 @@ export async function requireAuth(
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    req.user = toPublicUser(user);
+    req.user = toPublicUser(user, null);
     return next();
   } catch {
     return res.status(401).json({ error: 'Não autenticado' });
