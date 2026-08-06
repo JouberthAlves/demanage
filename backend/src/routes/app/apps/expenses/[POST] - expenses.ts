@@ -7,9 +7,12 @@ import {
   parseStartsAt,
 } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
+import {
+  isValidExpenseCategory,
+  isValidFrequency,
+  parsePositiveAmount,
+} from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
-
-const VALID_FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 const router = Router();
 
@@ -34,14 +37,24 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       customTagId,
     } = req.body;
 
-    if (!name || amount == null || !category) {
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName || amount == null || !category) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, amount, category',
       });
     }
 
+    const parsedAmount = parsePositiveAmount(amount);
+    if (parsedAmount == null) {
+      return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+    }
+
+    if (!isValidExpenseCategory(category)) {
+      return res.status(400).json({ error: 'Categoria inválida' });
+    }
+
     const resolvedFrequency = frequency ?? 'mensal';
-    if (!VALID_FREQUENCIES.has(resolvedFrequency)) {
+    if (!isValidFrequency(resolvedFrequency)) {
       return res.status(400).json({ error: 'Frequência inválida' });
     }
 
@@ -131,8 +144,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const expense = await prisma.expense.create({
       data: {
         userId,
-        name,
-        amount,
+        name: trimmedName,
+        amount: parsedAmount,
         category,
         frequency: resolvedFrequency,
         cardId: resolvedCardId,

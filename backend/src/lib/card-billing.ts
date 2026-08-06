@@ -2,18 +2,71 @@ import type { Card, Expense } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 
-function startOfDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+const BILLING_TIMEZONE = 'America/Sao_Paulo';
+
+/** Dia civil YYYY-MM-DD (comparações estáveis, sem drift de fuso). */
+type DayKey = string;
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
 }
 
-function closingDateInMonth(
+function toDayKey(year: number, monthIndex: number, day: number): DayKey {
+  return `${year}-${pad2(monthIndex + 1)}-${pad2(day)}`;
+}
+
+function formatPtBrDayKey(dayKey: DayKey) {
+  const [year, month, day] = dayKey.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+/** Instant → dia civil em America/Sao_Paulo. */
+function instantToSpDayKey(date: Date): DayKey {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: BILLING_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${map.year}-${map.month}-${map.day}`;
+}
+
+/**
+ * Date-only persistido via Date.UTC (startsAt/endsAt/lastInvoicedOn)
+ * → usa componentes UTC para não deslocar o dia no fuso SP.
+ */
+function dateOnlyToDayKey(date: Date): DayKey {
+  return toDayKey(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate());
+}
+
+/** Persiste um dia civil como meio-dia UTC (não muda de dia em SP/UTC). */
+function dayKeyToUtcNoon(dayKey: DayKey) {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  return new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+}
+
+function compareDayKeys(a: DayKey, b: DayKey) {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+/** Calendário civil em America/Sao_Paulo. */
+export function todayInSaoPaulo(now = new Date()): Date {
+  const dayKey = instantToSpDayKey(now);
+  return dayKeyToUtcNoon(dayKey);
+}
+
+function closingDayKeyInMonth(
   year: number,
   monthIndex: number,
   closingDay: number,
-) {
-  const lastDay = new Date(year, monthIndex + 1, 0).getDate();
+): DayKey {
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
   const day = Math.min(closingDay, lastDay);
-  return new Date(year, monthIndex, day);
+  return toDayKey(year, monthIndex, day);
 }
 
 /** Datas de fechamento estritamente após `after`, até `until` (inclusive). */
@@ -23,18 +76,21 @@ export function listDueClosingDates(
   until: Date,
 ) {
   const dates: Date[] = [];
-  const end = startOfDay(until);
-  const afterDay = startOfDay(after);
+  const endKey = dateOnlyToDayKey(until);
+  const afterKey = dateOnlyToDayKey(after);
 
-  let year = afterDay.getFullYear();
-  let month = afterDay.getMonth();
+  let year = Number(afterKey.slice(0, 4));
+  let month = Number(afterKey.slice(5, 7)) - 1;
 
   for (let i = 0; i < 48; i += 1) {
-    const candidate = closingDateInMonth(year, month, closingDay);
-    if (candidate > afterDay && candidate <= end) {
-      dates.push(candidate);
+    const candidateKey = closingDayKeyInMonth(year, month, closingDay);
+    if (
+      compareDayKeys(candidateKey, afterKey) > 0 &&
+      compareDayKeys(candidateKey, endKey) <= 0
+    ) {
+      dates.push(dayKeyToUtcNoon(candidateKey));
     }
-    if (candidate > end) break;
+    if (compareDayKeys(candidateKey, endKey) > 0) break;
     month += 1;
     if (month > 11) {
       month = 0;
@@ -45,37 +101,86 @@ export function listDueClosingDates(
   return dates;
 }
 
-function chargesTotal(expenses: Expense[]) {
-  return expenses
-    .filter((expense) => !expense.isInvoice)
-    .reduce((sum, expense) => sum + Number(expense.amount), 0);
+function chargeAmountForClosing(
+  expense: Expense,
+  closingOn: Date,
+  periodStart: Date,
+) {
+  if (expense.isInvoice) return 0;
+
+  const closingKey = dateOnlyToDayKey(closingOn);
+  const periodStartKey = dateOnlyToDayKey(periodStart);
+
+  const startsKey = expense.startsAt
+    ? dateOnlyToDayKey(expense.startsAt)
+    : instantToSpDayKey(expense.createdAt);
+  if (compareDayKeys(startsKey, closingKey) > 0) return 0;
+
+  if (expense.endsAt) {
+    const endsKey = dateOnlyToDayKey(expense.endsAt);
+    if (compareDayKeys(endsKey, closingKey) < 0) return 0;
+  }
+
+  const amount = Number(expense.amount);
+
+  if (expense.frequency === 'unica') {
+    const createdKey = instantToSpDayKey(expense.createdAt);
+    if (
+      compareDayKeys(createdKey, periodStartKey) <= 0 ||
+      compareDayKeys(createdKey, closingKey) > 0
+    ) {
+      return 0;
+    }
+    return amount;
+  }
+
+  if (expense.frequency === 'semanal') return amount * 4;
+  return amount;
+}
+
+export function chargesTotalForClosing(
+  expenses: Expense[],
+  closingOn: Date,
+  periodStart: Date,
+) {
+  return expenses.reduce(
+    (sum, expense) =>
+      sum + chargeAmountForClosing(expense, closingOn, periodStart),
+    0,
+  );
 }
 
 export async function processUserCardBilling(userId: string) {
-  const today = startOfDay(new Date());
+  const today = todayInSaoPaulo();
   const cards = await prisma.card.findMany({
-    where: { userId, closingDay: { not: null } },
+    where: { userId },
     include: { expenses: true },
   });
 
   let createdCount = 0;
 
   for (const card of cards) {
-    if (!card.closingDay) continue;
+    let periodStart = card.lastInvoicedOn
+      ? dayKeyToUtcNoon(dateOnlyToDayKey(card.lastInvoicedOn))
+      : dayKeyToUtcNoon(instantToSpDayKey(card.createdAt));
 
-    const after = card.lastInvoicedOn
-      ? startOfDay(card.lastInvoicedOn)
-      : startOfDay(card.createdAt);
-
-    const dueDates = listDueClosingDates(card.closingDay, after, today);
-    const amount = chargesTotal(card.expenses);
+    const dueDates = listDueClosingDates(card.closingDay, periodStart, today);
 
     for (const closingOn of dueDates) {
+      const amount = chargesTotalForClosing(
+        card.expenses,
+        closingOn,
+        periodStart,
+      );
+
+      const closingKey = dateOnlyToDayKey(closingOn);
+
       if (amount <= 0) {
         await prisma.card.update({
           where: { id: card.id },
           data: { lastInvoicedOn: closingOn },
         });
+        periodStart = closingOn;
         continue;
       }
 
@@ -87,9 +192,9 @@ export async function processUserCardBilling(userId: string) {
             name: `Fatura do cartão ${card.name}`,
             amount,
             category: 'outro',
-            frequency: 'mensal',
+            frequency: 'unica',
             isInvoice: true,
-            notes: `Fechamento ${closingOn.toLocaleDateString('pt-BR')}`,
+            notes: `Fechamento ${formatPtBrDayKey(closingKey)}`,
           },
         });
 
@@ -99,6 +204,7 @@ export async function processUserCardBilling(userId: string) {
         });
       });
 
+      periodStart = closingOn;
       createdCount += 1;
     }
   }

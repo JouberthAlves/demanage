@@ -24,8 +24,6 @@ import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { useAuthStore } from '@/stores/auth-store';
 
-import logo from '../../../frontend/public/favicon.svg';
-
 export function RegisterPage() {
   const navigate = useNavigate();
   const register = useAuthStore((state) => state.register);
@@ -77,10 +75,23 @@ export function RegisterPage() {
 
   return (
     <AuthShell>
-      <div className='mb-6 flex items-center justify-center'>
-        <img src={logo} alt='logo' className='size-15' />
+      <div className='mb-8 flex flex-col items-center gap-3 text-center'>
+        <img
+          src='/favicon.svg'
+          alt='deManage'
+          className='size-16 drop-shadow-[0_0_24px_rgba(52,211,153,0.35)]'
+        />
+        <div>
+          <p className='text-2xl font-semibold tracking-tight'>deManage</p>
+          <p className='mt-1 text-sm text-muted-foreground'>
+            Comece a organizar seu mês
+          </p>
+        </div>
       </div>
-      <Card className='w-full border-border bg-card/60 backdrop-blur' size='sm'>
+      <Card
+        className='w-full border-white/10 bg-card/55 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl'
+        size='sm'
+      >
         <CardHeader>
           <CardTitle>Criar conta</CardTitle>
           <CardDescription>

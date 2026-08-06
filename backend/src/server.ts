@@ -1,4 +1,4 @@
-import 'module-alias/register';
+import './register-aliases';
 
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
@@ -29,7 +29,17 @@ if (NODE_ENV === 'production') {
   app.use(limiter);
 }
 
-app.set('trust proxy', 'loopback');
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: NODE_ENV === 'production' ? 20 : 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: 'Muitas tentativas de login. Tente novamente em alguns minutos.',
+  },
+});
+
+app.set('trust proxy', NODE_ENV === 'production' ? 1 : 'loopback');
 app.use(
   cors({
     origin: APP_URL,
@@ -40,9 +50,25 @@ app.use(
 );
 
 app.use(cookieParser());
-app.use(express.json());
+app.use(express.json({ limit: '256kb' }));
 app.use(requestLogger);
+
+app.use('/auth/login', authLimiter);
+app.use('/auth/register', authLimiter);
 app.use(api);
+
+app.use(
+  (
+    err: unknown,
+    _req: express.Request,
+    res: express.Response,
+    _next: express.NextFunction,
+  ) => {
+    console.error(err);
+    if (res.headersSent) return;
+    res.status(500).json({ error: 'Internal server error' });
+  },
+);
 
 httpServer.listen(API_PORT, () => {
   console.log(`deManage API running on ${API_PORT}`);

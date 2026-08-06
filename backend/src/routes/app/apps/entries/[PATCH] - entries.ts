@@ -7,9 +7,13 @@ import {
   parseStartsAt,
 } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
+import {
+  isValidEntryType,
+  isValidFrequency,
+  parsePositiveAmount,
+  parseUniqueDate,
+} from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
-
-const VALID_FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 const router = Router();
 
@@ -48,13 +52,26 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       endsAt,
     } = req.body;
 
+    let parsedAmount: number | undefined;
+    if (amount !== undefined) {
+      const nextAmount = parsePositiveAmount(amount);
+      if (nextAmount == null) {
+        return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+      }
+      parsedAmount = nextAmount;
+    }
+
+    if (type !== undefined && !isValidEntryType(type)) {
+      return res.status(400).json({ error: 'Tipo inválido' });
+    }
+
     if (type === 'salario') {
       return res.status(400).json({
         error: 'O salário é cadastrado pela aba Perfil',
       });
     }
 
-    if (frequency !== undefined && !VALID_FREQUENCIES.has(frequency)) {
+    if (frequency !== undefined && !isValidFrequency(frequency)) {
       return res.status(400).json({ error: 'Frequência inválida' });
     }
 
@@ -155,18 +172,32 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    let nextDate: Date | null | undefined;
+    if (nextFrequency === 'unica') {
+      if (date !== undefined) {
+        nextDate = parseUniqueDate(date);
+        if (!nextDate) {
+          return res.status(400).json({
+            error: 'Informe a data da entrada única',
+          });
+        }
+      } else if (!existing.date) {
+        return res.status(400).json({
+          error: 'Informe a data da entrada única',
+        });
+      }
+    } else {
+      nextDate = null;
+    }
+
     const entry = await prisma.entry.update({
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
-        ...(amount !== undefined ? { amount } : {}),
+        ...(parsedAmount !== undefined ? { amount: parsedAmount } : {}),
         ...(type !== undefined ? { type } : {}),
         ...(frequency !== undefined ? { frequency } : {}),
-        ...(date !== undefined
-          ? { date: date ? new Date(date) : null }
-          : nextFrequency !== 'unica'
-            ? { date: null }
-            : {}),
+        ...(nextDate !== undefined ? { date: nextDate } : {}),
         ...(resolvedReceiveDay !== undefined
           ? { receiveDay: resolvedReceiveDay }
           : {}),

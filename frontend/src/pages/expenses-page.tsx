@@ -7,6 +7,16 @@ import { ExpenseFormDialog } from '@/components/expenses/expense-form-dialog';
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -62,6 +72,9 @@ export function ExpensesPage() {
   const [category, setCategory] = useState<string>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
+  const [confirmPay, setConfirmPay] = useState<RecurringExpense | null>(null);
+  const [confirmDelete, setConfirmDelete] =
+    useState<RecurringExpense | null>(null);
 
   const filtered = useMemo(() => {
     return expenses.filter((expense) => {
@@ -193,9 +206,9 @@ export function ExpensesPage() {
           </Select>
         </div>
 
-        <div className='overflow-hidden rounded-xl border border-border bg-black/15'>
+        <div className='max-h-[70vh] overflow-auto rounded-xl border border-border bg-black/15'>
           <Table>
-            <TableHeader>
+            <TableHeader className='sticky top-0 z-10 bg-card'>
               <TableRow className='hover:bg-transparent'>
                 <TableHead>Nome</TableHead>
                 <TableHead>Categoria</TableHead>
@@ -321,9 +334,7 @@ export function ExpensesPage() {
                             size='sm'
                             className='rounded-lg'
                             disabled={removeExpense.isPending}
-                            onClick={() =>
-                              void handlePay(expense.id, expense.name)
-                            }
+                            onClick={() => setConfirmPay(expense)}
                           >
                             Pago
                           </Button>
@@ -340,9 +351,7 @@ export function ExpensesPage() {
                             variant='ghost'
                             size='icon-sm'
                             disabled={removeExpense.isPending}
-                            onClick={() =>
-                              void handleDelete(expense.id, expense.name)
-                            }
+                            onClick={() => setConfirmDelete(expense)}
                           >
                             <Trash2 className='size-4' />
                           </Button>
@@ -370,6 +379,66 @@ export function ExpensesPage() {
         onOpenChange={setDialogOpen}
         expense={editing}
       />
+
+      <AlertDialog
+        open={confirmPay != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmPay(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar como paga?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Isso remove a despesa &quot;{confirmPay?.name}&quot; da lista —
+              não apenas marca um ciclo. Para recorrências, use a data de
+              término se quiser encerrar sem apagar o histórico da agenda.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!confirmPay) return;
+                void handlePay(confirmPay.id, confirmPay.name);
+                setConfirmPay(null);
+              }}
+            >
+              Remover despesa
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={confirmDelete != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir despesa?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A despesa &quot;{confirmDelete?.name}&quot; será removida
+              permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              variant='destructive'
+              onClick={() => {
+                if (!confirmDelete) return;
+                void handleDelete(confirmDelete.id, confirmDelete.name);
+                setConfirmDelete(null);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

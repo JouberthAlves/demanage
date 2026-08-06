@@ -1,17 +1,12 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 
-import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
+import {
+  EXPENSE_CATEGORY_COLORS,
+  EXPENSE_CATEGORY_LABELS,
+} from '@/data/labels';
 import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { formatCurrency } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
-import type { ExpenseCategory } from '@/types/finance';
-
-const COLORS: Record<ExpenseCategory, string> = {
-  assinatura: '#60A5FA',
-  parcela: '#FFB800',
-  divida: '#F43F5E',
-  outro: '#A3A3A3',
-};
 
 export function CategoryDonutChart() {
   const expenses = useFinanceStore((state) => state.expenses);
@@ -30,7 +25,7 @@ export function CategoryDonutChart() {
       : EXPENSE_CATEGORY_LABELS[expense.category];
     const color = expense.customTag
       ? expense.customTag.color
-      : COLORS[expense.category];
+      : EXPENSE_CATEGORY_COLORS[expense.category];
 
     const current = acc[key];
     acc[key] = {

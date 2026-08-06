@@ -94,15 +94,15 @@ export function CardFormDialog({
     }
 
     const closingNormalized = normalizeClosingDayInput(form.closingDay);
-    if (form.closingDay.trim() && !closingNormalized) {
-      toast.error('Fechamento inválido. Use um dia entre 01 e 31');
+    if (!closingNormalized) {
+      toast.error('Informe o dia de fechamento (01-31)');
       return;
     }
 
     const payload = {
       name: form.name.trim(),
       limit: form.limit ? parseCurrencyInput(form.limit) : null,
-      closingDay: closingNormalized ? Number(closingNormalized) : null,
+      closingDay: Number(closingNormalized),
       expiresAt,
     };
 
@@ -164,7 +164,7 @@ export function CardFormDialog({
 
           <div className='grid grid-cols-2 gap-3'>
             <div className='flex flex-col gap-2'>
-              <Label htmlFor='card-closing'>Fechamento</Label>
+              <Label htmlFor='card-closing'>Fechamento (obrigatório)</Label>
               <Input
                 id='card-closing'
                 inputMode='numeric'

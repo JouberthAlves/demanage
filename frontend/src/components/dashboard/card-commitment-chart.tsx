@@ -75,26 +75,35 @@ export function CardCommitmentChart() {
               ))}
             </RadialBar>
             <Tooltip
-              contentStyle={{
-                background: '#111',
-                border: '1px solid rgba(255,255,255,0.08)',
-                borderRadius: 12,
-              }}
-              formatter={(_value, _name, item) => {
-                const payload = item?.payload as
-                  | {
-                      name: string;
-                      committed: number;
-                      limit: number;
-                      percent: number;
-                    }
-                  | undefined;
-                if (!payload) return [String(_value), 'Comprometido'];
+              cursor={false}
+              content={({ active, payload }) => {
+                if (!active || !payload?.[0]) return null;
 
-                return [
-                  `${formatPercent(payload.percent / 100)} (${formatCurrency(payload.committed)} de ${formatCurrency(payload.limit)})`,
-                  payload.name,
-                ];
+                const item = payload[0].payload as {
+                  name: string;
+                  committed: number;
+                  limit: number;
+                  percent: number;
+                  fill: string;
+                };
+
+                return (
+                  <div className='rounded-xl border border-white/10 bg-[#111] px-3 py-2 text-sm text-foreground shadow-lg'>
+                    <div className='flex items-center gap-2 font-medium'>
+                      <span
+                        className='size-2.5 shrink-0 rounded-sm'
+                        style={{ backgroundColor: item.fill }}
+                      />
+                      {item.name}
+                    </div>
+                    <p className='mt-1 text-muted-foreground'>
+                      {formatPercent(item.percent / 100)}
+                      {' · '}
+                      {formatCurrency(item.committed)} de{' '}
+                      {formatCurrency(item.limit)}
+                    </p>
+                  </div>
+                );
               }}
             />
           </RadialBarChart>

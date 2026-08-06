@@ -7,6 +7,16 @@ import { IncomeFormDialog } from '@/components/income/income-form-dialog';
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -60,6 +70,7 @@ export function IncomePage() {
   const [type, setType] = useState<string>('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Income | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Income | null>(null);
 
   const filtered = useMemo(() => {
     return incomes.filter((income) => {
@@ -184,9 +195,9 @@ export function IncomePage() {
           </Select>
         </div>
 
-        <div className='overflow-hidden rounded-xl border border-border bg-black/15'>
+        <div className='max-h-[70vh] overflow-auto rounded-xl border border-border bg-black/15'>
           <Table>
-            <TableHeader>
+            <TableHeader className='sticky top-0 z-10 bg-card'>
               <TableRow className='hover:bg-transparent'>
                 <TableHead>Nome</TableHead>
                 <TableHead>Tipo</TableHead>
@@ -302,9 +313,7 @@ export function IncomePage() {
                               variant='ghost'
                               size='icon-sm'
                               disabled={removeEntry.isPending}
-                              onClick={() =>
-                                void handleDelete(income.id, income.name)
-                              }
+                              onClick={() => setConfirmDelete(income)}
                             >
                               <Trash2 className='size-4' />
                             </Button>
@@ -321,7 +330,10 @@ export function IncomePage() {
 
         <p className='mt-3 text-sm text-muted-foreground'>
           {filtered.length} entrada{filtered.length === 1 ? '' : 's'} •{' '}
-          {formatCurrency(total)} já no saldo do mês
+          {formatCurrency(filteredTotal)} filtrado
+          {filteredTotal !== total
+            ? ` · ${formatCurrency(total)} no total`
+            : ' / mês'}
         </p>
       </SectionPanel>
 
@@ -330,6 +342,36 @@ export function IncomePage() {
         onOpenChange={setDialogOpen}
         income={editing}
       />
+
+      <AlertDialog
+        open={confirmDelete != null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir entrada?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A entrada &quot;{confirmDelete?.name}&quot; será removida
+              permanentemente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              variant='destructive'
+              onClick={() => {
+                if (!confirmDelete) return;
+                void handleDelete(confirmDelete.id, confirmDelete.name);
+                setConfirmDelete(null);
+              }}
+            >
+              Excluir
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

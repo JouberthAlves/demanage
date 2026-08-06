@@ -1,3 +1,4 @@
+import { CalendarClock } from 'lucide-react';
 import {
   Area,
   AreaChart,
@@ -20,25 +21,31 @@ export function IncomeExpenseAreaChart() {
   const currentIncome = useFinanceStore(selectMonthlyIncome);
   const currentExpense = useFinanceStore(selectMonthlyExpenses);
 
-  const currentMonth = new Date().toISOString().slice(0, 7);
+  if (history.length === 0) {
+    return (
+      <div className='flex h-72 flex-col items-center justify-center gap-3 px-6 text-center'>
+        <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-amber/10'>
+          <CalendarClock className='size-6 text-neon-amber' />
+        </div>
+        <div className='space-y-1'>
+          <p className='font-medium'>Histórico mensal em breve</p>
+          <p className='text-sm text-muted-foreground'>
+            Este mês no saldo: {formatCurrency(currentIncome)} entradas ·{' '}
+            {formatCurrency(currentExpense)} saídas.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
-  const data =
-    history.length === 0
-      ? [
-          {
-            label: formatMonthLabel(currentMonth),
-            income: currentIncome,
-            expense: currentExpense,
-          },
-        ]
-      : history.map((item, index) => {
-          const isLast = index === history.length - 1;
-          return {
-            label: formatMonthLabel(item.month),
-            income: isLast ? currentIncome : item.income,
-            expense: isLast ? currentExpense : item.expense,
-          };
-        });
+  const data = history.map((item, index) => {
+    const isLast = index === history.length - 1;
+    return {
+      label: formatMonthLabel(item.month),
+      income: isLast ? currentIncome : item.income,
+      expense: isLast ? currentExpense : item.expense,
+    };
+  });
 
   return (
     <div className='h-72 w-full'>
