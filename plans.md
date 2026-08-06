@@ -68,5 +68,44 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~Pente fino pré-deploy~~ — Docker/entrypoint/`PORT`; billing day-key SP; cookie TTL = JWT; rate limit auth; `closingDay` NOT NULL; confirm delete entradas; polish auth/dashboard/tabelas.
 
+- [x] ~~**Cofrinho**~~ — Aba de metas de poupança com depósito/saque, impacto no saldo, histórico e dashboard.
+
+  ### Regras de negócio
+  - Vários cofres por usuário.
+  - Campos: `name`, `goalAmount` (meta final), `targetDate`, `monthlyGoal` (calculada), `autoDebit`, `isEmergency`, `archivedAt?`.
+  - **Meta mensal** = `goalAmount / meses` até `targetDate` (meses de calendário; mínimo 1). Recalcula ao mudar meta/data.
+  - **Guardar** (só na aba Cofrinho): cria `PiggyTransaction` deposit + `Expense` `unica` categoria `cofrinho` → saldo do mês ↓.
+  - **Sacar**: withdraw; valor volta ao saldo no dia/mês do saque como **Entry** `unica` tipo `outro` nome “Resgate · {cofre}” (visível). Se `isEmergency`, aviso extra no modal.
+  - **Auto-débito** (opt-in): no **dia 1** de cada mês, se ativo e cofre não arquivado/não concluído, debita `monthlyGoal` (ou o que falta pra meta) via mesmo fluxo de guardar. Idempotente por mês (`autoDebitMonth` ou unique deposit tag).
+  - **Meta atingida** (depósito que faz balance ≥ goal): confetes + parabéns + libera **Arquivar** (`archivedAt`). Arquivar some da lista ativa (não hard-delete).
+  - **Excluir** com saldo > 0: modal de confirmação (não bloqueia). Cascade apaga txs; despesas/entradas ligadas ficam ou são removidas junto — **default: soft orphan ok, apaga só txs + cofre**; despesa “Cofrinho” permanece no histórico financeiro.
+
+  ### Schema
+  - Enum `ExpenseCategory` += `cofrinho`
+  - `PiggyBank` + `PiggyTransaction` (`deposit` | `withdraw`, `amount`, `date`, `expenseId?`, `entryId?`, `note?`)
+  - Saldo do cofre = soma deposits − withdraws (derivado)
+
+  ### API
+  - `GET/POST /piggy-banks`, `PATCH/DELETE /piggy-banks/:id`
+  - `POST /piggy-banks/:id/deposit`, `POST /piggy-banks/:id/withdraw`
+  - `POST /piggy-banks/:id/archive`
+  - `GET /piggy-banks/:id/transactions`
+  - Hook de auto-débito: junto do bootstrap do app (como `process-billing`) ou endpoint dedicado chamado no load
+
+  ### Frontend
+  - Rota `/cofrinho`, sidebar (ícone PiggyBank), entre Despesas e Entradas
+  - Página: lista de cofres, CRUD, guardar/sacar, histórico, toggle auto-débito / emergência
+  - Dashboard hero: card **Total no cofre** entre “Saldo até hoje” e “Saídas/entradas”
+  - Labels/cores: categoria Cofrinho (ex. `#A78BFA` ou verde poupança)
+  - Confetti na conclusão (lib leve ou CSS/canvas simples)
+
+  ### Ordem de implementação
+  1. Prisma migrate (enum + models)
+  2. Lib meta mensal + saldo derivado
+  3. API CRUD + deposit/withdraw/archive (+ auto-debit no load)
+  4. FE página Cofrinho + hooks
+  5. Dashboard KPI + categoria nas despesas
+  6. Confetti / arquivar / modais
+
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 

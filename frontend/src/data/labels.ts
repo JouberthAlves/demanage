@@ -13,6 +13,7 @@ export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   parcela: 'Parcela',
   divida: 'Dívida',
   outro: 'Outro',
+  cofrinho: 'Cofrinho',
 };
 
 export const EXPENSE_CATEGORY_COLORS: Record<ExpenseCategory, string> = {
@@ -20,11 +21,12 @@ export const EXPENSE_CATEGORY_COLORS: Record<ExpenseCategory, string> = {
   parcela: '#FFB800',
   divida: '#F43F5E',
   outro: '#A3A3A3',
+  cofrinho: '#A78BFA',
 };
 
-/** Categorias pré-definidas no select (sem "Outro", que abre o modal). */
+/** Categorias pré-definidas no select (sem "Outro"/cofrinho). */
 export const BUILTIN_EXPENSE_CATEGORY_LABELS: Record<
-  Exclude<ExpenseCategory, 'outro'>,
+  Exclude<ExpenseCategory, 'outro' | 'cofrinho'>,
   string
 > = {
   assinatura: 'Assinatura',

@@ -1,4 +1,10 @@
-import { LayoutDashboard, Receipt, TrendingUp, UserRound } from 'lucide-react';
+import {
+  LayoutDashboard,
+  PiggyBank,
+  Receipt,
+  TrendingUp,
+  UserRound,
+} from 'lucide-react';
 import { NavLink } from 'react-router';
 import logo from '../../../public/favicon.svg';
 
@@ -13,6 +19,7 @@ const navItems = [
   { to: '/perfil', label: 'Perfil', icon: UserRound },
   { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
   { to: '/despesas', label: 'Despesas', icon: Receipt },
+  { to: '/cofrinho', label: 'Cofrinho', icon: PiggyBank },
   { to: '/entradas', label: 'Entradas', icon: TrendingUp },
 ];
 
