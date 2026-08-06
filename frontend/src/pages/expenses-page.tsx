@@ -29,6 +29,7 @@ import {
 import {
   BUILTIN_EXPENSE_CATEGORY_LABELS,
   EXPENSE_FREQUENCY_LABELS,
+  MONTH_LABELS,
   expenseTypeLabel,
   tagBadgeStyle,
 } from '@/data/labels';
@@ -296,7 +297,11 @@ export function ExpensesPage() {
                                 .join('/')
                             : 'Hoje'
                           : expense.dueDay
-                            ? `Dia ${String(expense.dueDay).padStart(2, '0')}`
+                            ? `Dia ${String(expense.dueDay).padStart(2, '0')}${
+                                expense.startsAt
+                                  ? ` · ${MONTH_LABELS[Number(expense.startsAt.slice(5, 7))] ?? ''}`
+                                  : ''
+                              }`
                             : '—'}
                       </TableCell>
                       <TableCell className='text-muted-foreground'>

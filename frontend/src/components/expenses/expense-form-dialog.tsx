@@ -27,9 +27,14 @@ import { Textarea } from '@/components/ui/textarea';
 import {
   BUILTIN_EXPENSE_CATEGORY_LABELS,
   EXPENSE_FREQUENCY_LABELS,
+  MONTH_OPTIONS,
 } from '@/data/labels';
 import { useCustomTags } from '@/hooks/use-custom-tags';
 import { useCreateExpense, useUpdateExpense } from '@/hooks/use-expenses';
+import {
+  buildScheduleStartsAt,
+  formatStartsAtPreview,
+} from '@/lib/expense-schedule';
 import {
   formatBrlInputValue,
   maskClosingDayInput,
@@ -56,11 +61,16 @@ type FormState = {
   frequency: ExpenseFrequency;
   cardId: string;
   dueDay: string;
+  dueMonth: string;
   endsAt: string;
   notes: string;
 };
 
 const NEW_TYPE_VALUE = '__new_type__';
+
+function currentMonthValue() {
+  return String(new Date().getMonth() + 1);
+}
 
 const emptyForm: FormState = {
   name: '',
@@ -69,6 +79,7 @@ const emptyForm: FormState = {
   frequency: 'mensal',
   cardId: 'none',
   dueDay: '05',
+  dueMonth: currentMonthValue(),
   endsAt: '',
   notes: '',
 };
@@ -98,6 +109,10 @@ export function ExpenseFormDialog({
     if (!open) return;
 
     if (expense) {
+      const startsMonth = expense.startsAt
+        ? String(Number(expense.startsAt.slice(5, 7)))
+        : currentMonthValue();
+
       setForm({
         name: expense.name,
         amount: formatBrlInputValue(expense.amount),
@@ -107,13 +122,14 @@ export function ExpenseFormDialog({
         dueDay: expense.dueDay
           ? String(expense.dueDay).padStart(2, '0')
           : '05',
+        dueMonth: startsMonth,
         endsAt: expense.endsAt ?? '',
         notes: expense.notes ?? '',
       });
       return;
     }
 
-    setForm(emptyForm);
+    setForm({ ...emptyForm, dueMonth: currentMonthValue() });
   }, [expense, open]);
 
   async function handleSubmit(event: React.FormEvent) {
@@ -132,11 +148,22 @@ export function ExpenseFormDialog({
       : (form.categoryKey as ExpenseCategory);
 
     let dueDay: number | null = null;
+    let startsAt: string | null = null;
     if (isRecurring) {
       const normalized = normalizeClosingDayInput(form.dueDay);
       dueDay = normalized ? Number(normalized) : NaN;
+      const dueMonth = Number(form.dueMonth);
       if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
         toast.error('Informe o dia em que será descontado (01-31)');
+        return;
+      }
+      if (!Number.isInteger(dueMonth) || dueMonth < 1 || dueMonth > 12) {
+        toast.error('Informe o mês em que será descontado');
+        return;
+      }
+      startsAt = buildScheduleStartsAt(dueDay, dueMonth);
+      if (form.endsAt && form.endsAt < startsAt) {
+        toast.error('Data de término deve ser após o primeiro desconto');
         return;
       }
     }
@@ -148,6 +175,7 @@ export function ExpenseFormDialog({
       frequency: form.frequency,
       cardId: form.cardId === 'none' ? null : form.cardId,
       dueDay,
+      startsAt,
       endsAt: isRecurring ? form.endsAt || null : null,
       notes: form.notes.trim() || null,
       customTagId,
@@ -268,6 +296,10 @@ export function ExpenseFormDialog({
                       ...current,
                       frequency: value as ExpenseFrequency,
                       dueDay: value === 'unica' ? '' : current.dueDay || '05',
+                      dueMonth:
+                        value === 'unica'
+                          ? current.dueMonth
+                          : current.dueMonth || currentMonthValue(),
                       endsAt: value === 'unica' ? '' : current.endsAt,
                     }));
                   }}
@@ -289,32 +321,90 @@ export function ExpenseFormDialog({
             </div>
 
             {isRecurring ? (
-              <div className='grid grid-cols-2 gap-3'>
+              <>
                 <div className='flex flex-col gap-2'>
-                  <Label htmlFor='expense-due'>Quando será descontado</Label>
-                  <Input
-                    id='expense-due'
-                    inputMode='numeric'
-                    maxLength={2}
-                    value={form.dueDay}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        dueDay: maskClosingDayInput(event.target.value),
-                      }))
+                  <Label>Quando será descontado</Label>
+                  <div className='grid grid-cols-2 gap-3'>
+                    <div className='flex flex-col gap-1.5'>
+                      <span className='text-xs text-muted-foreground'>Dia</span>
+                      <Input
+                        id='expense-due'
+                        inputMode='numeric'
+                        maxLength={2}
+                        value={form.dueDay}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            dueDay: maskClosingDayInput(event.target.value),
+                          }))
+                        }
+                        onBlur={() =>
+                          setForm((current) => ({
+                            ...current,
+                            dueDay: normalizeClosingDayInput(current.dueDay),
+                          }))
+                        }
+                        placeholder='05'
+                        className='rounded-lg'
+                      />
+                    </div>
+                    <div className='flex flex-col gap-1.5'>
+                      <span className='text-xs text-muted-foreground'>Mês</span>
+                      <Select
+                        value={form.dueMonth}
+                        onValueChange={(value) => {
+                          if (value) {
+                            setForm((current) => ({
+                              ...current,
+                              dueMonth: value,
+                            }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger className='rounded-lg'>
+                          <SelectValue placeholder='Mês' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {MONTH_OPTIONS.map((month) => (
+                            <SelectItem
+                              key={month.value}
+                              value={String(month.value)}
+                            >
+                              {month.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {(() => {
+                    const day = Number(
+                      normalizeClosingDayInput(form.dueDay) || form.dueDay,
+                    );
+                    const month = Number(form.dueMonth);
+                    if (
+                      !Number.isInteger(day) ||
+                      day < 1 ||
+                      day > 31 ||
+                      !Number.isInteger(month)
+                    ) {
+                      return (
+                        <p className='text-xs text-muted-foreground'>
+                          Escolha o dia e o mês do primeiro desconto.
+                        </p>
+                      );
                     }
-                    onBlur={() =>
-                      setForm((current) => ({
-                        ...current,
-                        dueDay: normalizeClosingDayInput(current.dueDay),
-                      }))
-                    }
-                    placeholder='05'
-                    className='rounded-lg'
-                  />
-                  <p className='text-xs text-muted-foreground'>
-                    Dia do mês em que entra no saldo.
-                  </p>
+                    const preview = formatStartsAtPreview(
+                      buildScheduleStartsAt(day, month),
+                    );
+                    return (
+                      <p className='text-xs text-muted-foreground'>
+                        Primeiro desconto em{' '}
+                        <span className='text-foreground'>{preview}</span>,
+                        depois repete todo mês.
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div className='flex flex-col gap-2'>
                   <Label htmlFor='expense-ends-at'>Data de término</Label>
@@ -334,7 +424,7 @@ export function ExpenseFormDialog({
                     Opcional. Vazio = sem fim.
                   </p>
                 </div>
-              </div>
+              </>
             ) : null}
 
             {isUnique ? (

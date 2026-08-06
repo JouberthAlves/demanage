@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
-import { parseEndsAt, parseReceiveDay } from '@/lib/entry-schedule';
+import {
+  parseEndsAt,
+  parseReceiveDay,
+  parseStartsAt,
+} from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -32,8 +36,17 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const { name, amount, type, frequency, date, customTagId, receiveDay, endsAt } =
-      req.body;
+    const {
+      name,
+      amount,
+      type,
+      frequency,
+      date,
+      customTagId,
+      receiveDay,
+      startsAt,
+      endsAt,
+    } = req.body;
 
     if (type === 'salario') {
       return res.status(400).json({
@@ -72,11 +85,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     let resolvedReceiveDay: number | null | undefined;
+    let resolvedStartsAt: Date | null | undefined;
     let resolvedEndsAt: Date | null | undefined;
 
     try {
       if (nextFrequency === 'unica') {
         resolvedReceiveDay = null;
+        resolvedStartsAt = null;
         resolvedEndsAt = null;
       } else {
         if (receiveDay !== undefined) {
@@ -92,18 +107,52 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           });
         }
 
+        if (startsAt !== undefined) {
+          resolvedStartsAt = parseStartsAt(startsAt);
+          if (resolvedStartsAt == null) {
+            return res.status(400).json({
+              error: 'Informe o mês em que recebe',
+            });
+          }
+        } else if (existing.startsAt == null) {
+          return res.status(400).json({
+            error: 'Informe o mês em que recebe',
+          });
+        }
+
         if (endsAt !== undefined) {
           resolvedEndsAt = parseEndsAt(endsAt);
         }
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'INVALID_RECEIVE_DAY') {
-        return res.status(400).json({ error: 'Dia de recebimento inválido (1-31)' });
+        return res
+          .status(400)
+          .json({ error: 'Dia de recebimento inválido (1-31)' });
+      }
+      if (error instanceof Error && error.message === 'INVALID_STARTS_AT') {
+        return res.status(400).json({ error: 'Mês de recebimento inválido' });
       }
       if (error instanceof Error && error.message === 'INVALID_ENDS_AT') {
         return res.status(400).json({ error: 'Data de término inválida' });
       }
       throw error;
+    }
+
+    const nextStartsAt =
+      resolvedStartsAt !== undefined ? resolvedStartsAt : existing.startsAt;
+    const nextEndsAt =
+      resolvedEndsAt !== undefined ? resolvedEndsAt : existing.endsAt;
+
+    if (
+      nextFrequency !== 'unica' &&
+      nextStartsAt &&
+      nextEndsAt &&
+      nextEndsAt.getTime() < nextStartsAt.getTime()
+    ) {
+      return res.status(400).json({
+        error: 'Data de término deve ser após o primeiro recebimento',
+      });
     }
 
     const entry = await prisma.entry.update({
@@ -120,6 +169,9 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
             : {}),
         ...(resolvedReceiveDay !== undefined
           ? { receiveDay: resolvedReceiveDay }
+          : {}),
+        ...(resolvedStartsAt !== undefined
+          ? { startsAt: resolvedStartsAt }
           : {}),
         ...(resolvedEndsAt !== undefined ? { endsAt: resolvedEndsAt } : {}),
         ...(resolvedCustomTagId !== undefined

@@ -26,9 +26,14 @@ import { Spinner } from '@/components/ui/spinner';
 import {
   BUILTIN_INCOME_TYPE_LABELS,
   INCOME_FREQUENCY_LABELS,
+  MONTH_OPTIONS,
 } from '@/data/labels';
 import { useCreateEntry, useUpdateEntry } from '@/hooks/use-entries';
 import { useCustomTags } from '@/hooks/use-custom-tags';
+import {
+  buildScheduleStartsAt,
+  formatStartsAtPreview,
+} from '@/lib/expense-schedule';
 import {
   formatBrlInputValue,
   maskClosingDayInput,
@@ -49,11 +54,24 @@ type FormState = {
   typeKey: string;
   frequency: IncomeFrequency;
   receiveDay: string;
+  receiveMonth: string;
   endsAt: string;
   date: string;
 };
 
 const NEW_TYPE_VALUE = '__new_type__';
+
+function currentMonthValue() {
+  return String(new Date().getMonth() + 1);
+}
+
+function todayDateValue() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
 
 const emptyForm: FormState = {
   name: '',
@@ -61,8 +79,9 @@ const emptyForm: FormState = {
   typeKey: 'freelance',
   frequency: 'mensal',
   receiveDay: '05',
+  receiveMonth: currentMonthValue(),
   endsAt: '',
-  date: '',
+  date: todayDateValue(),
 };
 
 function typeKeyFromIncome(income: Income) {
@@ -94,6 +113,10 @@ export function IncomeFormDialog({
         return;
       }
 
+      const startsMonth = income.startsAt
+        ? String(Number(income.startsAt.slice(5, 7)))
+        : currentMonthValue();
+
       setForm({
         name: income.name,
         amount: formatBrlInputValue(income.amount),
@@ -102,13 +125,18 @@ export function IncomeFormDialog({
         receiveDay: income.receiveDay
           ? String(income.receiveDay).padStart(2, '0')
           : '05',
+        receiveMonth: startsMonth,
         endsAt: income.endsAt ?? '',
-        date: income.date ?? '',
+        date: income.date ?? todayDateValue(),
       });
       return;
     }
 
-    setForm(emptyForm);
+    setForm({
+      ...emptyForm,
+      receiveMonth: currentMonthValue(),
+      date: todayDateValue(),
+    });
   }, [income, open, onOpenChange]);
 
   async function handleSubmit(event: React.FormEvent) {
@@ -127,13 +155,33 @@ export function IncomeFormDialog({
       : (form.typeKey as IncomeType);
 
     let receiveDay: number | null = null;
+    let startsAt: string | null = null;
     if (isRecurring) {
       const normalized = normalizeClosingDayInput(form.receiveDay);
       receiveDay = normalized ? Number(normalized) : NaN;
+      const receiveMonth = Number(form.receiveMonth);
       if (!Number.isInteger(receiveDay) || receiveDay < 1 || receiveDay > 31) {
         toast.error('Informe o dia em que recebe (01-31)');
         return;
       }
+      if (
+        !Number.isInteger(receiveMonth) ||
+        receiveMonth < 1 ||
+        receiveMonth > 12
+      ) {
+        toast.error('Informe o mês em que recebe');
+        return;
+      }
+      startsAt = buildScheduleStartsAt(receiveDay, receiveMonth);
+      if (form.endsAt && form.endsAt < startsAt) {
+        toast.error('Data de término deve ser após o primeiro recebimento');
+        return;
+      }
+    }
+
+    if (form.frequency === 'unica' && !form.date) {
+      toast.error('Informe a data da entrada');
+      return;
     }
 
     const payload = {
@@ -142,6 +190,7 @@ export function IncomeFormDialog({
       type,
       frequency: form.frequency,
       receiveDay,
+      startsAt,
       endsAt: isRecurring ? form.endsAt || null : null,
       date: form.frequency === 'unica' ? form.date || null : null,
       customTagId,
@@ -257,12 +306,22 @@ export function IncomeFormDialog({
                 <Select
                   value={form.frequency}
                   onValueChange={(value) => {
-                    if (value) {
-                      setForm((current) => ({
-                        ...current,
-                        frequency: value as IncomeFrequency,
-                      }));
-                    }
+                    if (!value) return;
+                    setForm((current) => ({
+                      ...current,
+                      frequency: value as IncomeFrequency,
+                      receiveDay:
+                        value === 'unica' ? '' : current.receiveDay || '05',
+                      receiveMonth:
+                        value === 'unica'
+                          ? current.receiveMonth
+                          : current.receiveMonth || currentMonthValue(),
+                      endsAt: value === 'unica' ? '' : current.endsAt,
+                      date:
+                        value === 'unica'
+                          ? current.date || todayDateValue()
+                          : current.date,
+                    }));
                   }}
                 >
                   <SelectTrigger className='rounded-lg'>
@@ -282,34 +341,93 @@ export function IncomeFormDialog({
             </div>
 
             {isRecurring ? (
-              <div className='grid grid-cols-2 gap-3'>
+              <>
                 <div className='flex flex-col gap-2'>
-                  <Label htmlFor='income-receive-day'>Quando recebe</Label>
-                  <Input
-                    id='income-receive-day'
-                    inputMode='numeric'
-                    maxLength={2}
-                    value={form.receiveDay}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        receiveDay: maskClosingDayInput(event.target.value),
-                      }))
+                  <Label>Quando recebe</Label>
+                  <div className='grid grid-cols-2 gap-3'>
+                    <div className='flex flex-col gap-1.5'>
+                      <span className='text-xs text-muted-foreground'>Dia</span>
+                      <Input
+                        id='income-receive-day'
+                        inputMode='numeric'
+                        maxLength={2}
+                        value={form.receiveDay}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            receiveDay: maskClosingDayInput(event.target.value),
+                          }))
+                        }
+                        onBlur={() =>
+                          setForm((current) => ({
+                            ...current,
+                            receiveDay: normalizeClosingDayInput(
+                              current.receiveDay,
+                            ),
+                          }))
+                        }
+                        placeholder='05'
+                        className='rounded-lg'
+                      />
+                    </div>
+                    <div className='flex flex-col gap-1.5'>
+                      <span className='text-xs text-muted-foreground'>Mês</span>
+                      <Select
+                        value={form.receiveMonth}
+                        onValueChange={(value) => {
+                          if (value) {
+                            setForm((current) => ({
+                              ...current,
+                              receiveMonth: value,
+                            }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger className='rounded-lg'>
+                          <SelectValue placeholder='Mês' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {MONTH_OPTIONS.map((month) => (
+                            <SelectItem
+                              key={month.value}
+                              value={String(month.value)}
+                            >
+                              {month.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {(() => {
+                    const day = Number(
+                      normalizeClosingDayInput(form.receiveDay) ||
+                        form.receiveDay,
+                    );
+                    const month = Number(form.receiveMonth);
+                    if (
+                      !Number.isInteger(day) ||
+                      day < 1 ||
+                      day > 31 ||
+                      !Number.isInteger(month)
+                    ) {
+                      return (
+                        <p className='text-xs text-muted-foreground'>
+                          Escolha o dia e o mês do primeiro recebimento.
+                        </p>
+                      );
                     }
-                    onBlur={() =>
-                      setForm((current) => ({
-                        ...current,
-                        receiveDay: normalizeClosingDayInput(
-                          current.receiveDay,
-                        ),
-                      }))
-                    }
-                    placeholder='05'
-                    className='rounded-lg'
-                  />
-                  <p className='text-xs text-muted-foreground'>
-                    Dia do mês em que entra no saldo.
-                  </p>
+                    const preview = formatStartsAtPreview(
+                      buildScheduleStartsAt(day, month),
+                    );
+                    return (
+                      <p className='text-xs text-muted-foreground'>
+                        Primeiro recebimento em{' '}
+                        <span className='text-foreground'>{preview}</span>,
+                        depois repete todo mês.
+                      </p>
+                    );
+                  })()}
                 </div>
                 <div className='flex flex-col gap-2'>
                   <Label htmlFor='income-ends-at'>Data de término</Label>
@@ -329,7 +447,7 @@ export function IncomeFormDialog({
                     Opcional. Vazio = sem fim.
                   </p>
                 </div>
-              </div>
+              </>
             ) : null}
 
             {form.frequency === 'unica' ? (

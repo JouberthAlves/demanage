@@ -8,6 +8,7 @@ export type ApiEntry = {
   type: IncomeType;
   frequency: IncomeFrequency;
   receiveDay?: number | null;
+  startsAt?: string | null;
   endsAt?: string | null;
   date: string | null;
   customTagId?: string | null;
@@ -24,6 +25,7 @@ export type EntryPayload = {
   type: IncomeType;
   frequency: IncomeFrequency;
   receiveDay?: number | null;
+  startsAt?: string | null;
   endsAt?: string | null;
   date?: string | null;
   customTagId?: string | null;
@@ -42,6 +44,7 @@ export function mapEntryToIncome(entry: ApiEntry): Income {
     type: entry.type,
     frequency: entry.frequency,
     receiveDay: entry.receiveDay ?? undefined,
+    startsAt: mapDateOnly(entry.startsAt),
     endsAt: mapDateOnly(entry.endsAt),
     date: mapDateOnly(entry.date),
     customTagId: entry.customTagId ?? undefined,

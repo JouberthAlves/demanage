@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
-import { parseEndsAt, parseReceiveDay } from '@/lib/entry-schedule';
+import {
+  parseEndsAt,
+  parseReceiveDay,
+  parseStartsAt,
+} from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -17,8 +21,17 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    const { name, amount, type, frequency, date, customTagId, receiveDay, endsAt } =
-      req.body;
+    const {
+      name,
+      amount,
+      type,
+      frequency,
+      date,
+      customTagId,
+      receiveDay,
+      startsAt,
+      endsAt,
+    } = req.body;
 
     if (!name || amount == null || !type || !frequency) {
       return res.status(400).json({
@@ -54,11 +67,13 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     let resolvedReceiveDay: number | null = null;
+    let resolvedStartsAt: Date | null = null;
     let resolvedEndsAt: Date | null = null;
 
     try {
       if (frequency === 'unica') {
         resolvedReceiveDay = null;
+        resolvedStartsAt = null;
         resolvedEndsAt = null;
       } else {
         resolvedReceiveDay = parseReceiveDay(receiveDay);
@@ -67,11 +82,31 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
             error: 'Informe o dia em que recebe (1-31)',
           });
         }
+        resolvedStartsAt = parseStartsAt(startsAt);
+        if (resolvedStartsAt == null) {
+          return res.status(400).json({
+            error: 'Informe o mês em que recebe',
+          });
+        }
         resolvedEndsAt = parseEndsAt(endsAt);
+        if (
+          resolvedEndsAt &&
+          resolvedStartsAt &&
+          resolvedEndsAt.getTime() < resolvedStartsAt.getTime()
+        ) {
+          return res.status(400).json({
+            error: 'Data de término deve ser após o primeiro recebimento',
+          });
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'INVALID_RECEIVE_DAY') {
-        return res.status(400).json({ error: 'Dia de recebimento inválido (1-31)' });
+        return res
+          .status(400)
+          .json({ error: 'Dia de recebimento inválido (1-31)' });
+      }
+      if (error instanceof Error && error.message === 'INVALID_STARTS_AT') {
+        return res.status(400).json({ error: 'Mês de recebimento inválido' });
       }
       if (error instanceof Error && error.message === 'INVALID_ENDS_AT') {
         return res.status(400).json({ error: 'Data de término inválida' });
@@ -88,6 +123,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         frequency,
         date: frequency === 'unica' && date ? new Date(date) : null,
         receiveDay: resolvedReceiveDay,
+        startsAt: resolvedStartsAt,
         endsAt: resolvedEndsAt,
         customTagId: resolvedCustomTagId,
       },

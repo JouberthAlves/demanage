@@ -1,4 +1,4 @@
-import { monthlyAmount } from '@/data/labels';
+import { MONTH_LABELS, monthlyAmount } from '@/data/labels';
 import type { RecurringExpense } from '@/types/finance';
 
 export function resolveDebitDate(
@@ -21,13 +21,57 @@ function parseLocalDate(value: string) {
   return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
 }
 
-/** Despesa recorrente já entrou no saldo do mês corrente. */
+function isSameMonth(date: Date, now: Date) {
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth()
+  );
+}
+
+/** Monta YYYY-MM-DD do primeiro desconto/recebimento a partir de dia + mês (1-12). */
+export function buildScheduleStartsAt(
+  day: number,
+  month: number,
+  now = new Date(),
+) {
+  let year = now.getFullYear();
+  if (month < now.getMonth() + 1) {
+    year += 1;
+  }
+
+  const lastDay = new Date(year, month, 0).getDate();
+  const safeDay = Math.min(Math.max(day, 1), lastDay);
+  const monthStr = String(month).padStart(2, '0');
+  const dayStr = String(safeDay).padStart(2, '0');
+  return `${year}-${monthStr}-${dayStr}`;
+}
+
+/** @deprecated use buildScheduleStartsAt */
+export const buildExpenseStartsAt = buildScheduleStartsAt;
+
+export function formatStartsAtPreview(startsAt: string) {
+  const date = parseLocalDate(startsAt);
+  const day = String(date.getDate()).padStart(2, '0');
+  const month = MONTH_LABELS[date.getMonth() + 1] ?? '';
+  const year = date.getFullYear();
+  return `${day} de ${month} de ${year}`;
+}
+
+/** Despesa já entrou no saldo do mês corrente. */
 export function isExpenseDebitedThisMonth(
   expense: RecurringExpense,
   now = new Date(),
 ) {
   if (expense.isInvoice) return true;
-  if (expense.frequency === 'unica') return false;
+
+  if (expense.frequency === 'unica') {
+    if (!expense.registeredAt) return false;
+    const registered = parseLocalDate(expense.registeredAt);
+    return (
+      isSameMonth(registered, now) &&
+      startOfLocalDay(now) >= startOfLocalDay(registered)
+    );
+  }
 
   const dueDay = expense.dueDay ?? 1;
   const debitDate = resolveDebitDate(
@@ -37,6 +81,11 @@ export function isExpenseDebitedThisMonth(
   );
 
   if (startOfLocalDay(now) < debitDate) return false;
+
+  if (expense.startsAt) {
+    const startsAt = parseLocalDate(expense.startsAt);
+    if (debitDate < startOfLocalDay(startsAt)) return false;
+  }
 
   if (expense.endsAt) {
     const endsAt = parseLocalDate(expense.endsAt);
@@ -52,5 +101,6 @@ export function expenseContributionThisMonth(
 ) {
   if (expense.cardId && !expense.isInvoice) return 0;
   if (!isExpenseDebitedThisMonth(expense, now)) return 0;
+  if (expense.frequency === 'unica') return expense.amount;
   return monthlyAmount(expense.amount, expense.frequency);
 }

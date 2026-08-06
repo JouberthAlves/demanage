@@ -55,5 +55,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 - [x] ~~Quando recebe + data de término~~ — Entradas mensais/semanais com dia de recebimento e término; salário só com dia; saldo do mês conta após o dia.
 - [x] ~~Despesa frequência Única~~ — ExpenseFrequency inclui `unica` (não entra no total mensal recorrente).
 - [x] ~~Despesa: quando desconta + término~~ — Mensal/semanal com dia de desconto e data de término; saldo conta após o dia (como entradas).
+- [x] ~~Despesa: mês do desconto~~ — “Quando será descontado” com dia + mês (startsAt); primeiro desconto naquele mês.
+- [x] ~~Revisão agenda entradas/despesas~~ — Únicas contam no mês; entradas com dia+mês; validação término ≥ início; preview da 1ª data.
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 

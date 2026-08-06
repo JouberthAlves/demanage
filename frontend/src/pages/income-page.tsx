@@ -30,6 +30,7 @@ import {
   BUILTIN_INCOME_TYPE_LABELS,
   INCOME_FREQUENCY_LABELS,
   INCOME_TYPE_LABELS,
+  MONTH_LABELS,
   incomeTypeLabel,
   tagBadgeStyle,
 } from '@/data/labels';
@@ -266,7 +267,11 @@ export function IncomePage() {
                             ? income.date.split('-').reverse().join('/')
                             : '—'
                           : income.receiveDay
-                            ? `Dia ${income.receiveDay}`
+                            ? `Dia ${String(income.receiveDay).padStart(2, '0')}${
+                                income.startsAt
+                                  ? ` · ${MONTH_LABELS[Number(income.startsAt.slice(5, 7))] ?? ''}`
+                                  : ''
+                              }`
                             : '—'}
                       </TableCell>
                       <TableCell className='text-muted-foreground'>
