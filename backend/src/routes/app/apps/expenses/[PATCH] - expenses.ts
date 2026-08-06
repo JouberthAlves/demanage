@@ -59,6 +59,19 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Categoria inválida' });
     }
 
+    if (category === 'cofrinho' || existing.category === 'cofrinho') {
+      if (category !== undefined && category !== 'cofrinho') {
+        return res.status(400).json({
+          error: 'Despesas de cofrinho não podem mudar de categoria',
+        });
+      }
+      if (category === 'cofrinho' && existing.category !== 'cofrinho') {
+        return res.status(400).json({
+          error: 'Depósitos no cofrinho são feitos pela aba Cofrinho',
+        });
+      }
+    }
+
     if (frequency !== undefined && !isValidFrequency(frequency)) {
       return res.status(400).json({ error: 'Frequência inválida' });
     }

@@ -21,7 +21,42 @@ export type CustomTag = {
   color: string;
 };
 
-export type ExpenseCategory = 'assinatura' | 'parcela' | 'divida' | 'outro';
+export type ExpenseCategory =
+  | 'assinatura'
+  | 'parcela'
+  | 'divida'
+  | 'outro'
+  | 'cofrinho';
+
+export type PiggyBank = {
+  id: string;
+  name: string;
+  goalAmount: number;
+  targetDate: string;
+  monthlyGoal: number;
+  autoDebit: boolean;
+  isEmergency: boolean;
+  archivedAt: string | null;
+  completedAt: string | null;
+  balance: number;
+  progress: number;
+  remaining: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PiggyTransaction = {
+  id: string;
+  piggyBankId: string;
+  type: 'deposit' | 'withdraw';
+  source: 'manual' | 'auto_debit';
+  amount: number;
+  date: string;
+  expenseId: string | null;
+  entryId: string | null;
+  note: string | null;
+  createdAt: string;
+};
 export type ExpenseFrequency = 'mensal' | 'semanal' | 'unica';
 
 export type RecurringExpense = {

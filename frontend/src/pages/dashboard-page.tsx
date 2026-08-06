@@ -1,4 +1,5 @@
 import { ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
+import { useMemo } from 'react';
 
 import { CardCommitmentChart } from '@/components/dashboard/card-commitment-chart';
 import { CategoryDonutChart } from '@/components/dashboard/category-donut-chart';
@@ -9,6 +10,7 @@ import { TopExpensesBarChart } from '@/components/dashboard/top-expenses-bar-cha
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
+import { usePiggyBanks } from '@/hooks/use-piggy-banks';
 import { formatCurrency, formatPercent, getFirstName } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
 import {
@@ -26,8 +28,13 @@ export function DashboardPage() {
   const expenses = useFinanceStore(selectMonthlyExpenses);
   const averageExpense = useFinanceStore(selectAverageMonthlyExpense);
   const recurringShare = useFinanceStore(selectRecurringShare);
+  const { data: piggyBanks = [] } = usePiggyBanks();
   const balance = income - expenses;
   const hasHistory = history.length > 0;
+  const piggyTotal = useMemo(
+    () => piggyBanks.reduce((sum, bank) => sum + bank.balance, 0),
+    [piggyBanks],
+  );
 
   return (
     <div className='space-y-6'>
@@ -46,7 +53,7 @@ export function DashboardPage() {
             : 'As saídas já no saldo estão acima das entradas. Vale revisar cartões e recorrências.'
         }
       >
-        <div className='grid gap-3 sm:grid-cols-2'>
+        <div className='grid gap-3 sm:grid-cols-3'>
           <div className='rounded-xl border border-border bg-black/25 p-4'>
             <p className='text-xs text-muted-foreground'>Saldo até hoje</p>
             <p
@@ -57,6 +64,12 @@ export function DashboardPage() {
               }
             >
               {formatCurrency(balance)}
+            </p>
+          </div>
+          <div className='rounded-xl border border-border bg-black/25 p-4'>
+            <p className='text-xs text-muted-foreground'>Total no cofre</p>
+            <p className='mt-2 text-2xl font-semibold text-violet-300'>
+              {formatCurrency(piggyTotal)}
             </p>
           </div>
           <div className='rounded-xl border border-border bg-black/25 p-4'>

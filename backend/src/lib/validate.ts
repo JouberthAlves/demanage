@@ -3,6 +3,7 @@ const EXPENSE_CATEGORIES = new Set([
   'parcela',
   'divida',
   'outro',
+  'cofrinho',
 ]);
 
 const ENTRY_TYPES = new Set(['salario', 'freelance', 'outro']);

@@ -53,6 +53,12 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Categoria inválida' });
     }
 
+    if (category === 'cofrinho') {
+      return res.status(400).json({
+        error: 'Depósitos no cofrinho são feitos pela aba Cofrinho',
+      });
+    }
+
     const resolvedFrequency = frequency ?? 'mensal';
     if (!isValidFrequency(resolvedFrequency)) {
       return res.status(400).json({ error: 'Frequência inválida' });

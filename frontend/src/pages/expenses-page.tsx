@@ -59,6 +59,7 @@ const categoryColors: Record<ExpenseCategory, string> = {
   parcela: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
   divida: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
   outro: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
+  cofrinho: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
 };
 
 export function ExpensesPage() {
@@ -190,6 +191,7 @@ export function ExpensesPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value='all'>Todas</SelectItem>
+              <SelectItem value='cofrinho'>Cofrinho</SelectItem>
               {Object.entries(BUILTIN_EXPENSE_CATEGORY_LABELS).map(
                 ([value, label]) => (
                   <SelectItem key={value} value={value}>

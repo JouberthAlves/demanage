@@ -5,11 +5,13 @@ import { AppTopbar } from '@/components/layout/app-topbar';
 import { useCards } from '@/hooks/use-cards';
 import { useEntries } from '@/hooks/use-entries';
 import { useExpenses } from '@/hooks/use-expenses';
+import { usePiggyBanks } from '@/hooks/use-piggy-banks';
 
 export function AppLayout() {
   useCards();
   useEntries();
   useExpenses();
+  usePiggyBanks();
 
   return (
     <div className='flex min-h-screen bg-background text-foreground'>
