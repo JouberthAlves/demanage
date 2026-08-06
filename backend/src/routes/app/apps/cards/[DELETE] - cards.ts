@@ -24,12 +24,7 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
 
     await prisma.$transaction(async (tx) => {
       await tx.expense.deleteMany({
-        where: { userId, cardId: id, isInvoice: true },
-      });
-
-      await tx.expense.updateMany({
-        where: { userId, cardId: id, isInvoice: false },
-        data: { cardId: null },
+        where: { userId, cardId: id },
       });
 
       await tx.card.delete({ where: { id } });

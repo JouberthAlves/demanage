@@ -100,6 +100,7 @@ export function ExpenseFormDialog({
   const updateExpense = useUpdateExpense();
   const [form, setForm] = useState<FormState>(emptyForm);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [categorySelectKey, setCategorySelectKey] = useState(0);
   const submitting = createExpense.isPending || updateExpense.isPending;
   const isUnique = form.frequency === 'unica';
   const isRecurring =
@@ -247,10 +248,12 @@ export function ExpenseFormDialog({
               <div className='flex flex-col gap-2'>
                 <Label>Categoria</Label>
                 <Select
+                  key={categorySelectKey}
                   value={form.categoryKey}
                   onValueChange={(value) => {
                     if (!value) return;
                     if (value === NEW_TYPE_VALUE) {
+                      setCategorySelectKey((current) => current + 1);
                       setTagDialogOpen(true);
                       return;
                     }
@@ -400,8 +403,10 @@ export function ExpenseFormDialog({
                     return (
                       <p className='text-xs text-muted-foreground'>
                         Primeiro desconto em{' '}
-                        <span className='text-foreground'>{preview}</span>,
-                        depois repete todo mês.
+                        <span className='text-foreground'>{preview}</span>
+                        {form.frequency === 'semanal'
+                          ? ' · semanal equivale a ~4× no mês.'
+                          : ', depois repete todo mês.'}
                       </p>
                     );
                   })()}

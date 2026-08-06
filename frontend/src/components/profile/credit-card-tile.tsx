@@ -196,9 +196,8 @@ export function CreditCardTile({
           <AlertDialogHeader>
             <AlertDialogTitle>Remover cartão?</AlertDialogTitle>
             <AlertDialogDescription>
-              Ao remover &quot;{card.name}&quot;, todas as faturas vinculadas a
-              este cartão serão excluídas. As demais despesas vinculadas
-              permanecerão, sem cartão.
+              Ao remover &quot;{card.name}&quot;, todas as faturas e cobranças
+              vinculadas a este cartão serão excluídas.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

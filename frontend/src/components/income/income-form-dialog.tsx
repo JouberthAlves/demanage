@@ -99,6 +99,7 @@ export function IncomeFormDialog({
   const updateEntry = useUpdateEntry();
   const [form, setForm] = useState<FormState>(emptyForm);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
+  const [typeSelectKey, setTypeSelectKey] = useState(0);
   const submitting = createEntry.isPending || updateEntry.isPending;
   const isRecurring =
     form.frequency === 'mensal' || form.frequency === 'semanal';
@@ -262,10 +263,12 @@ export function IncomeFormDialog({
               <div className='flex flex-col gap-2'>
                 <Label>Tipo</Label>
                 <Select
+                  key={typeSelectKey}
                   value={form.typeKey}
                   onValueChange={(value) => {
                     if (!value) return;
                     if (value === NEW_TYPE_VALUE) {
+                      setTypeSelectKey((current) => current + 1);
                       setTagDialogOpen(true);
                       return;
                     }
@@ -423,8 +426,10 @@ export function IncomeFormDialog({
                     return (
                       <p className='text-xs text-muted-foreground'>
                         Primeiro recebimento em{' '}
-                        <span className='text-foreground'>{preview}</span>,
-                        depois repete todo mês.
+                        <span className='text-foreground'>{preview}</span>
+                        {form.frequency === 'semanal'
+                          ? ' · semanal equivale a ~4× no mês.'
+                          : ', depois repete todo mês.'}
                       </p>
                     );
                   })()}

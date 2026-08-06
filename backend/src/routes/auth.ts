@@ -54,7 +54,7 @@ authRoutes.post('/auth/register', async (req, res) => {
     });
 
     const token = signAuthToken(user.id);
-    setAuthCookie(res, token);
+    setAuthCookie(res, token, req);
 
     return res.status(201).json({ user: toPublicUser(user, null) });
   } catch (error) {
@@ -91,7 +91,7 @@ authRoutes.post('/auth/login', async (req, res) => {
     }
 
     const token = signAuthToken(user.id);
-    setAuthCookie(res, token);
+    setAuthCookie(res, token, req);
     const salaryReceiveDay = await getSalaryReceiveDay(user.id);
 
     return res.json({ user: toPublicUser(user, salaryReceiveDay) });
@@ -101,8 +101,8 @@ authRoutes.post('/auth/login', async (req, res) => {
   }
 });
 
-authRoutes.post('/auth/logout', (_req, res) => {
-  clearAuthCookie(res);
+authRoutes.post('/auth/logout', (req, res) => {
+  clearAuthCookie(res, req);
   return res.json({ ok: true });
 });
 

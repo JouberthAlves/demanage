@@ -7,9 +7,13 @@ import {
   parseStartsAt,
 } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
+import {
+  isValidEntryType,
+  isValidFrequency,
+  parsePositiveAmount,
+  parseUniqueDate,
+} from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
-
-const VALID_FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 const router = Router();
 
@@ -33,10 +37,20 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       endsAt,
     } = req.body;
 
-    if (!name || amount == null || !type || !frequency) {
+    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    if (!trimmedName || amount == null || !type || !frequency) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, amount, type, frequency',
       });
+    }
+
+    const parsedAmount = parsePositiveAmount(amount);
+    if (parsedAmount == null) {
+      return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+    }
+
+    if (!isValidEntryType(type)) {
+      return res.status(400).json({ error: 'Tipo inválido' });
     }
 
     if (type === 'salario') {
@@ -45,8 +59,18 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    if (!VALID_FREQUENCIES.has(frequency)) {
+    if (!isValidFrequency(frequency)) {
       return res.status(400).json({ error: 'Frequência inválida' });
+    }
+
+    let uniqueDate: Date | null = null;
+    if (frequency === 'unica') {
+      uniqueDate = parseUniqueDate(date);
+      if (!uniqueDate) {
+        return res.status(400).json({
+          error: 'Informe a data da entrada única',
+        });
+      }
     }
 
     let resolvedCustomTagId: string | null = null;
@@ -117,11 +141,11 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const entry = await prisma.entry.create({
       data: {
         userId,
-        name,
-        amount,
+        name: trimmedName,
+        amount: parsedAmount,
         type,
         frequency,
-        date: frequency === 'unica' && date ? new Date(date) : null,
+        date: uniqueDate,
         receiveDay: resolvedReceiveDay,
         startsAt: resolvedStartsAt,
         endsAt: resolvedEndsAt,

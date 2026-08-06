@@ -57,5 +57,16 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 - [x] ~~Despesa: quando desconta + término~~ — Mensal/semanal com dia de desconto e data de término; saldo conta após o dia (como entradas).
 - [x] ~~Despesa: mês do desconto~~ — “Quando será descontado” com dia + mês (startsAt); primeiro desconto naquele mês.
 - [x] ~~Revisão agenda entradas/despesas~~ — Únicas contam no mês; entradas com dia+mês; validação término ≥ início; preview da 1ª data.
+- [x] ~~Passagem pré-deploy~~ — Fatura respeita agenda + fuso SP; env/cookies prod; dashboard/copy honestos; empty states nos gráficos stub; confirmação Pago/Excluir; `closingDay` obrigatório; delete de cartão remove cobranças; validação API amount/enums/unica; polish forms/tabelas.
+
+  Checklist de deploy:
+  1. `prisma migrate deploy` (ou `migrate dev` local) + `generate`
+  2. Backend prod: `DATABASE_URL`, `JWT_SECRET`, `APP_URL` (sem fallback fraco)
+  3. Se FE e API em origens diferentes: cookie `sameSite=none` + `secure` (auto ou `COOKIE_SAME_SITE`)
+  4. Frontend build: `VITE_API_URL` apontando para a API
+  5. Docker/Railway: `PORT` (ou `API_PORT`); entrypoint roda migrate + `node dist/server.js`
+
+- [x] ~~Pente fino pré-deploy~~ — Docker/entrypoint/`PORT`; billing day-key SP; cookie TTL = JWT; rate limit auth; `closingDay` NOT NULL; confirm delete entradas; polish auth/dashboard/tabelas.
+
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 

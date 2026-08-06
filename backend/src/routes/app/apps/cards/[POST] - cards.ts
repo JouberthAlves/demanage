@@ -57,6 +57,12 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       throw error;
     }
 
+    if (parsedClosingDay == null) {
+      return res.status(400).json({
+        error: 'Informe o dia de fechamento do cartão (01-31)',
+      });
+    }
+
     const card = await prisma.card.create({
       data: {
         userId,

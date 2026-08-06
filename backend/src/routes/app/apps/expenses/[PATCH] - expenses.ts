@@ -7,9 +7,12 @@ import {
   parseStartsAt,
 } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
+import {
+  isValidExpenseCategory,
+  isValidFrequency,
+  parsePositiveAmount,
+} from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
-
-const VALID_FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 const router = Router();
 
@@ -43,7 +46,20 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       customTagId,
     } = req.body;
 
-    if (frequency !== undefined && !VALID_FREQUENCIES.has(frequency)) {
+    let parsedAmount: number | undefined;
+    if (amount !== undefined) {
+      const nextAmount = parsePositiveAmount(amount);
+      if (nextAmount == null) {
+        return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+      }
+      parsedAmount = nextAmount;
+    }
+
+    if (category !== undefined && !isValidExpenseCategory(category)) {
+      return res.status(400).json({ error: 'Categoria inválida' });
+    }
+
+    if (frequency !== undefined && !isValidFrequency(frequency)) {
       return res.status(400).json({ error: 'Frequência inválida' });
     }
 
@@ -158,7 +174,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       where: { id },
       data: {
         ...(name !== undefined ? { name } : {}),
-        ...(amount !== undefined ? { amount } : {}),
+        ...(parsedAmount !== undefined ? { amount: parsedAmount } : {}),
         ...(category !== undefined ? { category } : {}),
         ...(frequency !== undefined ? { frequency } : {}),
         ...(cardId !== undefined ? { cardId: cardId || null } : {}),

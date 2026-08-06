@@ -1,3 +1,4 @@
+import { CalendarClock } from 'lucide-react';
 import {
   Bar,
   BarChart,
@@ -22,16 +23,34 @@ export function MonthCompareBarChart() {
   const currentExpense = useFinanceStore(selectMonthlyExpenses);
 
   const previous = history[history.length - 2];
+
+  if (!previous) {
+    return (
+      <div className='flex h-72 flex-col items-center justify-center gap-3 px-6 text-center'>
+        <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-green/10'>
+          <CalendarClock className='size-6 text-neon-green' />
+        </div>
+        <div className='space-y-1'>
+          <p className='font-medium'>Histórico mensal em breve</p>
+          <p className='text-sm text-muted-foreground'>
+            Ainda não há mês anterior para comparar. Este mês:{' '}
+            {formatCurrency(currentIncome)} / {formatCurrency(currentExpense)}.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const data = [
     {
       name: 'Entradas',
       atual: currentIncome,
-      anterior: previous?.income ?? 0,
+      anterior: previous.income,
     },
     {
       name: 'Saídas',
       atual: currentExpense,
-      anterior: previous?.expense ?? 0,
+      anterior: previous.expense,
     },
   ];
 
