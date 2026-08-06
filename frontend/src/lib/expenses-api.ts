@@ -13,6 +13,7 @@ export type ApiExpense = {
   frequency: ExpenseFrequency;
   cardId: string | null;
   dueDay: number | null;
+  startsAt?: string | null;
   endsAt?: string | null;
   notes: string | null;
   isInvoice?: boolean;
@@ -32,6 +33,7 @@ export type ExpensePayload = {
   frequency?: ExpenseFrequency;
   cardId?: string | null;
   dueDay?: number | null;
+  startsAt?: string | null;
   endsAt?: string | null;
   notes?: string | null;
   customTagId?: string | null;
@@ -60,6 +62,7 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     frequency: expense.frequency ?? 'mensal',
     cardId: expense.cardId ?? undefined,
     dueDay: expense.dueDay ?? undefined,
+    startsAt: mapDateOnly(expense.startsAt),
     endsAt: mapDateOnly(expense.endsAt),
     registeredAt: expense.createdAt
       ? toLocalDateOnly(expense.createdAt)

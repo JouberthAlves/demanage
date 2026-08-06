@@ -95,6 +95,8 @@ model Expense {
   frequency   ExpenseFrequency @default(mensal)
   /// Dia do mês em que a despesa entra no saldo (1-31). Null em despesas únicas.
   dueDay      Int?
+  /// Primeira data de desconto (define mês/ano de início da recorrência).
+  startsAt    DateTime?
   /// Data em que a recorrência deixa de valer. Null = sem término.
   endsAt      DateTime?
   notes       String?
@@ -120,6 +122,8 @@ model Entry {
   frequency   EntryFrequency
   /// Dia do mês em que a entrada entra no saldo (1-31). Null em entradas únicas.
   receiveDay  Int?
+  /// Primeira data de recebimento (define mês/ano de início da recorrência).
+  startsAt    DateTime?
   /// Data em que a recorrência deixa de valer. Null = sem término (ex.: salário).
   endsAt      DateTime?
   date        DateTime?

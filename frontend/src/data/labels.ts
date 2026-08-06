@@ -51,6 +51,28 @@ export const INCOME_FREQUENCY_LABELS: Record<IncomeFrequency, string> = {
   unica: 'Única',
 };
 
+export const MONTH_LABELS: Record<number, string> = {
+  1: 'Janeiro',
+  2: 'Fevereiro',
+  3: 'Março',
+  4: 'Abril',
+  5: 'Maio',
+  6: 'Junho',
+  7: 'Julho',
+  8: 'Agosto',
+  9: 'Setembro',
+  10: 'Outubro',
+  11: 'Novembro',
+  12: 'Dezembro',
+};
+
+export const MONTH_OPTIONS = Object.entries(MONTH_LABELS).map(
+  ([value, label]) => ({
+    value: Number(value),
+    label,
+  }),
+);
+
 export const TAG_COLOR_OPTIONS = [
   '#60A5FA',
   '#FFB800',

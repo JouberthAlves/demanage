@@ -7,14 +7,17 @@ export function parseReceiveDay(value: unknown): number | null {
   return day;
 }
 
-export function parseEndsAt(value: unknown): Date | null {
+export function parseDateOnly(
+  value: unknown,
+  errorCode = 'INVALID_DATE',
+): Date | null {
   if (value == null || value === '') return null;
   if (typeof value !== 'string') {
-    throw new Error('INVALID_ENDS_AT');
+    throw new Error(errorCode);
   }
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) {
-    throw new Error('INVALID_ENDS_AT');
+    throw new Error(errorCode);
   }
   const year = Number(match[1]);
   const month = Number(match[2]);
@@ -25,7 +28,23 @@ export function parseEndsAt(value: unknown): Date | null {
     date.getUTCMonth() !== month - 1 ||
     date.getUTCDate() !== day
   ) {
-    throw new Error('INVALID_ENDS_AT');
+    throw new Error(errorCode);
   }
   return date;
+}
+
+export function parseEndsAt(value: unknown): Date | null {
+  try {
+    return parseDateOnly(value, 'INVALID_ENDS_AT');
+  } catch {
+    throw new Error('INVALID_ENDS_AT');
+  }
+}
+
+export function parseStartsAt(value: unknown): Date | null {
+  try {
+    return parseDateOnly(value, 'INVALID_STARTS_AT');
+  } catch {
+    throw new Error('INVALID_STARTS_AT');
+  }
 }

@@ -33,6 +33,8 @@ export type RecurringExpense = {
   cardId?: string;
   /** Dia do mês (1-31) em que a despesa entra no saldo. */
   dueDay?: number;
+  /** YYYY-MM-DD — primeira data de desconto (mês/ano de início). */
+  startsAt?: string;
   /** YYYY-MM-DD — após essa data a recorrência para. */
   endsAt?: string;
   /** Data de registro (YYYY-MM-DD), usada em despesas únicas. */
@@ -54,6 +56,8 @@ export type Income = {
   frequency: IncomeFrequency;
   /** Dia do mês (1-31) em que a entrada entra no saldo. */
   receiveDay?: number;
+  /** YYYY-MM-DD — primeira data de recebimento (mês/ano de início). */
+  startsAt?: string;
   /** YYYY-MM-DD — após essa data a recorrência para. */
   endsAt?: string;
   date?: string;

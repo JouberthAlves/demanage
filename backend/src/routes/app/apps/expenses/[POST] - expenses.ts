@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
-import { parseEndsAt, parseReceiveDay } from '@/lib/entry-schedule';
+import {
+  parseEndsAt,
+  parseReceiveDay,
+  parseStartsAt,
+} from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -24,6 +28,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       frequency,
       cardId,
       dueDay,
+      startsAt,
       endsAt,
       notes,
       customTagId,
@@ -76,11 +81,13 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     let resolvedDueDay: number | null = null;
+    let resolvedStartsAt: Date | null = null;
     let resolvedEndsAt: Date | null = null;
 
     try {
       if (resolvedFrequency === 'unica') {
         resolvedDueDay = null;
+        resolvedStartsAt = null;
         resolvedEndsAt = null;
       } else {
         resolvedDueDay = parseReceiveDay(dueDay);
@@ -89,13 +96,31 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
             error: 'Informe o dia em que será descontado (1-31)',
           });
         }
+        resolvedStartsAt = parseStartsAt(startsAt);
+        if (resolvedStartsAt == null) {
+          return res.status(400).json({
+            error: 'Informe o mês em que será descontado',
+          });
+        }
         resolvedEndsAt = parseEndsAt(endsAt);
+        if (
+          resolvedEndsAt &&
+          resolvedStartsAt &&
+          resolvedEndsAt.getTime() < resolvedStartsAt.getTime()
+        ) {
+          return res.status(400).json({
+            error: 'Data de término deve ser após o primeiro desconto',
+          });
+        }
       }
     } catch (error) {
       if (error instanceof Error && error.message === 'INVALID_RECEIVE_DAY') {
         return res.status(400).json({
           error: 'Dia de desconto inválido (1-31)',
         });
+      }
+      if (error instanceof Error && error.message === 'INVALID_STARTS_AT') {
+        return res.status(400).json({ error: 'Mês de desconto inválido' });
       }
       if (error instanceof Error && error.message === 'INVALID_ENDS_AT') {
         return res.status(400).json({ error: 'Data de término inválida' });
@@ -112,6 +137,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         frequency: resolvedFrequency,
         cardId: resolvedCardId,
         dueDay: resolvedDueDay,
+        startsAt: resolvedStartsAt,
         endsAt: resolvedEndsAt,
         notes: notes || null,
         customTagId: resolvedCustomTagId,

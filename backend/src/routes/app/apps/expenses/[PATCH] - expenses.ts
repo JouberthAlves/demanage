@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
-import { parseEndsAt, parseReceiveDay } from '@/lib/entry-schedule';
+import {
+  parseEndsAt,
+  parseReceiveDay,
+  parseStartsAt,
+} from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -33,6 +37,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       frequency,
       cardId,
       dueDay,
+      startsAt,
       endsAt,
       notes,
       customTagId,
@@ -79,11 +84,13 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     let resolvedDueDay: number | null | undefined;
+    let resolvedStartsAt: Date | null | undefined;
     let resolvedEndsAt: Date | null | undefined;
 
     try {
       if (nextFrequency === 'unica') {
         resolvedDueDay = null;
+        resolvedStartsAt = null;
         resolvedEndsAt = null;
       } else {
         if (dueDay !== undefined) {
@@ -99,6 +106,19 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           });
         }
 
+        if (startsAt !== undefined) {
+          resolvedStartsAt = parseStartsAt(startsAt);
+          if (resolvedStartsAt == null) {
+            return res.status(400).json({
+              error: 'Informe o mês em que será descontado',
+            });
+          }
+        } else if (existing.startsAt == null && !existing.isInvoice) {
+          return res.status(400).json({
+            error: 'Informe o mês em que será descontado',
+          });
+        }
+
         if (endsAt !== undefined) {
           resolvedEndsAt = parseEndsAt(endsAt);
         }
@@ -109,10 +129,29 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           error: 'Dia de desconto inválido (1-31)',
         });
       }
+      if (error instanceof Error && error.message === 'INVALID_STARTS_AT') {
+        return res.status(400).json({ error: 'Mês de desconto inválido' });
+      }
       if (error instanceof Error && error.message === 'INVALID_ENDS_AT') {
         return res.status(400).json({ error: 'Data de término inválida' });
       }
       throw error;
+    }
+
+    const nextStartsAt =
+      resolvedStartsAt !== undefined ? resolvedStartsAt : existing.startsAt;
+    const nextEndsAt =
+      resolvedEndsAt !== undefined ? resolvedEndsAt : existing.endsAt;
+
+    if (
+      nextFrequency !== 'unica' &&
+      nextStartsAt &&
+      nextEndsAt &&
+      nextEndsAt.getTime() < nextStartsAt.getTime()
+    ) {
+      return res.status(400).json({
+        error: 'Data de término deve ser após o primeiro desconto',
+      });
     }
 
     const expense = await prisma.expense.update({
@@ -124,6 +163,9 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         ...(frequency !== undefined ? { frequency } : {}),
         ...(cardId !== undefined ? { cardId: cardId || null } : {}),
         ...(resolvedDueDay !== undefined ? { dueDay: resolvedDueDay } : {}),
+        ...(resolvedStartsAt !== undefined
+          ? { startsAt: resolvedStartsAt }
+          : {}),
         ...(resolvedEndsAt !== undefined ? { endsAt: resolvedEndsAt } : {}),
         ...(notes !== undefined ? { notes: notes || null } : {}),
         ...(resolvedCustomTagId !== undefined
