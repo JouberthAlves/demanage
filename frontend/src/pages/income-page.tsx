@@ -26,9 +26,20 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { INCOME_FREQUENCY_LABELS, INCOME_TYPE_LABELS } from '@/data/labels';
+import {
+  BUILTIN_INCOME_TYPE_LABELS,
+  INCOME_FREQUENCY_LABELS,
+  INCOME_TYPE_LABELS,
+  incomeTypeLabel,
+  tagBadgeStyle,
+} from '@/data/labels';
+import { useCustomTags } from '@/hooks/use-custom-tags';
 import { useDeleteEntry, useEntries } from '@/hooks/use-entries';
 import { formatCurrency } from '@/lib/format';
+import {
+  incomeContributionThisMonth,
+  isIncomeReceivedThisMonth,
+} from '@/lib/income-schedule';
 import { selectMonthlyIncome, useFinanceStore } from '@/stores/finance-store';
 import type { Income, IncomeType } from '@/types/finance';
 
@@ -40,6 +51,7 @@ const typeColors: Record<IncomeType, string> = {
 
 export function IncomePage() {
   const { data: incomes = [], isLoading, isError } = useEntries();
+  const { data: customTags = [] } = useCustomTags('income');
   const removeEntry = useDeleteEntry();
   const total = useFinanceStore(selectMonthlyIncome);
 
@@ -53,13 +65,21 @@ export function IncomePage() {
       const matchesSearch = income.name
         .toLowerCase()
         .includes(search.toLowerCase());
-      const matchesType = type === 'all' || income.type === type;
+      const matchesType =
+        type === 'all' ||
+        (type.startsWith('tag:')
+          ? income.customTagId === type.slice(4)
+          : income.type === type && !income.customTagId);
       return matchesSearch && matchesType;
     });
   }, [incomes, search, type]);
 
   const filteredTotal = useMemo(
-    () => filtered.reduce((sum, income) => sum + income.amount, 0),
+    () =>
+      filtered.reduce(
+        (sum, income) => sum + incomeContributionThisMonth(income),
+        0,
+      ),
     [filtered],
   );
 
@@ -102,12 +122,12 @@ export function IncomePage() {
       <PageHero
         eyebrow='Receitas'
         title={`${incomes.length} entrada${incomes.length === 1 ? '' : 's'}`}
-        description='Organize o que entra todo mês e o que é pontual.'
+        description='O saldo do mês só conta entradas a partir do dia de recebimento.'
       >
         <div className='grid gap-3 sm:grid-cols-2'>
           <div className='rounded-xl border border-border bg-black/25 p-4'>
             <p className='text-xs text-muted-foreground'>
-              Recorrentes / mês
+              Já no saldo / mês
             </p>
             <p className='mt-2 text-2xl font-semibold text-neon-green'>
               {formatCurrency(total)}
@@ -144,9 +164,19 @@ export function IncomePage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value='all'>Todos</SelectItem>
-              {Object.entries(INCOME_TYPE_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
+              <SelectItem value='salario'>
+                {INCOME_TYPE_LABELS.salario}
+              </SelectItem>
+              {Object.entries(BUILTIN_INCOME_TYPE_LABELS).map(
+                ([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ),
+              )}
+              {customTags.map((tag) => (
+                <SelectItem key={tag.id} value={`tag:${tag.id}`}>
+                  {tag.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -160,6 +190,8 @@ export function IncomePage() {
                 <TableHead>Nome</TableHead>
                 <TableHead>Tipo</TableHead>
                 <TableHead>Frequência</TableHead>
+                <TableHead>Recebe</TableHead>
+                <TableHead>Término</TableHead>
                 <TableHead className='text-right'>Valor</TableHead>
                 <TableHead className='w-24 text-right'>Ações</TableHead>
               </TableRow>
@@ -167,14 +199,14 @@ export function IncomePage() {
             <TableBody>
               {isLoading ? (
                 <TableRow>
-                  <TableCell colSpan={5} className='h-28 text-center'>
+                  <TableCell colSpan={7} className='h-28 text-center'>
                     <Spinner className='mx-auto size-5' />
                   </TableCell>
                 </TableRow>
               ) : isError ? (
                 <TableRow>
                   <TableCell
-                    colSpan={5}
+                    colSpan={7}
                     className='h-28 text-center text-destructive'
                   >
                     Não foi possível carregar as entradas.
@@ -182,7 +214,7 @@ export function IncomePage() {
                 </TableRow>
               ) : filtered.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={5} className='h-40'>
+                  <TableCell colSpan={7} className='h-40'>
                     <div className='flex flex-col items-center justify-center gap-2 text-center'>
                       <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-green/10'>
                         <TrendingUp className='size-6 text-neon-green' />
@@ -195,52 +227,88 @@ export function IncomePage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((income) => (
-                  <TableRow key={income.id}>
-                    <TableCell className='font-medium'>{income.name}</TableCell>
-                    <TableCell>
-                      <Badge
-                        variant='outline'
-                        className={typeColors[income.type]}
-                      >
-                        {INCOME_TYPE_LABELS[income.type]}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className='text-muted-foreground'>
-                      {INCOME_FREQUENCY_LABELS[income.frequency]}
-                    </TableCell>
-                    <TableCell className='text-right font-semibold text-neon-green'>
-                      {formatCurrency(income.amount)}
-                    </TableCell>
-                    <TableCell className='text-right'>
-                      {income.type === 'salario' ? (
-                        <span className='text-xs text-muted-foreground'>
-                          Perfil
-                        </span>
-                      ) : (
-                        <div className='flex justify-end gap-1'>
-                          <Button
-                            variant='ghost'
-                            size='icon-sm'
-                            onClick={() => openEdit(income)}
+                filtered.map((income) => {
+                  const received = isIncomeReceivedThisMonth(income);
+
+                  return (
+                    <TableRow key={income.id}>
+                      <TableCell className='font-medium'>
+                        {income.name}
+                        {income.frequency !== 'unica' && !received ? (
+                          <span className='mt-0.5 block text-xs text-muted-foreground'>
+                            Aguardando dia {income.receiveDay ?? '—'}
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>
+                        {income.customTag ? (
+                          <Badge
+                            variant='outline'
+                            style={tagBadgeStyle(income.customTag.color)}
                           >
-                            <Pencil className='size-4' />
-                          </Button>
-                          <Button
-                            variant='ghost'
-                            size='icon-sm'
-                            disabled={removeEntry.isPending}
-                            onClick={() =>
-                              void handleDelete(income.id, income.name)
-                            }
+                            {income.customTag.name}
+                          </Badge>
+                        ) : (
+                          <Badge
+                            variant='outline'
+                            className={typeColors[income.type]}
                           >
-                            <Trash2 className='size-4' />
-                          </Button>
-                        </div>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                ))
+                            {incomeTypeLabel(income)}
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {INCOME_FREQUENCY_LABELS[income.frequency]}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {income.frequency === 'unica'
+                          ? income.date
+                            ? income.date.split('-').reverse().join('/')
+                            : '—'
+                          : income.receiveDay
+                            ? `Dia ${income.receiveDay}`
+                            : '—'}
+                      </TableCell>
+                      <TableCell className='text-muted-foreground'>
+                        {income.type === 'salario'
+                          ? '—'
+                          : income.endsAt
+                            ? income.endsAt.split('-').reverse().join('/')
+                            : '—'}
+                      </TableCell>
+                      <TableCell className='text-right font-semibold text-neon-green'>
+                        {formatCurrency(income.amount)}
+                      </TableCell>
+                      <TableCell className='text-right'>
+                        {income.type === 'salario' ? (
+                          <span className='text-xs text-muted-foreground'>
+                            Perfil
+                          </span>
+                        ) : (
+                          <div className='flex justify-end gap-1'>
+                            <Button
+                              variant='ghost'
+                              size='icon-sm'
+                              onClick={() => openEdit(income)}
+                            >
+                              <Pencil className='size-4' />
+                            </Button>
+                            <Button
+                              variant='ghost'
+                              size='icon-sm'
+                              disabled={removeEntry.isPending}
+                              onClick={() =>
+                                void handleDelete(income.id, income.name)
+                              }
+                            >
+                              <Trash2 className='size-4' />
+                            </Button>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
@@ -248,7 +316,7 @@ export function IncomePage() {
 
         <p className='mt-3 text-sm text-muted-foreground'>
           {filtered.length} entrada{filtered.length === 1 ? '' : 's'} •{' '}
-          {formatCurrency(total)} / mês (recorrentes)
+          {formatCurrency(total)} já no saldo do mês
         </p>
       </SectionPanel>
 

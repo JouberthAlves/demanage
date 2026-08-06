@@ -1,6 +1,7 @@
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from 'recharts';
 
 import { EXPENSE_CATEGORY_LABELS } from '@/data/labels';
+import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { formatCurrency } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { ExpenseCategory } from '@/types/finance';
@@ -15,17 +16,34 @@ const COLORS: Record<ExpenseCategory, string> = {
 export function CategoryDonutChart() {
   const expenses = useFinanceStore((state) => state.expenses);
 
-  const grouped = expenses
-    .filter((expense) => !expense.cardId || expense.isInvoice)
-    .reduce<Record<string, number>>((acc, expense) => {
-      acc[expense.category] = (acc[expense.category] ?? 0) + expense.amount;
-      return acc;
-    }, {});
+  const grouped = expenses.reduce<
+    Record<string, { name: string; color: string; value: number }>
+  >((acc, expense) => {
+    const value = expenseContributionThisMonth(expense);
+    if (value <= 0) return acc;
 
-  const data = Object.entries(grouped).map(([category, value]) => ({
-    name: EXPENSE_CATEGORY_LABELS[category as ExpenseCategory],
-    category: category as ExpenseCategory,
-    value,
+    const key = expense.customTag
+      ? `tag:${expense.customTag.id}`
+      : expense.category;
+    const name = expense.customTag
+      ? expense.customTag.name
+      : EXPENSE_CATEGORY_LABELS[expense.category];
+    const color = expense.customTag
+      ? expense.customTag.color
+      : COLORS[expense.category];
+
+    const current = acc[key];
+    acc[key] = {
+      name,
+      color,
+      value: (current?.value ?? 0) + value,
+    };
+    return acc;
+  }, {});
+
+  const data = Object.entries(grouped).map(([key, item]) => ({
+    key,
+    ...item,
   }));
 
   const total = data.reduce((sum, item) => sum + item.value, 0);
@@ -45,7 +63,7 @@ export function CategoryDonutChart() {
               stroke='transparent'
             >
               {data.map((entry) => (
-                <Cell key={entry.category} fill={COLORS[entry.category]} />
+                <Cell key={entry.key} fill={entry.color} />
               ))}
             </Pie>
             <Tooltip
@@ -67,13 +85,13 @@ export function CategoryDonutChart() {
       <div className='w-full space-y-2'>
         {data.map((item) => (
           <div
-            key={item.category}
+            key={item.key}
             className='flex items-center justify-between text-sm'
           >
             <div className='flex items-center gap-2'>
               <span
                 className='size-2.5 rounded-sm'
-                style={{ backgroundColor: COLORS[item.category] }}
+                style={{ backgroundColor: item.color }}
               />
               <span className='text-muted-foreground'>{item.name}</span>
             </div>

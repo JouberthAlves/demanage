@@ -7,7 +7,15 @@ export type ApiEntry = {
   amount: string | number;
   type: IncomeType;
   frequency: IncomeFrequency;
+  receiveDay?: number | null;
+  endsAt?: string | null;
   date: string | null;
+  customTagId?: string | null;
+  customTag?: {
+    id: string;
+    name: string;
+    color: string;
+  } | null;
 };
 
 export type EntryPayload = {
@@ -15,8 +23,16 @@ export type EntryPayload = {
   amount: number;
   type: IncomeType;
   frequency: IncomeFrequency;
+  receiveDay?: number | null;
+  endsAt?: string | null;
   date?: string | null;
+  customTagId?: string | null;
 };
+
+function mapDateOnly(value?: string | null) {
+  if (!value) return undefined;
+  return value.slice(0, 10);
+}
 
 export function mapEntryToIncome(entry: ApiEntry): Income {
   return {
@@ -25,7 +41,11 @@ export function mapEntryToIncome(entry: ApiEntry): Income {
     amount: Number(entry.amount),
     type: entry.type,
     frequency: entry.frequency,
-    date: entry.date ? entry.date.slice(0, 10) : undefined,
+    receiveDay: entry.receiveDay ?? undefined,
+    endsAt: mapDateOnly(entry.endsAt),
+    date: mapDateOnly(entry.date),
+    customTagId: entry.customTagId ?? undefined,
+    customTag: entry.customTag ?? undefined,
   };
 }
 

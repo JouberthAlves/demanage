@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
+import logo from '../../../frontend/public/favicon.svg';
+
 import { AuthShell } from '@/components/layout/auth-shell';
 import { Button } from '@/components/ui/button';
 import {
@@ -74,11 +76,8 @@ export function LoginPage() {
 
   return (
     <AuthShell>
-      <div className='mb-6 text-center'>
-        <div className='mx-auto mb-3 flex size-12 items-center justify-center rounded-2xl bg-primary text-sm font-bold text-primary-foreground'>
-          dM
-        </div>
-        <p className='text-sm text-muted-foreground'>deManage</p>
+      <div className='mb-6 flex items-center justify-center'>
+        <img src={logo} alt='logo' className='size-15' />
       </div>
       <Card className='w-full border-border bg-card/60 backdrop-blur' size='sm'>
         <CardHeader>

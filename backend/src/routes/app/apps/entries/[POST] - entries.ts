@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
+import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
+import { parseEndsAt, parseReceiveDay } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
+
+const VALID_FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 const router = Router();
 
@@ -13,7 +17,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    const { name, amount, type, frequency, date } = req.body;
+    const { name, amount, type, frequency, date, customTagId, receiveDay, endsAt } =
+      req.body;
 
     if (!name || amount == null || !type || !frequency) {
       return res.status(400).json({
@@ -27,6 +32,53 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    if (!VALID_FREQUENCIES.has(frequency)) {
+      return res.status(400).json({ error: 'Frequência inválida' });
+    }
+
+    let resolvedCustomTagId: string | null = null;
+    try {
+      resolvedCustomTagId = await resolveCustomTagId({
+        userId,
+        scope: 'income',
+        customTagId,
+      });
+    } catch {
+      return res.status(400).json({ error: 'Tipo personalizado inválido' });
+    }
+
+    if (resolvedCustomTagId && type !== 'outro') {
+      return res.status(400).json({
+        error: 'Tipos personalizados devem usar type=outro',
+      });
+    }
+
+    let resolvedReceiveDay: number | null = null;
+    let resolvedEndsAt: Date | null = null;
+
+    try {
+      if (frequency === 'unica') {
+        resolvedReceiveDay = null;
+        resolvedEndsAt = null;
+      } else {
+        resolvedReceiveDay = parseReceiveDay(receiveDay);
+        if (resolvedReceiveDay == null) {
+          return res.status(400).json({
+            error: 'Informe o dia em que recebe (1-31)',
+          });
+        }
+        resolvedEndsAt = parseEndsAt(endsAt);
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INVALID_RECEIVE_DAY') {
+        return res.status(400).json({ error: 'Dia de recebimento inválido (1-31)' });
+      }
+      if (error instanceof Error && error.message === 'INVALID_ENDS_AT') {
+        return res.status(400).json({ error: 'Data de término inválida' });
+      }
+      throw error;
+    }
+
     const entry = await prisma.entry.create({
       data: {
         userId,
@@ -34,8 +86,12 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         amount,
         type,
         frequency,
-        date: date ? new Date(date) : undefined,
+        date: frequency === 'unica' && date ? new Date(date) : null,
+        receiveDay: resolvedReceiveDay,
+        endsAt: resolvedEndsAt,
+        customTagId: resolvedCustomTagId,
       },
+      include: { customTag: { select: customTagSelect } },
     });
 
     return res.status(201).json(entry);

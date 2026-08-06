@@ -6,6 +6,7 @@ import type { AuthUser } from '@/types/auth';
 type UpdateProfileInput = {
   name?: string;
   salary?: number;
+  salaryReceiveDay?: number | null;
   notes?: string | null;
 };
 
@@ -87,6 +88,7 @@ export const useAuthStore = create<AuthState>((set) => ({
     const { data } = await api.patch<{ user: AuthUser }>('/auth/me', {
       name: input.name,
       salary: input.salary,
+      salaryReceiveDay: input.salaryReceiveDay,
       notes: input.notes,
     });
     set({

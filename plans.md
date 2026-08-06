@@ -51,5 +51,9 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 - [x] ~~Frontend: trocar Zustand/localStorage pela API~~ — Entradas, Despesas, Cartões e perfil na API; finance store sem persist.
 - [x] ~~Inputs monetários BRL~~ — máscara `R$ 1.234,56` em perfil, despesas, entradas e cartões.
 - [x] ~~Fatura de cartão + validade~~ — fechamento gera `Fatura do cartão {nome}`; validade MM/AA com renovar; botão Pago; aviso ao remover cartão.
+- [x] ~~Tipos personalizados + frequência semanal~~ — Em Entradas/Despesas, "Outro…" abre modal para criar tag com cor; frequência inclui Semanal (mensal ≈ valor × 4).
+- [x] ~~Quando recebe + data de término~~ — Entradas mensais/semanais com dia de recebimento e término; salário só com dia; saldo do mês conta após o dia.
+- [x] ~~Despesa frequência Única~~ — ExpenseFrequency inclui `unica` (não entra no total mensal recorrente).
+- [x] ~~Despesa: quando desconta + término~~ — Mensal/semanal com dia de desconto e data de término; saldo conta após o dia (como entradas).
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 

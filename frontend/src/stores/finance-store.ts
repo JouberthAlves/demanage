@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 
+import { expenseContributionThisMonth } from '@/lib/expense-schedule';
+import { incomeContributionThisMonth } from '@/lib/income-schedule';
 import type {
   Card,
   FinanceState,
@@ -56,15 +58,17 @@ export const useFinanceStore = create<FinanceStore>((set) => ({
 }));
 
 export function selectMonthlyIncome(state: FinanceState) {
-  return state.incomes
-    .filter((income) => income.frequency === 'mensal')
-    .reduce((sum, income) => sum + income.amount, 0);
+  return state.incomes.reduce(
+    (sum, income) => sum + incomeContributionThisMonth(income),
+    0,
+  );
 }
 
 export function selectMonthlyExpenses(state: FinanceState) {
-  return state.expenses
-    .filter((expense) => !expense.cardId || expense.isInvoice)
-    .reduce((sum, expense) => sum + expense.amount, 0);
+  return state.expenses.reduce(
+    (sum, expense) => sum + expenseContributionThisMonth(expense),
+    0,
+  );
 }
 
 export function selectAverageMonthlyExpense(state: FinanceState) {

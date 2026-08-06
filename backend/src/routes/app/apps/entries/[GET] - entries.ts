@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+import { customTagSelect } from '@/lib/custom-tag';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -15,6 +16,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const entries = await prisma.entry.findMany({
       where: { userId },
+      include: { customTag: { select: customTagSelect } },
       orderBy: { createdAt: 'desc' },
     });
 

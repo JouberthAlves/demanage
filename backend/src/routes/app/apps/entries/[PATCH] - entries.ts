@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
+import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
+import { parseEndsAt, parseReceiveDay } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
+
+const VALID_FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 const router = Router();
 
@@ -28,12 +32,78 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const { name, amount, type, frequency, date } = req.body;
+    const { name, amount, type, frequency, date, customTagId, receiveDay, endsAt } =
+      req.body;
 
     if (type === 'salario') {
       return res.status(400).json({
         error: 'O salário é cadastrado pela aba Perfil',
       });
+    }
+
+    if (frequency !== undefined && !VALID_FREQUENCIES.has(frequency)) {
+      return res.status(400).json({ error: 'Frequência inválida' });
+    }
+
+    let resolvedCustomTagId: string | null | undefined;
+    if (customTagId !== undefined) {
+      try {
+        resolvedCustomTagId = await resolveCustomTagId({
+          userId,
+          scope: 'income',
+          customTagId,
+        });
+      } catch {
+        return res.status(400).json({ error: 'Tipo personalizado inválido' });
+      }
+    }
+
+    const nextType = type ?? existing.type;
+    const nextFrequency = frequency ?? existing.frequency;
+    const nextCustomTagId =
+      resolvedCustomTagId !== undefined
+        ? resolvedCustomTagId
+        : existing.customTagId;
+
+    if (nextCustomTagId && nextType !== 'outro') {
+      return res.status(400).json({
+        error: 'Tipos personalizados devem usar type=outro',
+      });
+    }
+
+    let resolvedReceiveDay: number | null | undefined;
+    let resolvedEndsAt: Date | null | undefined;
+
+    try {
+      if (nextFrequency === 'unica') {
+        resolvedReceiveDay = null;
+        resolvedEndsAt = null;
+      } else {
+        if (receiveDay !== undefined) {
+          resolvedReceiveDay = parseReceiveDay(receiveDay);
+          if (resolvedReceiveDay == null) {
+            return res.status(400).json({
+              error: 'Informe o dia em que recebe (1-31)',
+            });
+          }
+        } else if (existing.receiveDay == null) {
+          return res.status(400).json({
+            error: 'Informe o dia em que recebe (1-31)',
+          });
+        }
+
+        if (endsAt !== undefined) {
+          resolvedEndsAt = parseEndsAt(endsAt);
+        }
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message === 'INVALID_RECEIVE_DAY') {
+        return res.status(400).json({ error: 'Dia de recebimento inválido (1-31)' });
+      }
+      if (error instanceof Error && error.message === 'INVALID_ENDS_AT') {
+        return res.status(400).json({ error: 'Data de término inválida' });
+      }
+      throw error;
     }
 
     const entry = await prisma.entry.update({
@@ -45,8 +115,18 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         ...(frequency !== undefined ? { frequency } : {}),
         ...(date !== undefined
           ? { date: date ? new Date(date) : null }
+          : nextFrequency !== 'unica'
+            ? { date: null }
+            : {}),
+        ...(resolvedReceiveDay !== undefined
+          ? { receiveDay: resolvedReceiveDay }
+          : {}),
+        ...(resolvedEndsAt !== undefined ? { endsAt: resolvedEndsAt } : {}),
+        ...(resolvedCustomTagId !== undefined
+          ? { customTagId: resolvedCustomTagId }
           : {}),
       },
+      include: { customTag: { select: customTagSelect } },
     });
 
     return res.json(entry);
