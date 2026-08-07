@@ -106,10 +106,10 @@ export function ProfilePage() {
 
     try {
       await updateProfile({
-        name: name.trim() || 'Usuário',
+        name: name.trim().slice(0, 100) || 'Usuário',
         salary: nextSalary,
         salaryReceiveDay: nextSalary > 0 ? nextReceiveDay : null,
-        notes: notes.trim() || null,
+        notes: notes.trim().slice(0, 500) || null,
       });
       await queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
       toast.success('Perfil atualizado');
@@ -217,6 +217,7 @@ export function ProfilePage() {
                 id='profile-name'
                 value={name}
                 onChange={(event) => setName(event.target.value)}
+                maxLength={100}
                 className='rounded-lg'
               />
             </div>
@@ -260,8 +261,10 @@ export function ProfilePage() {
               value={notes}
               onChange={(event) => setNotes(event.target.value)}
               placeholder='Metas, lembretes, anotações...'
-              className='min-h-28 rounded-lg'
+              maxLength={500}
+              className='max-h-40 min-h-28 field-sizing-fixed overflow-y-auto rounded-lg'
             />
+            <p className='text-xs text-muted-foreground'>{notes.length}/500</p>
           </div>
 
           <Button type='submit' className='rounded-lg' disabled={saving}>

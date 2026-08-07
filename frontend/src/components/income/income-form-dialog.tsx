@@ -186,7 +186,7 @@ export function IncomeFormDialog({
     }
 
     const payload = {
-      name: form.name.trim(),
+      name: form.name.trim().slice(0, 100),
       amount,
       type,
       frequency: form.frequency,
@@ -243,6 +243,7 @@ export function IncomeFormDialog({
                   }))
                 }
                 placeholder='Ex: Freelance'
+                maxLength={100}
                 className='rounded-lg'
               />
             </div>

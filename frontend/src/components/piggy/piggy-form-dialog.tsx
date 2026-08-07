@@ -101,7 +101,7 @@ export function PiggyFormDialog({
     }
 
     const payload = {
-      name: form.name.trim(),
+      name: form.name.trim().slice(0, 100),
       goalAmount,
       targetDate: form.targetDate,
       autoDebit: form.autoDebit,
@@ -149,6 +149,7 @@ export function PiggyFormDialog({
                 setForm((current) => ({ ...current, name: event.target.value }))
               }
               placeholder='Ex: Viagem'
+              maxLength={100}
               className='rounded-lg'
             />
           </div>
