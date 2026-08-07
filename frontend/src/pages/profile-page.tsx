@@ -155,10 +155,10 @@ export function ProfilePage() {
 
       <section className='relative overflow-hidden rounded-2xl border border-border bg-card/40'>
         <div className='pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(255,184,0,0.12),transparent_45%),radial-gradient(ellipse_at_bottom_right,rgba(52,211,153,0.1),transparent_40%)]' />
-        <div className='relative grid gap-6 p-6 sm:grid-cols-[1.2fr_1fr] sm:items-end'>
+        <div className='relative grid gap-5 p-4 sm:grid-cols-[1.2fr_1fr] sm:items-end sm:gap-6 sm:p-6'>
           <div className='space-y-2'>
             <p className='text-sm text-muted-foreground'>Bem-vindo de volta</p>
-            <h2 className='text-3xl font-semibold tracking-tight'>
+            <h2 className='text-2xl font-semibold tracking-tight sm:text-3xl'>
               {user?.name || 'Usuário'}
             </h2>
             <p className='max-w-md text-sm text-muted-foreground'>
@@ -198,10 +198,10 @@ export function ProfilePage() {
         </div>
       </section>
 
-      <div className='grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]'>
+      <div className='grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]'>
         <form
           onSubmit={(event) => void handleSaveProfile(event)}
-          className='space-y-5 rounded-2xl border border-border bg-card/30 p-6'
+          className='space-y-5 rounded-2xl border border-border bg-card/30 p-4 sm:p-6'
         >
           <div>
             <h2 className='text-lg font-medium'>Informações gerais</h2>

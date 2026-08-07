@@ -8,6 +8,7 @@ type KpiCardProps = {
   hint?: string;
   tone?: 'default' | 'positive' | 'negative' | 'amber';
   icon?: ReactNode;
+  className?: string;
 };
 
 export function KpiCard({
@@ -16,9 +17,15 @@ export function KpiCard({
   hint,
   tone = 'default',
   icon,
+  className,
 }: KpiCardProps) {
   return (
-    <div className='relative overflow-hidden rounded-2xl border border-border bg-card/40 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]'>
+    <div
+      className={cn(
+        'relative overflow-hidden rounded-2xl border border-border bg-card/40 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]',
+        className,
+      )}
+    >
       <div className='pointer-events-none absolute -right-6 -top-8 size-24 rounded-full bg-white/5 blur-2xl' />
       <div className='relative flex items-start justify-between gap-2'>
         <p className='text-sm text-muted-foreground'>{label}</p>

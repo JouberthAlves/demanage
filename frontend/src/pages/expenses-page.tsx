@@ -4,6 +4,10 @@ import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { ExpenseFormDialog } from '@/components/expenses/expense-form-dialog';
+import {
+  ExpenseListCard,
+  categoryColors,
+} from '@/components/expenses/expense-list-card';
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
@@ -52,15 +56,7 @@ import {
 } from '@/lib/expense-schedule';
 import { formatCurrency } from '@/lib/format';
 import { selectMonthlyExpenses, useFinanceStore } from '@/stores/finance-store';
-import type { ExpenseCategory, RecurringExpense } from '@/types/finance';
-
-const categoryColors: Record<ExpenseCategory, string> = {
-  assinatura: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  parcela: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  divida: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-  outro: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
-  cofrinho: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
-};
+import type { RecurringExpense } from '@/types/finance';
 
 export function ExpensesPage() {
   const { data: expenses = [], isLoading, isError } = useExpenses();
@@ -208,164 +204,174 @@ export function ExpensesPage() {
           </Select>
         </div>
 
-        <div className='max-h-[70vh] overflow-auto rounded-xl border border-border bg-black/15'>
-          <Table>
-            <TableHeader className='sticky top-0 z-10 bg-card'>
-              <TableRow className='hover:bg-transparent'>
-                <TableHead>Nome</TableHead>
-                <TableHead>Categoria</TableHead>
-                <TableHead>Frequência</TableHead>
-                <TableHead>Cartão</TableHead>
-                <TableHead>Desconto</TableHead>
-                <TableHead>Término</TableHead>
-                <TableHead className='text-right'>Valor</TableHead>
-                <TableHead className='w-40 text-right'>Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={8} className='h-28 text-center'>
-                    <Spinner className='mx-auto size-5' />
-                  </TableCell>
-                </TableRow>
-              ) : isError ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={8}
-                    className='h-28 text-center text-destructive'
-                  >
-                    Não foi possível carregar as despesas.
-                  </TableCell>
-                </TableRow>
-              ) : filtered.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={8} className='h-40'>
-                    <div className='flex flex-col items-center justify-center gap-2 text-center'>
-                      <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-amber/10'>
-                        <Receipt className='size-6 text-neon-amber' />
-                      </div>
-                      <p className='font-medium'>Nenhuma despesa encontrada</p>
-                      <p className='text-sm text-muted-foreground'>
-                        Ajuste o filtro ou cadastre uma nova recorrência.
-                      </p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filtered.map((expense) => {
-                  const card = cards.find((item) => item.id === expense.cardId);
-                  const tone = card ? getCardTone(card) : null;
-                  const debited = isExpenseDebitedThisMonth(expense);
+        {isLoading ? (
+          <div className='flex h-28 items-center justify-center rounded-xl border border-border bg-black/15'>
+            <Spinner className='size-5' />
+          </div>
+        ) : isError ? (
+          <div className='flex h-28 items-center justify-center rounded-xl border border-border bg-black/15 text-destructive'>
+            Não foi possível carregar as despesas.
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className='flex h-40 flex-col items-center justify-center gap-2 rounded-xl border border-border bg-black/15 text-center'>
+            <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-amber/10'>
+              <Receipt className='size-6 text-neon-amber' />
+            </div>
+            <p className='font-medium'>Nenhuma despesa encontrada</p>
+            <p className='text-sm text-muted-foreground'>
+              Ajuste o filtro ou cadastre uma nova recorrência.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className='space-y-3 md:hidden'>
+              {filtered.map((expense) => {
+                const card = cards.find((item) => item.id === expense.cardId);
+                return (
+                  <ExpenseListCard
+                    key={expense.id}
+                    expense={expense}
+                    card={card}
+                    pending={removeExpense.isPending}
+                    onPay={() => setConfirmPay(expense)}
+                    onEdit={() => openEdit(expense)}
+                    onDelete={() => setConfirmDelete(expense)}
+                  />
+                );
+              })}
+            </div>
 
-                  return (
-                    <TableRow key={expense.id}>
-                      <TableCell className='font-medium'>
-                        {expense.name}
-                        {expense.frequency !== 'unica' &&
-                        !expense.isInvoice &&
-                        !debited ? (
-                          <span className='mt-0.5 block text-xs text-muted-foreground'>
-                            Aguardando dia {expense.dueDay ?? '—'}
-                          </span>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>
-                        {expense.customTag ? (
-                          <Badge
-                            variant='outline'
-                            style={tagBadgeStyle(expense.customTag.color)}
-                          >
-                            {expense.customTag.name}
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant='outline'
-                            className={categoryColors[expense.category]}
-                          >
-                            {expenseTypeLabel(expense)}
-                          </Badge>
-                        )}
-                      </TableCell>
-                      <TableCell className='text-muted-foreground'>
-                        {EXPENSE_FREQUENCY_LABELS[expense.frequency]}
-                      </TableCell>
-                      <TableCell>
-                        {card ? (
-                          <span className='inline-flex items-center gap-2 text-muted-foreground'>
-                            <span
-                              className='size-2.5 rounded-sm'
-                              style={{ backgroundColor: tone?.fill }}
-                            />
-                            {card.name}
-                          </span>
-                        ) : (
-                          <span className='text-muted-foreground'>—</span>
-                        )}
-                      </TableCell>
-                      <TableCell className='text-muted-foreground'>
-                        {expense.frequency === 'unica'
-                          ? expense.registeredAt
+            <div className='hidden max-h-[70vh] overflow-auto rounded-xl border border-border bg-black/15 md:block'>
+              <Table>
+                <TableHeader className='sticky top-0 z-10 bg-card'>
+                  <TableRow className='hover:bg-transparent'>
+                    <TableHead>Nome</TableHead>
+                    <TableHead>Categoria</TableHead>
+                    <TableHead>Frequência</TableHead>
+                    <TableHead>Cartão</TableHead>
+                    <TableHead>Desconto</TableHead>
+                    <TableHead>Término</TableHead>
+                    <TableHead className='text-right'>Valor</TableHead>
+                    <TableHead className='w-40 text-right'>Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filtered.map((expense) => {
+                    const card = cards.find(
+                      (item) => item.id === expense.cardId,
+                    );
+                    const tone = card ? getCardTone(card) : null;
+                    const debited = isExpenseDebitedThisMonth(expense);
+
+                    return (
+                      <TableRow key={expense.id}>
+                        <TableCell className='font-medium'>
+                          {expense.name}
+                          {expense.frequency !== 'unica' &&
+                          !expense.isInvoice &&
+                          !debited ? (
+                            <span className='mt-0.5 block text-xs text-muted-foreground'>
+                              Aguardando dia {expense.dueDay ?? '—'}
+                            </span>
+                          ) : null}
+                        </TableCell>
+                        <TableCell>
+                          {expense.customTag ? (
+                            <Badge
+                              variant='outline'
+                              style={tagBadgeStyle(expense.customTag.color)}
+                            >
+                              {expense.customTag.name}
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant='outline'
+                              className={categoryColors[expense.category]}
+                            >
+                              {expenseTypeLabel(expense)}
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell className='text-muted-foreground'>
+                          {EXPENSE_FREQUENCY_LABELS[expense.frequency]}
+                        </TableCell>
+                        <TableCell>
+                          {card ? (
+                            <span className='inline-flex items-center gap-2 text-muted-foreground'>
+                              <span
+                                className='size-2.5 rounded-sm'
+                                style={{ backgroundColor: tone?.fill }}
+                              />
+                              {card.name}
+                            </span>
+                          ) : (
+                            <span className='text-muted-foreground'>—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className='text-muted-foreground'>
+                          {expense.frequency === 'unica'
                             ? expense.registeredAt
-                                .split('-')
-                                .reverse()
-                                .join('/')
-                            : 'Hoje'
-                          : expense.dueDay
-                            ? `Dia ${String(expense.dueDay).padStart(2, '0')}${
-                                expense.startsAt
-                                  ? ` · ${MONTH_LABELS[Number(expense.startsAt.slice(5, 7))] ?? ''}`
-                                  : ''
-                              }`
-                            : '—'}
-                      </TableCell>
-                      <TableCell className='text-muted-foreground'>
-                        {expense.frequency === 'unica' || expense.isInvoice
-                          ? '—'
-                          : expense.endsAt
-                            ? expense.endsAt.split('-').reverse().join('/')
-                            : '—'}
-                      </TableCell>
-                      <TableCell className='text-right font-semibold'>
-                        {formatCurrency(expense.amount)}
-                      </TableCell>
-                      <TableCell className='text-right'>
-                        <div className='flex justify-end gap-1'>
-                          <Button
-                            variant='secondary'
-                            size='sm'
-                            className='rounded-lg'
-                            disabled={removeExpense.isPending}
-                            onClick={() => setConfirmPay(expense)}
-                          >
-                            Pago
-                          </Button>
-                          {!expense.isInvoice ? (
+                              ? expense.registeredAt
+                                  .split('-')
+                                  .reverse()
+                                  .join('/')
+                              : 'Hoje'
+                            : expense.dueDay
+                              ? `Dia ${String(expense.dueDay).padStart(2, '0')}${
+                                  expense.startsAt
+                                    ? ` · ${MONTH_LABELS[Number(expense.startsAt.slice(5, 7))] ?? ''}`
+                                    : ''
+                                }`
+                              : '—'}
+                        </TableCell>
+                        <TableCell className='text-muted-foreground'>
+                          {expense.frequency === 'unica' || expense.isInvoice
+                            ? '—'
+                            : expense.endsAt
+                              ? expense.endsAt.split('-').reverse().join('/')
+                              : '—'}
+                        </TableCell>
+                        <TableCell className='text-right font-semibold'>
+                          {formatCurrency(expense.amount)}
+                        </TableCell>
+                        <TableCell className='text-right'>
+                          <div className='flex justify-end gap-1'>
+                            <Button
+                              variant='secondary'
+                              size='sm'
+                              className='rounded-lg'
+                              disabled={removeExpense.isPending}
+                              onClick={() => setConfirmPay(expense)}
+                            >
+                              Pago
+                            </Button>
+                            {!expense.isInvoice ? (
+                              <Button
+                                variant='ghost'
+                                size='icon-sm'
+                                onClick={() => openEdit(expense)}
+                              >
+                                <Pencil className='size-4' />
+                              </Button>
+                            ) : null}
                             <Button
                               variant='ghost'
                               size='icon-sm'
-                              onClick={() => openEdit(expense)}
+                              disabled={removeExpense.isPending}
+                              onClick={() => setConfirmDelete(expense)}
                             >
-                              <Pencil className='size-4' />
+                              <Trash2 className='size-4' />
                             </Button>
-                          ) : null}
-                          <Button
-                            variant='ghost'
-                            size='icon-sm'
-                            disabled={removeExpense.isPending}
-                            onClick={() => setConfirmDelete(expense)}
-                          >
-                            <Trash2 className='size-4' />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          </>
+        )}
 
         <p className='mt-3 text-sm text-muted-foreground'>
           {filtered.length} despesa{filtered.length === 1 ? '' : 's'} •{' '}

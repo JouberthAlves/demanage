@@ -20,7 +20,7 @@ export function SectionPanel({
   return (
     <section
       className={cn(
-        'rounded-2xl border border-border bg-card/30 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]',
+        'rounded-2xl border border-border bg-card/30 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-5',
         className,
       )}
     >

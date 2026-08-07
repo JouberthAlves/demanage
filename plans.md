@@ -107,5 +107,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
   5. Dashboard KPI + categoria nas despesas
   6. Confetti / arquivar / modais
 
+- [x] ~~**Responsividade**~~ — Bottom nav no mobile; sidebar só em `md+`; Despesas/Entradas em cards no mobile (tabela no desktop); grids/padding notebook; scroll em form dialogs.
+
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 
