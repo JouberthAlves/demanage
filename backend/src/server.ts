@@ -15,7 +15,11 @@ const app = express();
 const httpServer = createServer(app);
 
 if (NODE_ENV === 'production') {
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+    }),
+  );
 
   const limiter = rateLimit({
     windowMs: 15 * 60 * 1000,
