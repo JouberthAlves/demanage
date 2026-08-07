@@ -29,7 +29,7 @@ export function AppTopbar() {
   }
 
   return (
-    <header className='flex h-14 shrink-0 justify-end border-b border-border bg-background/80 px-6 backdrop-blur md:px-8'>
+    <header className='flex h-14 shrink-0 justify-end border-b border-border bg-background/80 px-4 backdrop-blur sm:px-6 lg:px-8'>
       <div className='flex items-center gap-2'>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

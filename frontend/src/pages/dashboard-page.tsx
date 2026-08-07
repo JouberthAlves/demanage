@@ -53,7 +53,7 @@ export function DashboardPage() {
             : 'As saídas já no saldo estão acima das entradas. Vale revisar cartões e recorrências.'
         }
       >
-        <div className='grid gap-3 sm:grid-cols-3'>
+        <div className='grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'>
           <div className='rounded-xl border border-border bg-black/25 p-4'>
             <p className='text-xs text-muted-foreground'>Saldo até hoje</p>
             <p
@@ -72,7 +72,7 @@ export function DashboardPage() {
               {formatCurrency(piggyTotal)}
             </p>
           </div>
-          <div className='rounded-xl border border-border bg-black/25 p-4'>
+          <div className='rounded-xl border border-border bg-black/25 p-4 sm:col-span-2 lg:col-span-1'>
             <p className='text-xs text-muted-foreground'>
               Saídas / entradas (já no saldo)
             </p>
@@ -88,7 +88,7 @@ export function DashboardPage() {
         fechamento.
       </p>
 
-      <div className='grid gap-4 sm:grid-cols-2 xl:grid-cols-3'>
+      <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
         <KpiCard
           label='Entradas já no saldo'
           value={formatCurrency(income)}
@@ -112,10 +112,11 @@ export function DashboardPage() {
               : 'Sem histórico ainda — valor = mês atual'
           }
           icon={<Wallet className='size-4' />}
+          className='sm:col-span-2 lg:col-span-1'
         />
       </div>
 
-      <div className='grid gap-4 xl:grid-cols-3'>
+      <div className='grid gap-4 lg:grid-cols-3'>
         <SectionPanel
           title='Entrada vs saída'
           description={
@@ -123,7 +124,7 @@ export function DashboardPage() {
               ? 'Comparativo dos últimos meses'
               : 'Histórico mensal ainda não disponível'
           }
-          className='xl:col-span-2'
+          className='lg:col-span-2'
         >
           <IncomeExpenseAreaChart />
         </SectionPanel>
@@ -143,7 +144,7 @@ export function DashboardPage() {
         <TopExpensesBarChart />
       </SectionPanel>
 
-      <div className='grid gap-4 xl:grid-cols-2'>
+      <div className='grid gap-4 lg:grid-cols-2'>
         <SectionPanel
           title='Este mês vs mês passado'
           description={

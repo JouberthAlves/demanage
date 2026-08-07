@@ -1,13 +1,8 @@
-import {
-  LayoutDashboard,
-  PiggyBank,
-  Receipt,
-  TrendingUp,
-  UserRound,
-} from 'lucide-react';
 import { NavLink } from 'react-router';
+
 import logo from '../../../public/favicon.svg';
 
+import { APP_NAV_ITEMS } from '@/components/layout/nav-items';
 import {
   Tooltip,
   TooltipContent,
@@ -15,22 +10,14 @@ import {
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
-const navItems = [
-  { to: '/perfil', label: 'Perfil', icon: UserRound },
-  { to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true },
-  { to: '/despesas', label: 'Despesas', icon: Receipt },
-  { to: '/cofrinho', label: 'Cofrinho', icon: PiggyBank },
-  { to: '/entradas', label: 'Entradas', icon: TrendingUp },
-];
-
 export function AppSidebar() {
   return (
-    <aside className='sticky top-0 flex h-screen w-16 shrink-0 flex-col items-center border-r border-border bg-card/20 pb-5'>
-      <div className='flex items-center justify-center w-full'>
-        <img src={logo} alt='logo' className=' mt-4 size-10 border-b w-full' />
+    <aside className='sticky top-0 hidden h-screen w-16 shrink-0 flex-col items-center border-r border-border bg-card/20 pb-5 md:flex'>
+      <div className='flex w-full items-center justify-center'>
+        <img src={logo} alt='logo' className='mt-4 size-10 w-full border-b' />
       </div>
       <nav className='flex flex-1 flex-col items-center gap-2'>
-        {navItems.map((item) => {
+        {APP_NAV_ITEMS.map((item) => {
           const Icon = item.icon;
 
           return (

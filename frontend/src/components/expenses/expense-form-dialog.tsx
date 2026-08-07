@@ -202,7 +202,7 @@ export function ExpenseFormDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className='rounded-xl sm:max-w-md'>
+        <DialogContent className='max-h-[min(90dvh,720px)] overflow-y-auto rounded-xl sm:max-w-md'>
           <DialogHeader>
             <DialogTitle>
               {expense ? 'Editar despesa' : 'Nova despesa'}
