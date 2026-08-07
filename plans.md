@@ -76,7 +76,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
   - **Meta mensal** = `goalAmount / meses` até `targetDate` (meses de calendário; mínimo 1). Recalcula ao mudar meta/data.
   - **Guardar** (só na aba Cofrinho): cria `PiggyTransaction` deposit + `Expense` `unica` categoria `cofrinho` → saldo do mês ↓.
   - **Sacar**: withdraw; valor volta ao saldo no dia/mês do saque como **Entry** `unica` tipo `outro` nome “Resgate · {cofre}” (visível). Se `isEmergency`, aviso extra no modal.
-  - **Auto-débito** (opt-in): no **dia 1** de cada mês, se ativo e cofre não arquivado/não concluído, debita `monthlyGoal` (ou o que falta pra meta) via mesmo fluxo de guardar. Idempotente por mês (`autoDebitMonth` ou unique deposit tag).
+  - **Auto-débito** (opt-in): no **dia escolhido** de cada mês (`autoDebitDay`, 1–31; meses curtos usam o último dia), se ativo e cofre não arquivado/não concluído, debita `monthlyGoal` (ou o que falta pra meta) via mesmo fluxo de guardar. Idempotente por mês (`autoDebitMonth` ou unique deposit tag).
   - **Meta atingida** (depósito que faz balance ≥ goal): confetes + parabéns + libera **Arquivar** (`archivedAt`). Arquivar some da lista ativa (não hard-delete).
   - **Excluir** com saldo > 0: modal de confirmação (não bloqueia). Cascade apaga txs; despesas/entradas ligadas ficam ou são removidas junto — **default: soft orphan ok, apaga só txs + cofre**; despesa “Cofrinho” permanece no histórico financeiro.
 
@@ -108,6 +108,8 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
   6. Confetti / arquivar / modais
 
 - [x] ~~**Responsividade**~~ — Bottom nav no mobile; sidebar só em `md+`; Despesas/Entradas em cards no mobile (tabela no desktop); grids/padding notebook; scroll em form dialogs.
+
+- [x] ~~**Split cartão / PIX**~~ — Despesa em 2 cartões ou cartão+PIX por %; valida limite disponível; parte PIX no saldo; billing/comprometimento por split.
 
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
 

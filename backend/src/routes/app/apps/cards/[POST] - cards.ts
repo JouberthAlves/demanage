@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+import { parseAbnt2Text } from '@/lib/abnt2';
 import { serializeCard } from '@/lib/card-billing';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -35,8 +36,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     const { name, limit, closingDay, expiresAt } = req.body;
+    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
 
-    if (!name?.trim()) {
+    if (!trimmedName) {
       return res.status(400).json({ error: 'Campo obrigatório: name' });
     }
 
@@ -66,7 +68,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const card = await prisma.card.create({
       data: {
         userId,
-        name: name.trim(),
+        name: trimmedName,
         limit: limit ?? null,
         closingDay: parsedClosingDay,
         expiresAt: parsedExpiresAt,

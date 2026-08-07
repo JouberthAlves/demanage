@@ -116,7 +116,7 @@ export function CreditCardTile({
               <p className='text-xs text-muted-foreground'>
                 {hasLimit
                   ? `Limite ${formatCurrency(card.limit as number)}`
-                  : 'Sem limite cadastrado'}
+                  : 'Sem limite'}
               </p>
             </div>
           </div>

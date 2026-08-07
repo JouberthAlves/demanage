@@ -1,8 +1,17 @@
 import * as React from 'react';
 
+import { sanitizeAbnt2 } from '@/lib/abnt2';
 import { cn } from '@/lib/utils';
 
-function Textarea({ className, ...props }: React.ComponentProps<'textarea'>) {
+function Textarea({
+  className,
+  onChange,
+  abnt2 = true,
+  ...props
+}: React.ComponentProps<'textarea'> & {
+  /** Filtra para caracteres do teclado ABNT2 (padrão: ligado). */
+  abnt2?: boolean;
+}) {
   return (
     <textarea
       data-slot='textarea'
@@ -11,6 +20,15 @@ function Textarea({ className, ...props }: React.ComponentProps<'textarea'>) {
         className,
       )}
       {...props}
+      onChange={(event) => {
+        if (abnt2) {
+          const sanitized = sanitizeAbnt2(event.target.value);
+          if (sanitized !== event.target.value) {
+            event.target.value = sanitized;
+          }
+        }
+        onChange?.(event);
+      }}
     />
   );
 }

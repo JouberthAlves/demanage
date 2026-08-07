@@ -10,6 +10,7 @@ import {
 } from '@/data/labels';
 import { getCardTone } from '@/lib/card-tone';
 import { isExpenseDebitedThisMonth } from '@/lib/expense-schedule';
+import { formatExpensePaymentLabel } from '@/lib/expense-splits';
 import { formatCurrency } from '@/lib/format';
 import type { Card, ExpenseCategory, RecurringExpense } from '@/types/finance';
 
@@ -23,7 +24,7 @@ const categoryColors: Record<ExpenseCategory, string> = {
 
 type ExpenseListCardProps = {
   expense: RecurringExpense;
-  card?: Card;
+  cards: Card[];
   pending?: boolean;
   onPay: () => void;
   onEdit: () => void;
@@ -32,14 +33,16 @@ type ExpenseListCardProps = {
 
 export function ExpenseListCard({
   expense,
-  card,
+  cards,
   pending,
   onPay,
   onEdit,
   onDelete,
 }: ExpenseListCardProps) {
-  const tone = card ? getCardTone(card) : null;
+  const primaryCard = cards.find((item) => item.id === expense.cardId);
+  const tone = primaryCard ? getCardTone(primaryCard) : null;
   const debited = isExpenseDebitedThisMonth(expense);
+  const paymentLabel = formatExpensePaymentLabel(expense, cards);
 
   const discountLabel =
     expense.frequency === 'unica'
@@ -94,13 +97,15 @@ export function ExpenseListCard({
       </div>
 
       <div className='mt-3 space-y-1 text-xs text-muted-foreground'>
-        {card ? (
-          <p className='inline-flex items-center gap-2'>
-            <span
-              className='size-2.5 rounded-sm'
-              style={{ backgroundColor: tone?.fill }}
-            />
-            {card.name}
+        {paymentLabel ? (
+          <p className='inline-flex min-w-0 items-center gap-2 break-words [overflow-wrap:anywhere]'>
+            {primaryCard && (expense.splits?.length ?? 0) <= 1 ? (
+              <span
+                className='size-2.5 shrink-0 rounded-sm'
+                style={{ backgroundColor: tone?.fill }}
+              />
+            ) : null}
+            {paymentLabel}
           </p>
         ) : null}
         {discountLabel ? <p>Desconto: {discountLabel}</p> : null}

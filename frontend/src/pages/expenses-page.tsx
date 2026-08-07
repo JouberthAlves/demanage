@@ -54,6 +54,7 @@ import {
   expenseContributionThisMonth,
   isExpenseDebitedThisMonth,
 } from '@/lib/expense-schedule';
+import { formatExpensePaymentLabel } from '@/lib/expense-splits';
 import { formatCurrency } from '@/lib/format';
 import { selectMonthlyExpenses, useFinanceStore } from '@/stores/finance-store';
 import type { RecurringExpense } from '@/types/finance';
@@ -225,20 +226,17 @@ export function ExpensesPage() {
         ) : (
           <>
             <div className='space-y-3 md:hidden'>
-              {filtered.map((expense) => {
-                const card = cards.find((item) => item.id === expense.cardId);
-                return (
+              {filtered.map((expense) => (
                   <ExpenseListCard
                     key={expense.id}
                     expense={expense}
-                    card={card}
+                    cards={cards}
                     pending={removeExpense.isPending}
                     onPay={() => setConfirmPay(expense)}
                     onEdit={() => openEdit(expense)}
                     onDelete={() => setConfirmDelete(expense)}
                   />
-                );
-              })}
+              ))}
             </div>
 
             <div className='hidden max-h-[70vh] overflow-auto rounded-xl border border-border bg-black/15 md:block'>
@@ -257,6 +255,10 @@ export function ExpensesPage() {
                 </TableHeader>
                 <TableBody>
                   {filtered.map((expense) => {
+                    const paymentLabel = formatExpensePaymentLabel(
+                      expense,
+                      cards,
+                    );
                     const card = cards.find(
                       (item) => item.id === expense.cardId,
                     );
@@ -296,13 +298,17 @@ export function ExpensesPage() {
                           {EXPENSE_FREQUENCY_LABELS[expense.frequency]}
                         </TableCell>
                         <TableCell>
-                          {card ? (
-                            <span className='inline-flex items-center gap-2 text-muted-foreground'>
-                              <span
-                                className='size-2.5 rounded-sm'
-                                style={{ backgroundColor: tone?.fill }}
-                              />
-                              {card.name}
+                          {paymentLabel ? (
+                            <span className='inline-flex max-w-52 items-center gap-2 text-muted-foreground'>
+                              {card && (expense.splits?.length ?? 0) <= 1 ? (
+                                <span
+                                  className='size-2.5 shrink-0 rounded-sm'
+                                  style={{ backgroundColor: tone?.fill }}
+                                />
+                              ) : null}
+                              <span className='min-w-0 break-words [overflow-wrap:anywhere]'>
+                                {paymentLabel}
+                              </span>
                             </span>
                           ) : (
                             <span className='text-muted-foreground'>—</span>

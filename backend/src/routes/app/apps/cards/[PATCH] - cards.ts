@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+import { parseAbnt2Text } from '@/lib/abnt2';
 import { serializeCard } from '@/lib/card-billing';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -45,6 +46,15 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     const { name, limit, closingDay, expiresAt } = req.body;
 
+    let nextName: string | undefined;
+    if (name !== undefined) {
+      const parsed = parseAbnt2Text(name, { maxLength: 100, required: true });
+      if (!parsed) {
+        return res.status(400).json({ error: 'Nome inválido' });
+      }
+      nextName = parsed;
+    }
+
     let parsedExpiresAt: Date | null | undefined;
     let parsedClosingDay: number | null | undefined;
     try {
@@ -71,7 +81,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const card = await prisma.card.update({
       where: { id },
       data: {
-        ...(name !== undefined ? { name: String(name).trim() } : {}),
+        ...(nextName !== undefined ? { name: nextName } : {}),
         ...(limit !== undefined ? { limit: limit || null } : {}),
         ...(parsedClosingDay !== undefined
           ? { closingDay: parsedClosingDay }

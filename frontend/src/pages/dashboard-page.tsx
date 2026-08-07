@@ -11,7 +11,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { usePiggyBanks } from '@/hooks/use-piggy-banks';
-import { formatCurrency, formatPercent, getFirstName } from '@/lib/format';
+import { formatCurrencyCompact, formatPercent, getFirstName, moneyValueClass } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
 import {
   selectAverageMonthlyExpense,
@@ -35,6 +35,9 @@ export function DashboardPage() {
     () => piggyBanks.reduce((sum, bank) => sum + bank.balance, 0),
     [piggyBanks],
   );
+  const balanceLabel = formatCurrencyCompact(balance);
+  const piggyLabel = formatCurrencyCompact(piggyTotal);
+  const shareLabel = formatPercent(recurringShare);
 
   return (
     <div className='space-y-6'>
@@ -53,31 +56,38 @@ export function DashboardPage() {
             : 'As saídas já no saldo estão acima das entradas. Vale revisar cartões e recorrências.'
         }
       >
-        <div className='grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'>
-          <div className='rounded-xl border border-border bg-black/25 p-4'>
+        <div className='grid min-w-0 gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'>
+          <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
             <p className='text-xs text-muted-foreground'>Saldo até hoje</p>
             <p
+              title={balanceLabel}
               className={
                 balance >= 0
-                  ? 'mt-2 text-2xl font-semibold text-neon-green'
-                  : 'mt-2 text-2xl font-semibold text-rose-400'
+                  ? `mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold tabular-nums text-neon-green ${moneyValueClass(balanceLabel)}`
+                  : `mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold tabular-nums text-rose-400 ${moneyValueClass(balanceLabel)}`
               }
             >
-              {formatCurrency(balance)}
+              {balanceLabel}
             </p>
           </div>
-          <div className='rounded-xl border border-border bg-black/25 p-4'>
+          <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
             <p className='text-xs text-muted-foreground'>Total no cofre</p>
-            <p className='mt-2 text-2xl font-semibold text-violet-300'>
-              {formatCurrency(piggyTotal)}
+            <p
+              title={piggyLabel}
+              className={`mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold tabular-nums text-violet-300 ${moneyValueClass(piggyLabel)}`}
+            >
+              {piggyLabel}
             </p>
           </div>
-          <div className='rounded-xl border border-border bg-black/25 p-4 sm:col-span-2 lg:col-span-1'>
+          <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4 sm:col-span-2 lg:col-span-1'>
             <p className='text-xs text-muted-foreground'>
               Saídas / entradas (já no saldo)
             </p>
-            <p className='mt-2 text-2xl font-semibold text-neon-amber'>
-              {formatPercent(recurringShare)}
+            <p
+              title={shareLabel}
+              className={`mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold tabular-nums text-neon-amber ${moneyValueClass(shareLabel)}`}
+            >
+              {shareLabel}
             </p>
           </div>
         </div>
@@ -91,21 +101,21 @@ export function DashboardPage() {
       <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
         <KpiCard
           label='Entradas já no saldo'
-          value={formatCurrency(income)}
+          value={formatCurrencyCompact(income)}
           hint='Após o dia de recebimento'
           tone='positive'
           icon={<ArrowUpRight className='size-4 text-neon-green' />}
         />
         <KpiCard
           label='Saídas já no saldo'
-          value={formatCurrency(expenses)}
+          value={formatCurrencyCompact(expenses)}
           hint='Após o dia de desconto (sem cartão aberto)'
           tone='amber'
           icon={<ArrowDownRight className='size-4 text-neon-amber' />}
         />
         <KpiCard
           label='Gasto médio mensal'
-          value={formatCurrency(averageExpense)}
+          value={formatCurrencyCompact(averageExpense)}
           hint={
             hasHistory
               ? 'Média dos meses com histórico'

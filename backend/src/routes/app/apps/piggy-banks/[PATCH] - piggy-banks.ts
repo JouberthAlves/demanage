@@ -1,13 +1,15 @@
 import { Router, Request, Response } from 'express';
 
-import { prisma } from '@/lib/prisma';
+import { parseAbnt2Text } from '@/lib/abnt2';
 import {
   computeMonthlyGoal,
+  parseAutoDebitDay,
   parseTargetDate,
   serializePiggyBank,
 } from '@/lib/piggy';
 import { parsePositiveAmount } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
+import { prisma } from '@/lib/prisma';
 
 const router = Router();
 
@@ -32,7 +34,8 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Cofre arquivado não pode ser editado' });
     }
 
-    const { name, goalAmount, targetDate, autoDebit, isEmergency } = req.body;
+    const { name, goalAmount, targetDate, autoDebit, autoDebitDay, isEmergency } =
+      req.body;
 
     let nextGoal = Number(existing.goalAmount);
     if (goalAmount !== undefined) {
@@ -52,16 +55,42 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       }
     }
 
+    const nextAutoDebit =
+      autoDebit !== undefined ? Boolean(autoDebit) : existing.autoDebit;
+
+    let nextAutoDebitDay = existing.autoDebitDay;
+    if (autoDebitDay !== undefined || (autoDebit !== undefined && nextAutoDebit)) {
+      const day = parseAutoDebitDay(
+        autoDebitDay !== undefined ? autoDebitDay : existing.autoDebitDay,
+      );
+      if (nextAutoDebit && day == null) {
+        return res.status(400).json({
+          error: 'Dia do débito automático deve ser entre 1 e 31',
+        });
+      }
+      if (day != null) nextAutoDebitDay = day;
+    }
+
     const monthlyGoal = computeMonthlyGoal(nextGoal, nextTarget);
+
+    let nextName: string | undefined;
+    if (name !== undefined) {
+      const parsed = parseAbnt2Text(name, { maxLength: 50, required: true });
+      if (!parsed) {
+        return res.status(400).json({ error: 'Nome inválido' });
+      }
+      nextName = parsed;
+    }
 
     const bank = await prisma.piggyBank.update({
       where: { id },
       data: {
-        ...(name !== undefined ? { name: String(name).trim() } : {}),
+        ...(nextName !== undefined ? { name: nextName } : {}),
         ...(goalAmount !== undefined ? { goalAmount: nextGoal } : {}),
         ...(targetDate !== undefined ? { targetDate: nextTarget } : {}),
         monthlyGoal,
-        ...(autoDebit !== undefined ? { autoDebit: Boolean(autoDebit) } : {}),
+        ...(autoDebit !== undefined ? { autoDebit: nextAutoDebit } : {}),
+        autoDebitDay: nextAutoDebitDay,
         ...(isEmergency !== undefined
           ? { isEmergency: Boolean(isEmergency) }
           : {}),

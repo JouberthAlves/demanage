@@ -9,7 +9,7 @@ import {
   YAxis,
 } from 'recharts';
 
-import { formatCurrency, formatMonthLabel } from '@/lib/format';
+import { formatCurrencyCompact, formatMonthLabel } from '@/lib/format';
 import {
   selectMonthlyExpenses,
   selectMonthlyIncome,
@@ -30,8 +30,8 @@ export function IncomeExpenseAreaChart() {
         <div className='space-y-1'>
           <p className='font-medium'>Histórico mensal em breve</p>
           <p className='text-sm text-muted-foreground'>
-            Este mês no saldo: {formatCurrency(currentIncome)} entradas ·{' '}
-            {formatCurrency(currentExpense)} saídas.
+            Este mês no saldo: {formatCurrencyCompact(currentIncome)} entradas ·{' '}
+            {formatCurrencyCompact(currentExpense)} saídas.
           </p>
         </div>
       </div>
@@ -89,7 +89,7 @@ export function IncomeExpenseAreaChart() {
               borderRadius: 12,
             }}
             labelStyle={{ color: '#f5f5f5' }}
-            formatter={(value) => formatCurrency(Number(value))}
+            formatter={(value) => formatCurrencyCompact(Number(value))}
           />
           <Area
             type='monotone'

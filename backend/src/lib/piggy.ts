@@ -1,7 +1,8 @@
 import type { PiggyBank, PiggyTransaction } from '@prisma/client';
 
-import { prisma } from '@/lib/prisma';
+import { todayInSaoPaulo } from '@/lib/card-billing';
 import { parseDateOnly } from '@/lib/entry-schedule';
+import { prisma } from '@/lib/prisma';
 
 export function monthsUntilTarget(from: Date, targetDate: Date) {
   const fromYear = from.getUTCFullYear();
@@ -44,6 +45,7 @@ export function serializePiggyBank(
     targetDate: bank.targetDate.toISOString().slice(0, 10),
     monthlyGoal,
     autoDebit: bank.autoDebit,
+    autoDebitDay: bank.autoDebitDay,
     isEmergency: bank.isEmergency,
     archivedAt: bank.archivedAt?.toISOString() ?? null,
     completedAt: bank.completedAt?.toISOString() ?? null,
@@ -249,21 +251,26 @@ export async function withdrawFromPiggyBank({
   return result;
 }
 
+export function parseAutoDebitDay(value: unknown): number | null {
+  const day = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(day) || day < 1 || day > 31) return null;
+  return day;
+}
+
 /**
- * Auto-débito só no dia 1 do mês.
- * Cofres criados no mês corrente não debitam até o próximo dia 1
- * (o usuário escolhe quando fazer o primeiro depósito).
+ * Auto-débito no dia escolhido (America/Sao_Paulo).
+ * Cofres criados neste mês, no dia do débito ou depois, esperam o próximo ciclo.
  */
 export async function processPiggyAutoDebits(userId: string) {
   const now = new Date();
-  if (now.getDate() !== 1) {
-    return { createdCount: 0 };
-  }
+  const todaySp = todayInSaoPaulo(now);
+  const year = todaySp.getUTCFullYear();
+  const monthIndex = todaySp.getUTCMonth();
+  const todayDay = todaySp.getUTCDate();
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
 
-  const monthStart = new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
-  const monthEnd = new Date(
-    Date.UTC(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59),
-  );
+  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 12, 0, 0));
+  const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59));
 
   const banks = await prisma.piggyBank.findMany({
     where: {
@@ -278,8 +285,14 @@ export async function processPiggyAutoDebits(userId: string) {
   let createdCount = 0;
 
   for (const bank of banks) {
-    // Criado neste mês → espera o próximo ciclo (evita depositar ao abrir a aba)
-    if (bank.createdAt.getTime() >= monthStart.getTime()) {
+    const debitDay = Math.min(bank.autoDebitDay || 1, lastDay);
+    if (todayDay !== debitDay) continue;
+
+    const debitInstant = new Date(
+      Date.UTC(year, monthIndex, debitDay, 12, 0, 0),
+    );
+    // Criado no dia do débito ou depois neste mês → próximo ciclo
+    if (bank.createdAt.getTime() >= debitInstant.getTime()) {
       continue;
     }
 

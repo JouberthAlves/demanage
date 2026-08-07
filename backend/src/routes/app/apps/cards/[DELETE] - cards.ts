@@ -23,8 +23,20 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     await prisma.$transaction(async (tx) => {
+      const splitLinks = await tx.expenseSplit.findMany({
+        where: { cardId: id, expense: { userId } },
+        select: { expenseId: true },
+      });
+      const expenseIds = [...new Set(splitLinks.map((row) => row.expenseId))];
+
       await tx.expense.deleteMany({
-        where: { userId, cardId: id },
+        where: {
+          userId,
+          OR: [
+            { cardId: id },
+            ...(expenseIds.length > 0 ? [{ id: { in: expenseIds } }] : []),
+          ],
+        },
       });
 
       await tx.card.delete({ where: { id } });

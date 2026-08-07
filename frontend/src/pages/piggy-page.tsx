@@ -116,14 +116,17 @@ export function PiggyPage() {
       <PageHero
         eyebrow='Reservas'
         title={`${banks.length} cofre${banks.length === 1 ? '' : 's'}`}
-        description='Meta mensal = meta final ÷ meses até a data. Auto-débito no dia 1, se ligado.'
+        description='Meta mensal = meta final ÷ meses até a data. Auto-débito no dia que você escolher, se ligado.'
       >
-        <div className='rounded-xl border border-border bg-black/25 p-4'>
-          <p className='text-xs text-muted-foreground'>Total nos cofres</p>
-          <p className='mt-2 text-2xl font-semibold text-violet-300'>
-            {formatCurrency(totalBalance)}
-          </p>
-        </div>
+          <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
+            <p className='text-xs text-muted-foreground'>Total nos cofres</p>
+            <p
+              title={formatCurrency(totalBalance)}
+              className='mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold tabular-nums text-violet-300'
+            >
+              {formatCurrency(totalBalance)}
+            </p>
+          </div>
       </PageHero>
 
       {isLoading ? (
@@ -159,11 +162,16 @@ export function PiggyPage() {
               <SectionPanel key={bank.id}>
                 <div className='flex flex-col gap-4'>
                   <div className='flex items-start justify-between gap-3'>
-                    <div className='min-w-0'>
-                      <div className='flex flex-wrap items-center gap-2'>
-                        <h3 className='truncate text-base font-medium'>
-                          {bank.name}
-                        </h3>
+                    <div className='min-w-0 flex-1'>
+                      <h3
+                        className='truncate text-base font-medium'
+                        title={bank.name}
+                      >
+                        {bank.name.length > 50
+                          ? `${bank.name.slice(0, 50)}...`
+                          : bank.name}
+                      </h3>
+                      <div className='mt-1.5 flex flex-wrap items-center gap-2'>
                         {bank.isEmergency ? (
                           <Badge
                             variant='outline'
@@ -174,7 +182,10 @@ export function PiggyPage() {
                           </Badge>
                         ) : null}
                         {bank.autoDebit ? (
-                          <Badge variant='outline'>Auto-débito</Badge>
+                          <Badge variant='outline'>
+                            Auto-débito · dia{' '}
+                            {String(bank.autoDebitDay || 1).padStart(2, '0')}
+                          </Badge>
                         ) : null}
                         {goalDone ? (
                           <Badge className='bg-neon-green/20 text-neon-green'>
@@ -190,6 +201,7 @@ export function PiggyPage() {
                     <Button
                       variant='ghost'
                       size='icon-sm'
+                      className='shrink-0'
                       onClick={() => setConfirmDelete(bank)}
                     >
                       <Trash2 />
@@ -227,7 +239,7 @@ export function PiggyPage() {
                       disabled={goalDone}
                       onClick={() => openMoney(bank, 'deposit')}
                     >
-                      Guardar…
+                      Guardar
                     </Button>
                     <Button
                       size='sm'
@@ -344,10 +356,25 @@ export function PiggyPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir cofre?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {(confirmDelete?.balance ?? 0) > 0
-                ? `Este cofre possui saldo de ${formatCurrency(confirmDelete?.balance ?? 0)}. Deseja excluir mesmo assim? As despesas/entradas já lançadas no histórico financeiro permanecem.`
-                : `O cofre "${confirmDelete?.name}" será removido.`}
+            <AlertDialogDescription asChild>
+              <div>
+                {(confirmDelete?.balance ?? 0) > 0 ? (
+                  <>
+                    Este cofre possui saldo de{' '}
+                    {formatCurrency(confirmDelete?.balance ?? 0)}. Deseja
+                    excluir mesmo assim? As despesas/entradas já lançadas no
+                    histórico financeiro permanecem.
+                  </>
+                ) : (
+                  <>
+                    O cofre{' '}
+                    <span className='break-all font-medium text-foreground'>
+                      &quot;{confirmDelete?.name}&quot;
+                    </span>{' '}
+                    será removido.
+                  </>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
