@@ -100,7 +100,7 @@ export function CardFormDialog({
     }
 
     const payload = {
-      name: form.name.trim(),
+      name: form.name.trim().slice(0, 100),
       limit: form.limit ? parseCurrencyInput(form.limit) : null,
       closingDay: Number(closingNormalized),
       expiresAt,
@@ -146,6 +146,7 @@ export function CardFormDialog({
                 setForm((current) => ({ ...current, name: event.target.value }))
               }
               placeholder='Ex: Nubank'
+              maxLength={100}
               className='rounded-lg'
             />
           </div>

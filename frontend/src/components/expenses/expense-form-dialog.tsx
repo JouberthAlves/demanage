@@ -170,7 +170,7 @@ export function ExpenseFormDialog({
     }
 
     const payload = {
-      name: form.name.trim(),
+      name: form.name.trim().slice(0, 100),
       amount,
       category,
       frequency: form.frequency,
@@ -178,7 +178,7 @@ export function ExpenseFormDialog({
       dueDay,
       startsAt,
       endsAt: isRecurring ? form.endsAt || null : null,
-      notes: form.notes.trim() || null,
+      notes: form.notes.trim().slice(0, 500) || null,
       customTagId,
     };
 
@@ -202,7 +202,7 @@ export function ExpenseFormDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className='max-h-[min(90dvh,720px)] overflow-y-auto rounded-xl sm:max-w-md'>
+        <DialogContent className='max-h-[min(90dvh,720px)] overflow-x-hidden overflow-y-auto rounded-xl sm:max-w-md'>
           <DialogHeader>
             <DialogTitle>
               {expense ? 'Editar despesa' : 'Nova despesa'}
@@ -214,9 +214,9 @@ export function ExpenseFormDialog({
 
           <form
             onSubmit={(event) => void handleSubmit(event)}
-            className='flex flex-col gap-4'
+            className='flex min-w-0 flex-col gap-4'
           >
-            <div className='flex flex-col gap-2'>
+            <div className='flex min-w-0 flex-col gap-2'>
               <Label htmlFor='expense-name'>Nome</Label>
               <Input
                 id='expense-name'
@@ -228,7 +228,8 @@ export function ExpenseFormDialog({
                   }))
                 }
                 placeholder='Ex: Netflix'
-                className='rounded-lg'
+                maxLength={100}
+                className='min-w-0 rounded-lg'
               />
             </div>
 
@@ -469,7 +470,7 @@ export function ExpenseFormDialog({
               ) : null}
             </div>
 
-            <div className='flex flex-col gap-2'>
+            <div className='flex min-w-0 flex-col gap-2'>
               <Label htmlFor='expense-notes'>Observações</Label>
               <Textarea
                 id='expense-notes'
@@ -481,8 +482,12 @@ export function ExpenseFormDialog({
                   }))
                 }
                 placeholder='Opcional'
-                className='min-h-20 rounded-lg'
+                maxLength={500}
+                className='max-h-40 min-h-20 field-sizing-fixed overflow-y-auto rounded-lg'
               />
+              <p className='text-xs text-muted-foreground'>
+                {form.notes.length}/500
+              </p>
             </div>
 
             <DialogFooter>

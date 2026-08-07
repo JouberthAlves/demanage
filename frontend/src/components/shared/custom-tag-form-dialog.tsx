@@ -52,7 +52,7 @@ export function CustomTagFormDialog({
     try {
       const tag = await createTag.mutateAsync({
         scope,
-        name: name.trim(),
+        name: name.trim().slice(0, 100),
         color,
       });
       toast.success('Tipo criado');
@@ -87,6 +87,7 @@ export function CustomTagFormDialog({
               value={name}
               onChange={(event) => setName(event.target.value)}
               placeholder='Ex: Academia'
+              maxLength={100}
               className='rounded-lg'
               autoFocus
             />
