@@ -33,4 +33,4 @@ RUN chmod +x ./entrypoint.sh
 ENV NODE_ENV=production
 EXPOSE 8888
 
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["/bin/sh", "./entrypoint.sh"]
