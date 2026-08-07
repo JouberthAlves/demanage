@@ -5,6 +5,7 @@ import { Dialog as DialogPrimitive } from 'radix-ui';
 
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
+import { shouldIgnoreDialogDismiss } from '@/lib/overlay-dismiss';
 import { XIcon } from 'lucide-react';
 
 function Dialog({
@@ -47,25 +48,13 @@ function DialogOverlay({
   );
 }
 
-function shouldIgnoreDialogDismiss(target: EventTarget | null) {
-  if (!(target instanceof Element)) {
-    return Boolean(document.querySelector('[data-slot="select-content"]'));
-  }
-
-  // Select content is portaled outside the dialog; dismissing the select
-  // must not close the dialog.
-  return Boolean(
-    target.closest('[data-slot="select-content"]') ||
-      document.querySelector('[data-slot="select-content"]'),
-  );
-}
-
 function DialogContent({
   className,
   children,
   showCloseButton = true,
   onPointerDownOutside,
   onInteractOutside,
+  onFocusOutside,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
@@ -80,16 +69,22 @@ function DialogContent({
           className,
         )}
         onPointerDownOutside={(event) => {
-          if (shouldIgnoreDialogDismiss(event.target)) {
+          if (shouldIgnoreDialogDismiss(event)) {
             event.preventDefault();
           }
           onPointerDownOutside?.(event);
         }}
         onInteractOutside={(event) => {
-          if (shouldIgnoreDialogDismiss(event.target)) {
+          if (shouldIgnoreDialogDismiss(event)) {
             event.preventDefault();
           }
           onInteractOutside?.(event);
+        }}
+        onFocusOutside={(event) => {
+          if (shouldIgnoreDialogDismiss(event)) {
+            event.preventDefault();
+          }
+          onFocusOutside?.(event);
         }}
         {...props}
       >
@@ -172,7 +167,7 @@ function DialogDescription({
     <DialogPrimitive.Description
       data-slot='dialog-description'
       className={cn(
-        'text-sm text-muted-foreground *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground',
+        'min-w-0 break-words text-sm text-muted-foreground [overflow-wrap:anywhere] *:[a]:underline *:[a]:underline-offset-3 *:[a]:hover:text-foreground',
         className,
       )}
       {...props}

@@ -35,6 +35,7 @@ export type PiggyBank = {
   targetDate: string;
   monthlyGoal: number;
   autoDebit: boolean;
+  autoDebitDay: number;
   isEmergency: boolean;
   archivedAt: string | null;
   completedAt: string | null;
@@ -59,6 +60,17 @@ export type PiggyTransaction = {
 };
 export type ExpenseFrequency = 'mensal' | 'semanal' | 'unica';
 
+export type ExpenseSplitKind = 'card' | 'pix';
+
+export type ExpenseSplit = {
+  id?: string;
+  kind: ExpenseSplitKind;
+  cardId?: string | null;
+  percent: number;
+  amount: number;
+  cardName?: string | null;
+};
+
 export type RecurringExpense = {
   id: string;
   name: string;
@@ -78,6 +90,7 @@ export type RecurringExpense = {
   isInvoice?: boolean;
   customTagId?: string;
   customTag?: Pick<CustomTag, 'id' | 'name' | 'color'>;
+  splits?: ExpenseSplit[];
 };
 
 export type IncomeType = 'salario' | 'freelance' | 'outro';

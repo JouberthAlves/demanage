@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CurrencyInput } from '@/components/ui/currency-input';
 import {
   Dialog,
@@ -36,6 +37,7 @@ type CardFormDialogProps = {
 type FormState = {
   name: string;
   limit: string;
+  noLimit: boolean;
   closingDay: string;
   expiresAt: string;
 };
@@ -43,6 +45,7 @@ type FormState = {
 const emptyForm: FormState = {
   name: '',
   limit: '',
+  noLimit: false,
   closingDay: '',
   expiresAt: '',
 };
@@ -64,6 +67,7 @@ export function CardFormDialog({
       setForm({
         name: card.name,
         limit: card.limit != null ? formatBrlInputValue(card.limit) : '',
+        noLimit: card.limit == null,
         closingDay: card.closingDay
           ? String(card.closingDay).padStart(2, '0')
           : '',
@@ -83,6 +87,11 @@ export function CardFormDialog({
       return;
     }
 
+    if (!form.noLimit && !form.limit.trim()) {
+      toast.error('Informe o limite ou marque Sem limite');
+      return;
+    }
+
     let expiresAt: string | null = null;
     if (form.expiresAt.trim()) {
       const parsed = parseCardExpiryInput(form.expiresAt);
@@ -99,9 +108,18 @@ export function CardFormDialog({
       return;
     }
 
+    const parsedLimit = form.noLimit
+      ? null
+      : parseCurrencyInput(form.limit);
+
+    if (!form.noLimit && (!parsedLimit || parsedLimit <= 0)) {
+      toast.error('Informe um limite válido');
+      return;
+    }
+
     const payload = {
       name: form.name.trim().slice(0, 100),
-      limit: form.limit ? parseCurrencyInput(form.limit) : null,
+      limit: parsedLimit,
       closingDay: Number(closingNormalized),
       expiresAt,
     };
@@ -152,15 +170,45 @@ export function CardFormDialog({
           </div>
 
           <div className='flex flex-col gap-2'>
-            <Label htmlFor='card-limit'>Limite</Label>
+            <div className='flex items-center justify-between gap-3'>
+              <Label htmlFor='card-limit'>Limite</Label>
+              <label
+                htmlFor='card-no-limit'
+                className='flex cursor-pointer items-center gap-2 text-sm text-muted-foreground'
+              >
+                <Checkbox
+                  id='card-no-limit'
+                  checked={form.noLimit}
+                  onCheckedChange={(checked) => {
+                    const noLimit = checked === true;
+                    setForm((current) => ({
+                      ...current,
+                      noLimit,
+                      limit: noLimit ? '' : current.limit,
+                    }));
+                  }}
+                />
+                Sem limite
+              </label>
+            </div>
             <CurrencyInput
               id='card-limit'
               value={form.limit}
               onValueChange={(limit) =>
-                setForm((current) => ({ ...current, limit }))
+                setForm((current) => ({
+                  ...current,
+                  limit,
+                  noLimit: false,
+                }))
               }
+              disabled={form.noLimit}
               className='rounded-lg'
             />
+            {form.noLimit ? (
+              <p className='text-xs text-muted-foreground'>
+                O cartão não entra no gráfico de comprometimento do limite.
+              </p>
+            ) : null}
           </div>
 
           <div className='grid grid-cols-2 gap-3'>

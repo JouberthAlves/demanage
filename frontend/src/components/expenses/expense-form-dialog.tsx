@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { CurrencyInput } from '@/components/ui/currency-input';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -36,7 +37,13 @@ import {
   formatStartsAtPreview,
 } from '@/lib/expense-schedule';
 import {
+  availableCardLimit,
+  buildCommittedByCard,
+} from '@/lib/expense-splits';
+import type { ExpensePayload } from '@/lib/expenses-api';
+import {
   formatBrlInputValue,
+  formatCurrency,
   maskClosingDayInput,
   normalizeClosingDayInput,
   parseCurrencyInput,
@@ -54,12 +61,17 @@ type ExpenseFormDialogProps = {
   expense: RecurringExpense | null;
 };
 
+type PayMode = 'none' | 'one_card' | 'two_cards' | 'card_pix';
+
 type FormState = {
   name: string;
   amount: string;
   categoryKey: string;
   frequency: ExpenseFrequency;
+  payMode: PayMode;
   cardId: string;
+  cardId2: string;
+  cardPercent: string;
   dueDay: string;
   dueMonth: string;
   endsAt: string;
@@ -77,7 +89,10 @@ const emptyForm: FormState = {
   amount: '',
   categoryKey: 'assinatura',
   frequency: 'mensal',
+  payMode: 'none',
   cardId: 'none',
+  cardId2: 'none',
+  cardPercent: '70',
   dueDay: '05',
   dueMonth: currentMonthValue(),
   endsAt: '',
@@ -89,12 +104,27 @@ function categoryKeyFromExpense(expense: RecurringExpense) {
   return expense.category;
 }
 
+function payModeFromExpense(expense: RecurringExpense): PayMode {
+  const splits = expense.splits ?? [];
+  const cardSplits = splits.filter((split) => split.kind === 'card');
+  const pixSplits = splits.filter((split) => split.kind === 'pix');
+  if (cardSplits.length === 2) return 'two_cards';
+  if (cardSplits.length === 1 && pixSplits.length === 1) return 'card_pix';
+  if (cardSplits.length === 1 || expense.cardId) return 'one_card';
+  return 'none';
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
 export function ExpenseFormDialog({
   open,
   onOpenChange,
   expense,
 }: ExpenseFormDialogProps) {
   const cards = useFinanceStore((state) => state.profile.cards);
+  const expenses = useFinanceStore((state) => state.expenses);
   const { data: customTags = [] } = useCustomTags('expense');
   const createExpense = useCreateExpense();
   const updateExpense = useUpdateExpense();
@@ -105,6 +135,44 @@ export function ExpenseFormDialog({
   const isUnique = form.frequency === 'unica';
   const isRecurring =
     form.frequency === 'mensal' || form.frequency === 'semanal';
+  const validCards = cards.filter((card) => !card.expired);
+  const committedByCard = buildCommittedByCard(
+    expenses.filter((item) => item.id !== expense?.id),
+  );
+  const amountValue = parseCurrencyInput(form.amount);
+  const percent1 = Math.min(
+    99,
+    Math.max(1, Number(form.cardPercent) || 0),
+  );
+  const percent2 = roundMoney(100 - percent1);
+  const share1 = roundMoney((amountValue * percent1) / 100);
+  const share2 = roundMoney(amountValue - share1);
+
+  const limitBlocked = (() => {
+    const shares: Array<{ cardId: string; amount: number }> = [];
+    if (form.payMode === 'one_card' && form.cardId !== 'none') {
+      shares.push({ cardId: form.cardId, amount: amountValue });
+    } else if (form.payMode === 'two_cards') {
+      if (form.cardId !== 'none') {
+        shares.push({ cardId: form.cardId, amount: share1 });
+      }
+      if (form.cardId2 !== 'none') {
+        shares.push({ cardId: form.cardId2, amount: share2 });
+      }
+    } else if (form.payMode === 'card_pix' && form.cardId !== 'none') {
+      shares.push({ cardId: form.cardId, amount: share1 });
+    }
+
+    return shares.some((share) => {
+      const card = cards.find((item) => item.id === share.cardId);
+      if (!card || card.limit == null) return false;
+      const available = availableCardLimit({
+        limit: card.limit,
+        committed: committedByCard.get(card.id) ?? 0,
+      });
+      return available != null && share.amount > available + 0.001;
+    });
+  })();
 
   useEffect(() => {
     if (!open) return;
@@ -113,13 +181,26 @@ export function ExpenseFormDialog({
       const startsMonth = expense.startsAt
         ? String(Number(expense.startsAt.slice(5, 7)))
         : currentMonthValue();
+      const mode = payModeFromExpense(expense);
+      const splits = expense.splits ?? [];
+      const cardSplits = splits.filter((split) => split.kind === 'card');
+      const firstCard =
+        cardSplits[0]?.cardId ?? expense.cardId ?? 'none';
+      const secondCard = cardSplits[1]?.cardId ?? 'none';
+      const firstPercent =
+        mode === 'two_cards' || mode === 'card_pix'
+          ? String(Math.round(Number(cardSplits[0]?.percent ?? 70)))
+          : '70';
 
       setForm({
         name: expense.name,
         amount: formatBrlInputValue(expense.amount),
         categoryKey: categoryKeyFromExpense(expense),
         frequency: expense.frequency,
-        cardId: expense.cardId ?? 'none',
+        payMode: mode,
+        cardId: firstCard,
+        cardId2: secondCard,
+        cardPercent: firstPercent,
         dueDay: expense.dueDay
           ? String(expense.dueDay).padStart(2, '0')
           : '05',
@@ -169,17 +250,92 @@ export function ExpenseFormDialog({
       }
     }
 
-    const payload = {
+    let cardId: string | null = null;
+    let splits: ExpensePayload['splits'] = null;
+
+    if (form.payMode === 'one_card') {
+      if (form.cardId === 'none') {
+        toast.error('Selecione um cartão');
+        return;
+      }
+      cardId = form.cardId;
+      splits = [{ kind: 'card', cardId: form.cardId, percent: 100 }];
+    } else if (form.payMode === 'two_cards') {
+      if (form.cardId === 'none' || form.cardId2 === 'none') {
+        toast.error('Selecione os dois cartões');
+        return;
+      }
+      if (form.cardId === form.cardId2) {
+        toast.error('Escolha dois cartões diferentes');
+        return;
+      }
+      if (percent1 < 1 || percent1 > 99) {
+        toast.error('Informe um percentual entre 1 e 99');
+        return;
+      }
+      splits = [
+        { kind: 'card', cardId: form.cardId, percent: percent1 },
+        { kind: 'card', cardId: form.cardId2, percent: percent2 },
+      ];
+    } else if (form.payMode === 'card_pix') {
+      if (form.cardId === 'none') {
+        toast.error('Selecione o cartão');
+        return;
+      }
+      if (percent1 < 1 || percent1 > 99) {
+        toast.error('Informe um percentual entre 1 e 99');
+        return;
+      }
+      splits = [
+        { kind: 'card', cardId: form.cardId, percent: percent1 },
+        { kind: 'pix', percent: percent2 },
+      ];
+    } else {
+      splits = [];
+      cardId = null;
+    }
+
+    const cardShares: Array<{ cardId: string; amount: number }> = [];
+    if (form.payMode === 'one_card' && form.cardId !== 'none') {
+      cardShares.push({ cardId: form.cardId, amount });
+    }
+    if (form.payMode === 'two_cards') {
+      cardShares.push(
+        { cardId: form.cardId, amount: share1 },
+        { cardId: form.cardId2, amount: share2 },
+      );
+    }
+    if (form.payMode === 'card_pix' && form.cardId !== 'none') {
+      cardShares.push({ cardId: form.cardId, amount: share1 });
+    }
+
+    for (const share of cardShares) {
+      const card = cards.find((item) => item.id === share.cardId);
+      if (!card || card.limit == null) continue;
+      const available = availableCardLimit({
+        limit: card.limit,
+        committed: committedByCard.get(card.id) ?? 0,
+      });
+      if (available != null && share.amount > available + 0.001) {
+        toast.error(
+          `Limite insuficiente no cartão ${card.name} (disponível ${formatCurrency(available)})`,
+        );
+        return;
+      }
+    }
+
+    const payload: ExpensePayload = {
       name: form.name.trim().slice(0, 100),
       amount,
       category,
       frequency: form.frequency,
-      cardId: form.cardId === 'none' ? null : form.cardId,
+      cardId,
       dueDay,
       startsAt,
       endsAt: isRecurring ? form.endsAt || null : null,
       notes: form.notes.trim().slice(0, 500) || null,
       customTagId,
+      splits,
     };
 
     try {
@@ -414,17 +570,14 @@ export function ExpenseFormDialog({
                 </div>
                 <div className='flex flex-col gap-2'>
                   <Label htmlFor='expense-ends-at'>Data de término</Label>
-                  <Input
+                  <DatePicker
                     id='expense-ends-at'
-                    type='date'
                     value={form.endsAt}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        endsAt: event.target.value,
-                      }))
+                    onValueChange={(endsAt) =>
+                      setForm((current) => ({ ...current, endsAt }))
                     }
-                    className='rounded-lg'
+                    placeholder='Sem data de término'
+                    allowClear
                   />
                   <p className='text-xs text-muted-foreground'>
                     Opcional. Vazio = sem fim.
@@ -439,30 +592,259 @@ export function ExpenseFormDialog({
               </p>
             ) : null}
 
-            <div className='flex flex-col gap-2'>
-              <Label>Cartão</Label>
-              <Select
-                value={form.cardId}
-                onValueChange={(value) => {
-                  if (value) {
-                    setForm((current) => ({ ...current, cardId: value }));
-                  }
-                }}
-              >
-                <SelectTrigger className='rounded-lg'>
-                  <SelectValue placeholder='Opcional' />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value='none'>Nenhum</SelectItem>
-                  {cards
-                    .filter((card) => !card.expired)
-                    .map((card) => (
-                      <SelectItem key={card.id} value={card.id}>
-                        {card.name}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+            <div className='flex flex-col gap-3'>
+              <div className='flex flex-col gap-2'>
+                <Label>Pagamento</Label>
+                <Select
+                  value={form.payMode}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    setForm((current) => ({
+                      ...current,
+                      payMode: value as PayMode,
+                      cardId:
+                        value === 'none'
+                          ? 'none'
+                          : current.cardId === 'none' && validCards[0]
+                            ? validCards[0].id
+                            : current.cardId,
+                      cardId2:
+                        value === 'two_cards'
+                          ? current.cardId2 === 'none' ||
+                            current.cardId2 === current.cardId
+                            ? (validCards.find(
+                                (card) =>
+                                  card.id !==
+                                  (current.cardId === 'none'
+                                    ? validCards[0]?.id
+                                    : current.cardId),
+                              )?.id ?? 'none')
+                            : current.cardId2
+                          : 'none',
+                    }));
+                  }}
+                >
+                  <SelectTrigger className='rounded-lg'>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value='none'>PIX / dinheiro</SelectItem>
+                    <SelectItem value='one_card'>1 cartão</SelectItem>
+                    <SelectItem
+                      value='two_cards'
+                      disabled={validCards.length < 2}
+                    >
+                      2 cartões
+                    </SelectItem>
+                    <SelectItem
+                      value='card_pix'
+                      disabled={validCards.length < 1}
+                    >
+                      Cartão + PIX
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {form.payMode === 'one_card' ? (
+                <div className='flex flex-col gap-2'>
+                  <Label>Cartão</Label>
+                  <Select
+                    value={form.cardId}
+                    onValueChange={(value) => {
+                      if (value) {
+                        setForm((current) => ({ ...current, cardId: value }));
+                      }
+                    }}
+                  >
+                    <SelectTrigger className='rounded-lg'>
+                      <SelectValue placeholder='Selecione' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {validCards.map((card) => {
+                        const available = availableCardLimit({
+                          limit: card.limit,
+                          committed: committedByCard.get(card.id) ?? 0,
+                        });
+                        return (
+                          <SelectItem key={card.id} value={card.id}>
+                            {card.name}
+                            {available != null
+                              ? ` · disp. ${formatCurrency(available)}`
+                              : ' · sem limite'}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+
+              {form.payMode === 'two_cards' || form.payMode === 'card_pix' ? (
+                <div className='space-y-3 rounded-xl border border-border bg-black/20 p-3'>
+                  <div className='grid gap-3 sm:grid-cols-2'>
+                    <div className='flex flex-col gap-2'>
+                      <Label>Cartão 1</Label>
+                      <Select
+                        value={form.cardId}
+                        onValueChange={(value) => {
+                          if (value) {
+                            setForm((current) => ({
+                              ...current,
+                              cardId: value,
+                              cardId2:
+                                current.cardId2 === value
+                                  ? 'none'
+                                  : current.cardId2,
+                            }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger className='rounded-lg'>
+                          <SelectValue placeholder='Selecione' />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {validCards.map((card) => (
+                            <SelectItem key={card.id} value={card.id}>
+                              {card.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    {form.payMode === 'two_cards' ? (
+                      <div className='flex flex-col gap-2'>
+                        <Label>Cartão 2</Label>
+                        <Select
+                          value={form.cardId2}
+                          onValueChange={(value) => {
+                            if (value) {
+                              setForm((current) => ({
+                                ...current,
+                                cardId2: value,
+                              }));
+                            }
+                          }}
+                        >
+                          <SelectTrigger className='rounded-lg'>
+                            <SelectValue placeholder='Selecione' />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {validCards
+                              .filter((card) => card.id !== form.cardId)
+                              .map((card) => (
+                                <SelectItem key={card.id} value={card.id}>
+                                  {card.name}
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : (
+                      <div className='flex flex-col justify-end gap-1 rounded-lg border border-border/70 bg-black/25 px-3 py-2'>
+                        <p className='text-xs text-muted-foreground'>PIX</p>
+                        <p className='text-sm font-medium'>
+                          {percent2}% · {formatCurrency(share2)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className='flex flex-col gap-2'>
+                    <Label htmlFor='expense-card-percent'>
+                      % no cartão 1
+                    </Label>
+                    <Input
+                      id='expense-card-percent'
+                      inputMode='numeric'
+                      value={form.cardPercent}
+                      onChange={(event) => {
+                        const digits = event.target.value
+                          .replace(/\D/g, '')
+                          .slice(0, 2);
+                        setForm((current) => ({
+                          ...current,
+                          cardPercent: digits,
+                        }));
+                      }}
+                      className='rounded-lg'
+                    />
+                    <p className='text-xs text-muted-foreground'>
+                      Cartão 1: {percent1}% · {formatCurrency(share1)}
+                      {' · '}
+                      {form.payMode === 'card_pix' ? 'PIX' : 'Cartão 2'}:{' '}
+                      {percent2}% · {formatCurrency(share2)}
+                    </p>
+                  </div>
+
+                  {form.cardId !== 'none'
+                    ? (() => {
+                        const card = cards.find(
+                          (item) => item.id === form.cardId,
+                        );
+                        if (!card) return null;
+                        const available = availableCardLimit({
+                          limit: card.limit,
+                          committed: committedByCard.get(card.id) ?? 0,
+                        });
+                        if (available == null) {
+                          return (
+                            <p className='text-xs text-muted-foreground'>
+                              {card.name}: sem limite
+                            </p>
+                          );
+                        }
+                        const ok = share1 <= available + 0.001;
+                        return (
+                          <p
+                            className={
+                              ok
+                                ? 'text-xs text-muted-foreground'
+                                : 'text-xs text-rose-400'
+                            }
+                          >
+                            {card.name}: disponível {formatCurrency(available)}
+                            {ok ? '' : ' — insuficiente para esta parte'}
+                          </p>
+                        );
+                      })()
+                    : null}
+
+                  {form.payMode === 'two_cards' && form.cardId2 !== 'none'
+                    ? (() => {
+                        const card = cards.find(
+                          (item) => item.id === form.cardId2,
+                        );
+                        if (!card) return null;
+                        const available = availableCardLimit({
+                          limit: card.limit,
+                          committed: committedByCard.get(card.id) ?? 0,
+                        });
+                        if (available == null) {
+                          return (
+                            <p className='text-xs text-muted-foreground'>
+                              {card.name}: sem limite
+                            </p>
+                          );
+                        }
+                        const ok = share2 <= available + 0.001;
+                        return (
+                          <p
+                            className={
+                              ok
+                                ? 'text-xs text-muted-foreground'
+                                : 'text-xs text-rose-400'
+                            }
+                          >
+                            {card.name}: disponível {formatCurrency(available)}
+                            {ok ? '' : ' — insuficiente para esta parte'}
+                          </p>
+                        );
+                      })()
+                    : null}
+                </div>
+              ) : null}
+
               {cards.some((card) => card.expired) ? (
                 <p className='text-xs text-muted-foreground'>
                   Cartões vencidos não podem receber novas despesas.
@@ -500,7 +882,7 @@ export function ExpenseFormDialog({
               >
                 Cancelar
               </Button>
-              <Button type='submit' className='rounded-lg' disabled={submitting}>
+              <Button type='submit' className='rounded-lg' disabled={submitting || limitBlocked}>
                 {submitting ? <Spinner data-icon='inline-start' /> : null}
                 Salvar
               </Button>

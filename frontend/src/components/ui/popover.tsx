@@ -1,12 +1,26 @@
 import { Popover as PopoverPrimitive } from 'radix-ui';
 import * as React from 'react';
 
+import { markLayerClosed, markLayerOpened } from '@/lib/overlay-dismiss';
 import { cn } from '@/lib/utils';
 
 function Popover({
+  modal = false,
+  onOpenChange,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Root>) {
-  return <PopoverPrimitive.Root data-slot='popover' {...props} />;
+  return (
+    <PopoverPrimitive.Root
+      data-slot='popover'
+      modal={modal}
+      onOpenChange={(open) => {
+        if (open) markLayerOpened();
+        else markLayerClosed();
+        onOpenChange?.(open);
+      }}
+      {...props}
+    />
+  );
 }
 
 function PopoverTrigger({
@@ -20,6 +34,7 @@ function PopoverContent({
   align = 'center',
   sideOffset = 4,
   container,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
   container?: HTMLElement | null;
@@ -34,6 +49,10 @@ function PopoverContent({
           'z-50 flex w-72 origin-(--radix-popover-content-transform-origin) flex-col gap-4 rounded-3xl bg-popover p-4 text-sm text-popover-foreground shadow-lg ring-1 ring-foreground/5 outline-hidden duration-100 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 dark:ring-foreground/10 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95',
           className,
         )}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          onCloseAutoFocus?.(event);
+        }}
         {...props}
       />
     </PopoverPrimitive.Portal>

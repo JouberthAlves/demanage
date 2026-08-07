@@ -22,6 +22,7 @@ import {
   normalizeClosingDayInput,
   parseCurrencyInput,
 } from '@/lib/format';
+import { buildCommittedByCard } from '@/lib/expense-splits';
 import { useAuthStore } from '@/stores/auth-store';
 import { useFinanceStore } from '@/stores/finance-store';
 import type { Card } from '@/types/finance';
@@ -60,14 +61,10 @@ export function ProfilePage() {
     setNotes(user?.notes ?? '');
   }, [user?.name, user?.salary, user?.salaryReceiveDay, user?.notes]);
 
-  const committedByCard = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const expense of expenses) {
-      if (!expense.cardId || expense.isInvoice) continue;
-      map.set(expense.cardId, (map.get(expense.cardId) ?? 0) + expense.amount);
-    }
-    return map;
-  }, [expenses]);
+  const committedByCard = useMemo(
+    () => buildCommittedByCard(expenses),
+    [expenses],
+  );
 
   const totalLimit = useMemo(
     () => cards.reduce((sum, card) => sum + (card.limit ?? 0), 0),

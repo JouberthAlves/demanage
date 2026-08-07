@@ -1,6 +1,10 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect } from '@/lib/custom-tag';
+import {
+  expenseSplitInclude,
+  serializeExpense,
+} from '@/lib/expense-splits';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -16,11 +20,14 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const expenses = await prisma.expense.findMany({
       where: { userId },
-      include: { customTag: { select: customTagSelect } },
+      include: {
+        customTag: { select: customTagSelect },
+        ...expenseSplitInclude,
+      },
       orderBy: { createdAt: 'desc' },
     });
 
-    return res.json(expenses);
+    return res.json(expenses.map(serializeExpense));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });

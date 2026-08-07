@@ -1,4 +1,4 @@
-import type { Card, Expense } from '@prisma/client';
+import type { Card, Expense, ExpenseSplit } from '@prisma/client';
 
 import { prisma } from '@/lib/prisma';
 
@@ -6,6 +6,10 @@ const BILLING_TIMEZONE = 'America/Sao_Paulo';
 
 /** Dia civil YYYY-MM-DD (comparações estáveis, sem drift de fuso). */
 type DayKey = string;
+
+type ExpenseForBilling = Expense & {
+  splits?: ExpenseSplit[];
+};
 
 function pad2(value: number) {
   return String(value).padStart(2, '0');
@@ -101,7 +105,7 @@ export function listDueClosingDates(
   return dates;
 }
 
-function chargeAmountForClosing(
+function chargeBaseForClosing(
   expense: Expense,
   closingOn: Date,
   periodStart: Date,
@@ -121,8 +125,6 @@ function chargeAmountForClosing(
     if (compareDayKeys(endsKey, closingKey) < 0) return 0;
   }
 
-  const amount = Number(expense.amount);
-
   if (expense.frequency === 'unica') {
     const createdKey = instantToSpDayKey(expense.createdAt);
     if (
@@ -131,21 +133,50 @@ function chargeAmountForClosing(
     ) {
       return 0;
     }
-    return amount;
+    return 1;
   }
 
-  if (expense.frequency === 'semanal') return amount * 4;
-  return amount;
+  if (expense.frequency === 'semanal') return 4;
+  return 1;
+}
+
+function cardShareAmount(expense: ExpenseForBilling, cardId: string) {
+  const cardSplits =
+    expense.splits?.filter(
+      (split) => split.kind === 'card' && split.cardId === cardId,
+    ) ?? [];
+
+  if (cardSplits.length > 0) {
+    return cardSplits.reduce((sum, split) => sum + Number(split.amount), 0);
+  }
+
+  if (expense.cardId === cardId) {
+    return Number(expense.amount);
+  }
+
+  return 0;
+}
+
+export function chargeAmountForClosing(
+  expense: ExpenseForBilling,
+  cardId: string,
+  closingOn: Date,
+  periodStart: Date,
+) {
+  const multiplier = chargeBaseForClosing(expense, closingOn, periodStart);
+  if (multiplier <= 0) return 0;
+  return cardShareAmount(expense, cardId) * multiplier;
 }
 
 export function chargesTotalForClosing(
-  expenses: Expense[],
+  expenses: ExpenseForBilling[],
+  cardId: string,
   closingOn: Date,
   periodStart: Date,
 ) {
   return expenses.reduce(
     (sum, expense) =>
-      sum + chargeAmountForClosing(expense, closingOn, periodStart),
+      sum + chargeAmountForClosing(expense, cardId, closingOn, periodStart),
     0,
   );
 }
@@ -154,12 +185,27 @@ export async function processUserCardBilling(userId: string) {
   const today = todayInSaoPaulo();
   const cards = await prisma.card.findMany({
     where: { userId },
-    include: { expenses: true },
+    include: {
+      expenses: { include: { splits: true } },
+      expenseSplits: {
+        where: { kind: 'card' },
+        include: { expense: { include: { splits: true } } },
+      },
+    },
   });
 
   let createdCount = 0;
 
   for (const card of cards) {
+    const expenseMap = new Map<string, ExpenseForBilling>();
+    for (const expense of card.expenses) {
+      expenseMap.set(expense.id, expense);
+    }
+    for (const split of card.expenseSplits) {
+      expenseMap.set(split.expense.id, split.expense);
+    }
+    const expenses = [...expenseMap.values()];
+
     let periodStart = card.lastInvoicedOn
       ? dayKeyToUtcNoon(dateOnlyToDayKey(card.lastInvoicedOn))
       : dayKeyToUtcNoon(instantToSpDayKey(card.createdAt));
@@ -168,7 +214,8 @@ export async function processUserCardBilling(userId: string) {
 
     for (const closingOn of dueDates) {
       const amount = chargesTotalForClosing(
-        card.expenses,
+        expenses,
+        card.id,
         closingOn,
         periodStart,
       );

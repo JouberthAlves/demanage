@@ -1,16 +1,26 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
+import { parseAbnt2Text } from '@/lib/abnt2';
 import {
   parseEndsAt,
   parseReceiveDay,
   parseStartsAt,
 } from '@/lib/entry-schedule';
+import {
+  denormalizedCardId,
+  ExpenseSplitError,
+  expenseSplitInclude,
+  replaceExpenseSplits,
+  resolveAndValidateSplits,
+  serializeExpense,
+} from '@/lib/expense-splits';
 import { prisma } from '@/lib/prisma';
 import {
   isValidExpenseCategory,
   isValidFrequency,
   parsePositiveAmount,
+  positiveAmountError,
 } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -35,9 +45,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       endsAt,
       notes,
       customTagId,
+      splits,
     } = req.body;
 
-    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
     if (!trimmedName || amount == null || !category) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, amount, category',
@@ -46,7 +57,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const parsedAmount = parsePositiveAmount(amount);
     if (parsedAmount == null) {
-      return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+      return res.status(400).json({ error: positiveAmountError(amount) });
     }
 
     if (!isValidExpenseCategory(category)) {
@@ -64,22 +75,19 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Frequência inválida' });
     }
 
-    const resolvedCardId = cardId || null;
-
-    if (resolvedCardId) {
-      const card = await prisma.card.findFirst({
-        where: { id: resolvedCardId, userId },
+    let resolvedSplits;
+    try {
+      resolvedSplits = await resolveAndValidateSplits({
+        userId,
+        totalAmount: parsedAmount,
+        splits,
+        cardId,
       });
-
-      if (!card) {
-        return res.status(400).json({ error: 'Cartão inválido' });
+    } catch (error) {
+      if (error instanceof ExpenseSplitError) {
+        return res.status(400).json({ error: error.message });
       }
-
-      if (card.expiresAt && card.expiresAt.getTime() < Date.now()) {
-        return res.status(400).json({
-          error: 'Cartão vencido. Renove a validade no Perfil.',
-        });
-      }
+      throw error;
     }
 
     let resolvedCustomTagId: string | null = null;
@@ -147,24 +155,42 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       throw error;
     }
 
-    const expense = await prisma.expense.create({
-      data: {
-        userId,
-        name: trimmedName,
-        amount: parsedAmount,
-        category,
-        frequency: resolvedFrequency,
-        cardId: resolvedCardId,
-        dueDay: resolvedDueDay,
-        startsAt: resolvedStartsAt,
-        endsAt: resolvedEndsAt,
-        notes: notes || null,
-        customTagId: resolvedCustomTagId,
-      },
-      include: { customTag: { select: customTagSelect } },
+    const expense = await prisma.$transaction(async (tx) => {
+      const created = await tx.expense.create({
+        data: {
+          userId,
+          name: trimmedName,
+          amount: parsedAmount,
+          category,
+          frequency: resolvedFrequency,
+          cardId: denormalizedCardId(resolvedSplits),
+          dueDay: resolvedDueDay,
+          startsAt: resolvedStartsAt,
+          endsAt: resolvedEndsAt,
+          notes:
+            typeof notes === 'string'
+              ? parseAbnt2Text(notes, { maxLength: 500 }) || null
+              : null,
+          customTagId: resolvedCustomTagId,
+        },
+      });
+
+      await replaceExpenseSplits({
+        tx,
+        expenseId: created.id,
+        resolved: resolvedSplits,
+      });
+
+      return tx.expense.findUniqueOrThrow({
+        where: { id: created.id },
+        include: {
+          customTag: { select: customTagSelect },
+          ...expenseSplitInclude,
+        },
+      });
     });
 
-    return res.status(201).json(expense);
+    return res.status(201).json(serializeExpense(expense));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });

@@ -3,7 +3,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CurrencyInput } from '@/components/ui/currency-input';
+import { DatePicker } from '@/components/ui/date-picker';
 import {
   Dialog,
   DialogContent,
@@ -14,6 +16,13 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
   useCreatePiggyBank,
@@ -38,6 +47,7 @@ type FormState = {
   goalAmount: string;
   targetDate: string;
   autoDebit: boolean;
+  autoDebitDay: string;
   isEmergency: boolean;
 };
 
@@ -46,8 +56,13 @@ const emptyForm: FormState = {
   goalAmount: '',
   targetDate: '',
   autoDebit: false,
+  autoDebitDay: '1',
   isEmergency: false,
 };
+
+const AUTO_DEBIT_DAYS = Array.from({ length: 31 }, (_, index) =>
+  String(index + 1),
+);
 
 export function PiggyFormDialog({
   open,
@@ -67,6 +82,7 @@ export function PiggyFormDialog({
         goalAmount: formatBrlInputValue(bank.goalAmount),
         targetDate: bank.targetDate,
         autoDebit: bank.autoDebit,
+        autoDebitDay: String(bank.autoDebitDay || 1),
         isEmergency: bank.isEmergency,
       });
       return;
@@ -100,11 +116,21 @@ export function PiggyFormDialog({
       return;
     }
 
+    const autoDebitDay = Number(form.autoDebitDay);
+    if (
+      form.autoDebit &&
+      (!Number.isInteger(autoDebitDay) || autoDebitDay < 1 || autoDebitDay > 31)
+    ) {
+      toast.error('Informe o dia do débito automático (1 a 31)');
+      return;
+    }
+
     const payload = {
-      name: form.name.trim().slice(0, 100),
+      name: form.name.trim().slice(0, 50),
       goalAmount,
       targetDate: form.targetDate,
       autoDebit: form.autoDebit,
+      autoDebitDay: form.autoDebit ? autoDebitDay : 1,
       isEmergency: form.isEmergency,
     };
 
@@ -149,9 +175,12 @@ export function PiggyFormDialog({
                 setForm((current) => ({ ...current, name: event.target.value }))
               }
               placeholder='Ex: Viagem'
-              maxLength={100}
+              maxLength={50}
               className='rounded-lg'
             />
+            <p className='text-xs text-muted-foreground'>
+              {form.name.length}/50
+            </p>
           </div>
 
           <div className='flex flex-col gap-2'>
@@ -168,17 +197,13 @@ export function PiggyFormDialog({
 
           <div className='flex flex-col gap-2'>
             <Label htmlFor='piggy-date'>Data de conclusão</Label>
-            <Input
+            <DatePicker
               id='piggy-date'
-              type='date'
               value={form.targetDate}
-              onChange={(event) =>
-                setForm((current) => ({
-                  ...current,
-                  targetDate: event.target.value,
-                }))
+              onValueChange={(targetDate) =>
+                setForm((current) => ({ ...current, targetDate }))
               }
-              className='rounded-lg'
+              placeholder='Quando quer atingir a meta'
             />
           </div>
 
@@ -192,38 +217,75 @@ export function PiggyFormDialog({
             </p>
           ) : null}
 
-          <label className='flex flex-col gap-1 text-sm'>
-            <span className='flex items-center gap-2'>
-              <input
-                type='checkbox'
+          <div className='flex flex-col gap-3'>
+            <label
+              htmlFor='piggy-auto-debit'
+              className='flex cursor-pointer items-start gap-2 text-sm'
+            >
+              <Checkbox
+                id='piggy-auto-debit'
                 checked={form.autoDebit}
-                onChange={(event) =>
+                onCheckedChange={(checked) =>
                   setForm((current) => ({
                     ...current,
-                    autoDebit: event.target.checked,
+                    autoDebit: checked === true,
                   }))
                 }
-                className='size-4 rounded border-border'
+                className='mt-0.5'
               />
-              Débito automático no dia 1 de cada mês
-            </span>
-            <span className='pl-6 text-xs text-muted-foreground'>
-              Não debita ao criar o cofre — só a partir do próximo dia 1. Até
-              lá, use Guardar quando quiser.
-            </span>
-          </label>
+              <span className='flex flex-col gap-1'>
+                <span>Débito automático mensal</span>
+                <span className='text-xs text-muted-foreground'>
+                  Não debita ao criar o cofre — só a partir do próximo ciclo do
+                  dia escolhido. Até lá, use Guardar quando quiser.
+                </span>
+              </span>
+            </label>
 
-          <label className='flex items-center gap-2 text-sm'>
-            <input
-              type='checkbox'
+            {form.autoDebit ? (
+              <div className='flex flex-col gap-2 pl-6'>
+                <Label>Dia do débito</Label>
+                <Select
+                  value={form.autoDebitDay}
+                  onValueChange={(value) => {
+                    if (!value) return;
+                    setForm((current) => ({
+                      ...current,
+                      autoDebitDay: value,
+                    }));
+                  }}
+                >
+                  <SelectTrigger className='rounded-lg'>
+                    <SelectValue placeholder='Dia' />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {AUTO_DEBIT_DAYS.map((day) => (
+                      <SelectItem key={day} value={day}>
+                        Dia {day.padStart(2, '0')}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className='text-xs text-muted-foreground'>
+                  Em meses curtos, usa o último dia disponível.
+                </p>
+              </div>
+            ) : null}
+          </div>
+
+          <label
+            htmlFor='piggy-emergency'
+            className='flex cursor-pointer items-center gap-2 text-sm'
+          >
+            <Checkbox
+              id='piggy-emergency'
               checked={form.isEmergency}
-              onChange={(event) =>
+              onCheckedChange={(checked) =>
                 setForm((current) => ({
                   ...current,
-                  isEmergency: event.target.checked,
+                  isEmergency: checked === true,
                 }))
               }
-              className='size-4 rounded border-border'
             />
             Reserva de emergência
           </label>

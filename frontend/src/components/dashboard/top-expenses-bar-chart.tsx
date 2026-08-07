@@ -14,7 +14,7 @@ import {
   EXPENSE_CATEGORY_LABELS,
   monthlyAmount,
 } from '@/data/labels';
-import { formatCurrency } from '@/lib/format';
+import { formatCurrencyCompact } from '@/lib/format';
 import { useFinanceStore } from '@/stores/finance-store';
 
 const TOP_COUNT = 5;
@@ -61,7 +61,7 @@ function CategoryBarChart({
           dataKey='amount'
           tickLine={false}
           axisLine={false}
-          tickFormatter={(value) => formatCurrency(Number(value))}
+          tickFormatter={(value) => formatCurrencyCompact(Number(value))}
         />
         <YAxis
           type='category'
@@ -90,7 +90,7 @@ function CategoryBarChart({
                     {String(item?.payload?.name ?? 'Item')}
                   </span>
                   <span className='font-medium tabular-nums text-foreground'>
-                    {formatCurrency(Number(value))}
+                    {formatCurrencyCompact(Number(value))}
                   </span>
                 </div>
               )}
@@ -228,7 +228,7 @@ export function TopExpensesBarChart() {
                   <p className='truncate font-medium'>{category.name}</p>
                 </div>
                 <p className='shrink-0 text-sm tabular-nums text-muted-foreground'>
-                  {formatCurrency(category.amount)}
+                  {formatCurrencyCompact(category.amount)}
                 </p>
               </div>
               <CategoryBarChart

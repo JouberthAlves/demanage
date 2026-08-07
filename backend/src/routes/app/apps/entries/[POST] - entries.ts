@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
+import { parseAbnt2Text } from '@/lib/abnt2';
 import {
   parseEndsAt,
   parseReceiveDay,
@@ -12,6 +13,7 @@ import {
   isValidFrequency,
   parsePositiveAmount,
   parseUniqueDate,
+  positiveAmountError,
 } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -37,7 +39,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       endsAt,
     } = req.body;
 
-    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
     if (!trimmedName || amount == null || !type || !frequency) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, amount, type, frequency',
@@ -46,7 +48,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const parsedAmount = parsePositiveAmount(amount);
     if (parsedAmount == null) {
-      return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+      return res.status(400).json({ error: positiveAmountError(amount) });
     }
 
     if (!isValidEntryType(type)) {

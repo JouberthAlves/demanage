@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
+import { parseAbnt2Text } from '@/lib/abnt2';
 import {
   parseEndsAt,
   parseReceiveDay,
@@ -12,6 +13,7 @@ import {
   isValidFrequency,
   parsePositiveAmount,
   parseUniqueDate,
+  positiveAmountError,
 } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -52,11 +54,20 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       endsAt,
     } = req.body;
 
+    let nextName: string | undefined;
+    if (name !== undefined) {
+      const parsed = parseAbnt2Text(name, { maxLength: 100, required: true });
+      if (!parsed) {
+        return res.status(400).json({ error: 'Nome inválido' });
+      }
+      nextName = parsed;
+    }
+
     let parsedAmount: number | undefined;
     if (amount !== undefined) {
       const nextAmount = parsePositiveAmount(amount);
       if (nextAmount == null) {
-        return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+        return res.status(400).json({ error: positiveAmountError(amount) });
       }
       parsedAmount = nextAmount;
     }
@@ -193,7 +204,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const entry = await prisma.entry.update({
       where: { id },
       data: {
-        ...(name !== undefined ? { name } : {}),
+        ...(nextName !== undefined ? { name: nextName } : {}),
         ...(parsedAmount !== undefined ? { amount: parsedAmount } : {}),
         ...(type !== undefined ? { type } : {}),
         ...(frequency !== undefined ? { frequency } : {}),

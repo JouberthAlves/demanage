@@ -34,6 +34,7 @@ export function RegisterPage() {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,6 +57,14 @@ export function RegisterPage() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+
+    if (password !== confirmPassword) {
+      const message = 'As senhas não coincidem';
+      setError(message);
+      toast.error(message);
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -125,7 +134,7 @@ export function RegisterPage() {
                   required
                 />
               </Field>
-              <Field data-invalid={error ? true : undefined}>
+              <Field>
                 <FieldLabel htmlFor='register-password'>Senha</FieldLabel>
                 <Input
                   id='register-password'
@@ -133,11 +142,25 @@ export function RegisterPage() {
                   autoComplete='new-password'
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  aria-invalid={Boolean(error)}
                   minLength={6}
                   required
                 />
                 <FieldDescription>Mínimo de 6 caracteres.</FieldDescription>
+              </Field>
+              <Field data-invalid={error ? true : undefined}>
+                <FieldLabel htmlFor='register-confirm-password'>
+                  Confirmar senha
+                </FieldLabel>
+                <Input
+                  id='register-confirm-password'
+                  type='password'
+                  autoComplete='new-password'
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  aria-invalid={Boolean(error)}
+                  minLength={6}
+                  required
+                />
                 {error ? <FieldError>{error}</FieldError> : null}
               </Field>
               <Button type='submit' className='w-full' disabled={submitting}>

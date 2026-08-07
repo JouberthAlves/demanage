@@ -48,6 +48,11 @@ enum PiggyTransactionSource {
   auto_debit
 }
 
+enum ExpenseSplitKind {
+  card
+  pix
+}
+
 model User {
   id           String      @id @default(uuid())
   name         String
@@ -65,17 +70,18 @@ model User {
 }
 
 model Card {
-  id             String    @id @default(uuid())
+  id             String         @id @default(uuid())
   userId         String
   name           String
-  limit          Decimal?  @db.Decimal(12, 2)
+  limit          Decimal?       @db.Decimal(12, 2)
   closingDay     Int
   expiresAt      DateTime?
   lastInvoicedOn DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
-  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   expenses       Expense[]
+  expenseSplits  ExpenseSplit[]
 
   @@index([userId])
 }
@@ -118,10 +124,28 @@ model Expense {
   user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   card        Card?            @relation(fields: [cardId], references: [id], onDelete: SetNull)
   customTag   CustomTag?       @relation(fields: [customTagId], references: [id], onDelete: SetNull)
+  splits      ExpenseSplit[]
 
   @@index([userId])
   @@index([cardId])
   @@index([customTagId])
+}
+
+model ExpenseSplit {
+  id        String           @id @default(uuid())
+  expenseId String
+  kind      ExpenseSplitKind
+  cardId    String?
+  percent   Decimal          @db.Decimal(5, 2)
+  amount    Decimal          @db.Decimal(12, 2)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  expense   Expense          @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  card      Card?            @relation(fields: [cardId], references: [id], onDelete: Restrict)
+
+  @@unique([expenseId, kind, cardId])
+  @@index([expenseId])
+  @@index([cardId])
 }
 
 model Entry {
@@ -156,6 +180,8 @@ model PiggyBank {
   targetDate  DateTime
   monthlyGoal Decimal            @db.Decimal(12, 2)
   autoDebit   Boolean            @default(false)
+  /// Dia do mês (1-31) em que o auto-débito tenta debitar. Meses curtos usam o último dia.
+  autoDebitDay Int               @default(1)
   isEmergency Boolean            @default(false)
   archivedAt  DateTime?
   completedAt DateTime?

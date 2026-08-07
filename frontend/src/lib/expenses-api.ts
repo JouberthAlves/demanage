@@ -2,8 +2,18 @@ import { api } from '@/lib/api';
 import type {
   ExpenseCategory,
   ExpenseFrequency,
+  ExpenseSplit,
   RecurringExpense,
 } from '@/types/finance';
+
+export type ApiExpenseSplit = {
+  id?: string;
+  kind: 'card' | 'pix';
+  cardId: string | null;
+  percent: number;
+  amount: number;
+  cardName?: string | null;
+};
 
 export type ApiExpense = {
   id: string;
@@ -24,7 +34,12 @@ export type ApiExpense = {
     name: string;
     color: string;
   } | null;
+  splits?: ApiExpenseSplit[];
 };
+
+export type ExpenseSplitPayload =
+  | { kind: 'card'; cardId: string; percent: number }
+  | { kind: 'pix'; percent: number };
 
 export type ExpensePayload = {
   name: string;
@@ -37,6 +52,7 @@ export type ExpensePayload = {
   endsAt?: string | null;
   notes?: string | null;
   customTagId?: string | null;
+  splits?: ExpenseSplitPayload[] | null;
 };
 
 function toLocalDateOnly(iso: string) {
@@ -51,6 +67,18 @@ function toLocalDateOnly(iso: string) {
 function mapDateOnly(value?: string | null) {
   if (!value) return undefined;
   return value.slice(0, 10);
+}
+
+function mapSplits(splits?: ApiExpenseSplit[]): ExpenseSplit[] | undefined {
+  if (!splits || splits.length === 0) return undefined;
+  return splits.map((split) => ({
+    id: split.id,
+    kind: split.kind,
+    cardId: split.cardId,
+    percent: Number(split.percent),
+    amount: Number(split.amount),
+    cardName: split.cardName ?? null,
+  }));
 }
 
 export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
@@ -71,6 +99,7 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     isInvoice: Boolean(expense.isInvoice),
     customTagId: expense.customTagId ?? undefined,
     customTag: expense.customTag ?? undefined,
+    splits: mapSplits(expense.splits),
   };
 }
 

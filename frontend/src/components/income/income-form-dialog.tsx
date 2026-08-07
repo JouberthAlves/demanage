@@ -13,6 +13,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { CurrencyInput } from '@/components/ui/currency-input';
+import { DatePicker } from '@/components/ui/date-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
@@ -437,17 +438,14 @@ export function IncomeFormDialog({
                 </div>
                 <div className='flex flex-col gap-2'>
                   <Label htmlFor='income-ends-at'>Data de término</Label>
-                  <Input
+                  <DatePicker
                     id='income-ends-at'
-                    type='date'
                     value={form.endsAt}
-                    onChange={(event) =>
-                      setForm((current) => ({
-                        ...current,
-                        endsAt: event.target.value,
-                      }))
+                    onValueChange={(endsAt) =>
+                      setForm((current) => ({ ...current, endsAt }))
                     }
-                    className='rounded-lg'
+                    placeholder='Sem data de término'
+                    allowClear
                   />
                   <p className='text-xs text-muted-foreground'>
                     Opcional. Vazio = sem fim.
@@ -459,17 +457,14 @@ export function IncomeFormDialog({
             {form.frequency === 'unica' ? (
               <div className='flex flex-col gap-2'>
                 <Label htmlFor='income-date'>Data</Label>
-                <Input
+                <DatePicker
                   id='income-date'
-                  type='date'
                   value={form.date}
-                  onChange={(event) =>
-                    setForm((current) => ({
-                      ...current,
-                      date: event.target.value,
-                    }))
+                  onValueChange={(date) =>
+                    setForm((current) => ({ ...current, date }))
                   }
-                  className='rounded-lg'
+                  placeholder='Selecione a data'
+                  allowClear
                 />
               </div>
             ) : null}

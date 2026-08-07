@@ -1,4 +1,5 @@
 import { MONTH_LABELS, monthlyAmount } from '@/data/labels';
+import { expenseCashAmount } from '@/lib/expense-splits';
 import type { RecurringExpense } from '@/types/finance';
 
 export function resolveDebitDate(
@@ -99,8 +100,9 @@ export function expenseContributionThisMonth(
   expense: RecurringExpense,
   now = new Date(),
 ) {
-  if (expense.cardId && !expense.isInvoice) return 0;
   if (!isExpenseDebitedThisMonth(expense, now)) return 0;
-  if (expense.frequency === 'unica') return expense.amount;
-  return monthlyAmount(expense.amount, expense.frequency);
+  const cash = expenseCashAmount(expense);
+  if (cash <= 0) return 0;
+  if (expense.frequency === 'unica') return cash;
+  return monthlyAmount(cash, expense.frequency);
 }

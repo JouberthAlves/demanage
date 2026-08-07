@@ -14,11 +14,42 @@ const monthFormatter = new Intl.DateTimeFormat('pt-BR', {
 });
 
 export function formatCurrency(value: number) {
+  if (!Number.isFinite(value)) return currencyFormatter.format(0);
   return currencyFormatter.format(value);
 }
 
+/** Valores grandes em cards/KPIs (evita quebrar layout). */
+export function formatCurrencyCompact(value: number) {
+  if (!Number.isFinite(value)) return currencyFormatter.format(0);
+  if (Math.abs(value) < 1_000_000) {
+    return currencyFormatter.format(value);
+  }
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+    notation: 'compact',
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
 export function formatPercent(value: number) {
+  if (!Number.isFinite(value)) return '—';
+  if (Math.abs(value) >= 100) {
+    return `${(value * 100).toLocaleString('pt-BR', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    })}%`;
+  }
   return percentFormatter.format(value);
+}
+
+/** Escala tipográfica para valores monetários longos em cards. */
+export function moneyValueClass(formatted: string) {
+  const length = formatted.length;
+  if (length > 18) return 'text-sm sm:text-base';
+  if (length > 14) return 'text-base sm:text-lg';
+  if (length > 11) return 'text-lg sm:text-xl';
+  return 'text-2xl';
 }
 
 export function formatMonthLabel(monthKey: string) {
@@ -53,13 +84,14 @@ export function formatBrlInputValue(value: number) {
 
 /** Máscara BRL enquanto digita (centavos). */
 export function maskBrlInput(raw: string) {
-  const digits = raw.replace(/\D/g, '').slice(0, 15);
+  // Até 12 dígitos em centavos (= Decimal(12,2) / R$ 9.999.999.999,99)
+  const digits = raw.replace(/\D/g, '').slice(0, 12);
   if (!digits) return '';
   return formatBrlInputValue(Number(digits) / 100);
 }
 
 export function parseCurrencyInput(value: string) {
-  const digits = value.replace(/\D/g, '');
+  const digits = value.replace(/\D/g, '').slice(0, 12);
   if (!digits) return 0;
   return Number(digits) / 100;
 }

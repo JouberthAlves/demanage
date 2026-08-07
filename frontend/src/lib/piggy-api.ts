@@ -6,6 +6,7 @@ export type PiggyBankPayload = {
   goalAmount: number;
   targetDate: string;
   autoDebit?: boolean;
+  autoDebitDay?: number;
   isEmergency?: boolean;
 };
 

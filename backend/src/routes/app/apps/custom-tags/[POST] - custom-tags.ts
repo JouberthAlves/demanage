@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+import { parseAbnt2Text } from '@/lib/abnt2';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -21,7 +22,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'scope deve ser expense ou income' });
     }
 
-    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
     if (!trimmedName) {
       return res.status(400).json({ error: 'Informe o nome do tipo' });
     }

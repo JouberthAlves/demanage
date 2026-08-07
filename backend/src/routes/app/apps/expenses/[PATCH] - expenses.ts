@@ -1,16 +1,32 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
+import { parseAbnt2Text } from '@/lib/abnt2';
 import {
   parseEndsAt,
   parseReceiveDay,
   parseStartsAt,
 } from '@/lib/entry-schedule';
+import {
+  allocateSplitAmounts,
+  assertCardLimits,
+  assertCardsForSplits,
+  denormalizedCardId,
+  ExpenseSplitError,
+  expenseSplitInclude,
+  getCommittedByCard,
+  replaceExpenseSplits,
+  resolveAndValidateSplits,
+  serializeExpense,
+  type ResolvedSplit,
+  type SplitInput,
+} from '@/lib/expense-splits';
 import { prisma } from '@/lib/prisma';
 import {
   isValidExpenseCategory,
   isValidFrequency,
   parsePositiveAmount,
+  positiveAmountError,
 } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -27,6 +43,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     const existing = await prisma.expense.findFirst({
       where: { id, userId },
+      include: { splits: true },
     });
 
     if (!existing) {
@@ -44,13 +61,23 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       endsAt,
       notes,
       customTagId,
+      splits,
     } = req.body;
+
+    let nextName: string | undefined;
+    if (name !== undefined) {
+      const parsed = parseAbnt2Text(name, { maxLength: 100, required: true });
+      if (!parsed) {
+        return res.status(400).json({ error: 'Nome inválido' });
+      }
+      nextName = parsed;
+    }
 
     let parsedAmount: number | undefined;
     if (amount !== undefined) {
       const nextAmount = parsePositiveAmount(amount);
       if (nextAmount == null) {
-        return res.status(400).json({ error: 'Valor deve ser maior que zero' });
+        return res.status(400).json({ error: positiveAmountError(amount) });
       }
       parsedAmount = nextAmount;
     }
@@ -76,16 +103,6 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Frequência inválida' });
     }
 
-    if (cardId) {
-      const card = await prisma.card.findFirst({
-        where: { id: cardId, userId },
-      });
-
-      if (!card) {
-        return res.status(400).json({ error: 'Cartão inválido' });
-      }
-    }
-
     let resolvedCustomTagId: string | null | undefined;
     if (customTagId !== undefined) {
       try {
@@ -105,6 +122,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       resolvedCustomTagId !== undefined
         ? resolvedCustomTagId
         : existing.customTagId;
+    const nextAmount = parsedAmount ?? Number(existing.amount);
 
     if (nextCustomTagId && nextCategory !== 'outro') {
       return res.status(400).json({
@@ -183,28 +201,94 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const expense = await prisma.expense.update({
-      where: { id },
-      data: {
-        ...(name !== undefined ? { name } : {}),
-        ...(parsedAmount !== undefined ? { amount: parsedAmount } : {}),
-        ...(category !== undefined ? { category } : {}),
-        ...(frequency !== undefined ? { frequency } : {}),
-        ...(cardId !== undefined ? { cardId: cardId || null } : {}),
-        ...(resolvedDueDay !== undefined ? { dueDay: resolvedDueDay } : {}),
-        ...(resolvedStartsAt !== undefined
-          ? { startsAt: resolvedStartsAt }
-          : {}),
-        ...(resolvedEndsAt !== undefined ? { endsAt: resolvedEndsAt } : {}),
-        ...(notes !== undefined ? { notes: notes || null } : {}),
-        ...(resolvedCustomTagId !== undefined
-          ? { customTagId: resolvedCustomTagId }
-          : {}),
-      },
-      include: { customTag: { select: customTagSelect } },
+    let resolvedSplits: ResolvedSplit[];
+    try {
+      if (splits !== undefined || cardId !== undefined) {
+        resolvedSplits = await resolveAndValidateSplits({
+          userId,
+          totalAmount: nextAmount,
+          splits,
+          cardId,
+          excludeExpenseId: id,
+        });
+      } else if (existing.splits.length > 0) {
+        const inputs: SplitInput[] = existing.splits.map((split) =>
+          split.kind === 'pix'
+            ? { kind: 'pix', percent: Number(split.percent) }
+            : {
+                kind: 'card',
+                cardId: String(split.cardId),
+                percent: Number(split.percent),
+              },
+        );
+        const cards = await assertCardsForSplits({ userId, inputs });
+        resolvedSplits = allocateSplitAmounts(
+          nextAmount,
+          inputs.map((item) =>
+            item.kind === 'pix'
+              ? { kind: 'pix', cardId: null, percent: item.percent }
+              : { kind: 'card', cardId: item.cardId, percent: item.percent },
+          ),
+        );
+        const committedByCard = await getCommittedByCard({
+          userId,
+          excludeExpenseId: id,
+        });
+        assertCardLimits({ cards, resolved: resolvedSplits, committedByCard });
+      } else {
+        resolvedSplits = [];
+      }
+    } catch (error) {
+      if (error instanceof ExpenseSplitError) {
+        return res.status(400).json({ error: error.message });
+      }
+      throw error;
+    }
+
+    const expense = await prisma.$transaction(async (tx) => {
+      await tx.expense.update({
+        where: { id },
+        data: {
+          ...(nextName !== undefined ? { name: nextName } : {}),
+          ...(parsedAmount !== undefined ? { amount: parsedAmount } : {}),
+          ...(category !== undefined ? { category } : {}),
+          ...(frequency !== undefined ? { frequency } : {}),
+          cardId: denormalizedCardId(resolvedSplits),
+          ...(resolvedDueDay !== undefined ? { dueDay: resolvedDueDay } : {}),
+          ...(resolvedStartsAt !== undefined
+            ? { startsAt: resolvedStartsAt }
+            : {}),
+          ...(resolvedEndsAt !== undefined ? { endsAt: resolvedEndsAt } : {}),
+          ...(notes !== undefined
+            ? {
+                notes:
+                  notes == null || notes === ''
+                    ? null
+                    : parseAbnt2Text(notes, { maxLength: 500 }) || null,
+              }
+            : {}),
+          ...(resolvedCustomTagId !== undefined
+            ? { customTagId: resolvedCustomTagId }
+            : {}),
+        },
+      });
+
+      await replaceExpenseSplits({
+        tx,
+        expenseId: id,
+        resolved: resolvedSplits,
+      });
+
+      return tx.expense.findUniqueOrThrow({
+        where: { id },
+        include: {
+          customTag: { select: customTagSelect },
+          ...expenseSplitInclude,
+        },
+      });
     });
 
-    return res.json(expense);
+    return res.json(serializeExpense(expense));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });

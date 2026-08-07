@@ -9,6 +9,7 @@ import {
   signAuthToken,
   toPublicUser,
 } from '@/lib/auth';
+import { parseAbnt2Text, sanitizeAbnt2 } from '@/lib/abnt2';
 import { parseReceiveDay } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -23,9 +24,19 @@ authRoutes.post('/auth/register', async (req, res) => {
       password?: string;
     };
 
-    if (!name?.trim() || !email?.trim() || !password) {
+    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
+    const normalizedEmail = parseAbnt2Text(email, { required: true })
+      ?.toLowerCase();
+
+    if (!trimmedName || !normalizedEmail || !password) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, email, password',
+      });
+    }
+
+    if (!sanitizeAbnt2(password) || sanitizeAbnt2(password) !== password) {
+      return res.status(400).json({
+        error: 'Use apenas caracteres do teclado ABNT2 na senha',
       });
     }
 
@@ -35,7 +46,6 @@ authRoutes.post('/auth/register', async (req, res) => {
       });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
     const existing = await prisma.user.findUnique({
       where: { email: normalizedEmail },
     });
@@ -47,7 +57,7 @@ authRoutes.post('/auth/register', async (req, res) => {
     const passwordHash = await hashPassword(password);
     const user = await prisma.user.create({
       data: {
-        name: name.trim(),
+        name: trimmedName,
         email: normalizedEmail,
         passwordHash,
       },
@@ -130,10 +140,6 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
       salaryReceiveDay?: number | string | null;
     };
 
-    if (name !== undefined && !name.trim()) {
-      return res.status(400).json({ error: 'Nome não pode ser vazio' });
-    }
-
     let salaryValue: number | undefined;
     if (salary !== undefined) {
       salaryValue = typeof salary === 'string' ? Number(salary) : salary;
@@ -158,15 +164,27 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
+    const sanitizedName =
+      name !== undefined
+        ? parseAbnt2Text(name, { maxLength: 100, required: true })
+        : undefined;
+    if (name !== undefined && !sanitizedName) {
+      return res.status(400).json({ error: 'Nome não pode ser vazio' });
+    }
+    const sanitizedNotes =
+      notes !== undefined
+        ? notes == null || notes === ''
+          ? null
+          : parseAbnt2Text(notes, { maxLength: 500 }) || null
+        : undefined;
+
     const user = await prisma.$transaction(async (tx) => {
       const updatedUser = await tx.user.update({
         where: { id: userId },
         data: {
-          ...(name !== undefined ? { name: name.trim() } : {}),
+          ...(sanitizedName ? { name: sanitizedName } : {}),
           ...(salaryValue !== undefined ? { salary: salaryValue } : {}),
-          ...(notes !== undefined
-            ? { notes: notes?.trim() ? notes.trim() : null }
-            : {}),
+          ...(sanitizedNotes !== undefined ? { notes: sanitizedNotes } : {}),
         },
       });
 

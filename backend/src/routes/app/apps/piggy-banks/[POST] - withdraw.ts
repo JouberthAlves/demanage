@@ -5,6 +5,7 @@ import {
   serializePiggyTransaction,
   withdrawFromPiggyBank,
 } from '@/lib/piggy';
+import { parseAbnt2Text } from '@/lib/abnt2';
 import { parsePositiveAmount } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -27,7 +28,10 @@ router.post('/:id/withdraw', requireAuth, async (req: Request, res: Response) =>
       userId,
       piggyBankId: id,
       amount,
-      note: typeof req.body?.note === 'string' ? req.body.note.trim() : null,
+      note:
+        typeof req.body?.note === 'string'
+          ? parseAbnt2Text(req.body.note, { maxLength: 500 }) || null
+          : null,
     });
 
     return res.status(201).json({

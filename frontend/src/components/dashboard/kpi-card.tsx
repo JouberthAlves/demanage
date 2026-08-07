@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 
+import { moneyValueClass } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 type KpiCardProps = {
@@ -22,20 +23,22 @@ export function KpiCard({
   return (
     <div
       className={cn(
-        'relative overflow-hidden rounded-2xl border border-border bg-card/40 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]',
+        'relative min-w-0 overflow-hidden rounded-2xl border border-border bg-card/40 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]',
         className,
       )}
     >
       <div className='pointer-events-none absolute -right-6 -top-8 size-24 rounded-full bg-white/5 blur-2xl' />
       <div className='relative flex items-start justify-between gap-2'>
-        <p className='text-sm text-muted-foreground'>{label}</p>
+        <p className='min-w-0 truncate text-sm text-muted-foreground'>{label}</p>
         {icon ? (
-          <div className='text-muted-foreground opacity-80'>{icon}</div>
+          <div className='shrink-0 text-muted-foreground opacity-80'>{icon}</div>
         ) : null}
       </div>
       <p
+        title={value}
         className={cn(
-          'relative mt-2 text-2xl font-semibold tracking-tight',
+          'relative mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-semibold tracking-tight tabular-nums',
+          moneyValueClass(value),
           tone === 'positive' && 'text-neon-green',
           tone === 'negative' && 'text-rose-400',
           tone === 'amber' && 'text-neon-amber',

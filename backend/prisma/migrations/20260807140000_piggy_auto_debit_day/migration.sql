@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "PiggyBank" ADD COLUMN "autoDebitDay" INTEGER NOT NULL DEFAULT 1;

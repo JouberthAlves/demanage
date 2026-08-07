@@ -10,7 +10,7 @@ import {
   YAxis,
 } from 'recharts';
 
-import { formatCurrency } from '@/lib/format';
+import { formatCurrencyCompact } from '@/lib/format';
 import {
   selectMonthlyExpenses,
   selectMonthlyIncome,
@@ -34,7 +34,7 @@ export function MonthCompareBarChart() {
           <p className='font-medium'>Histórico mensal em breve</p>
           <p className='text-sm text-muted-foreground'>
             Ainda não há mês anterior para comparar. Este mês:{' '}
-            {formatCurrency(currentIncome)} / {formatCurrency(currentExpense)}.
+            {formatCurrencyCompact(currentIncome)} / {formatCurrencyCompact(currentExpense)}.
           </p>
         </div>
       </div>
@@ -82,7 +82,7 @@ export function MonthCompareBarChart() {
               border: '1px solid rgba(255,255,255,0.08)',
               borderRadius: 12,
             }}
-            formatter={(value) => formatCurrency(Number(value))}
+            formatter={(value) => formatCurrencyCompact(Number(value))}
           />
           <Legend />
           <Bar

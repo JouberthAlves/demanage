@@ -1,8 +1,10 @@
 import { Router, Request, Response } from 'express';
 
+import { parseAbnt2Text } from '@/lib/abnt2';
 import { prisma } from '@/lib/prisma';
 import {
   computeMonthlyGoal,
+  parseAutoDebitDay,
   parseTargetDate,
   serializePiggyBank,
 } from '@/lib/piggy';
@@ -18,8 +20,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    const { name, goalAmount, targetDate, autoDebit, isEmergency } = req.body;
-    const trimmedName = typeof name === 'string' ? name.trim() : '';
+    const { name, goalAmount, targetDate, autoDebit, autoDebitDay, isEmergency } =
+      req.body;
+    const trimmedName = parseAbnt2Text(name, { maxLength: 50, required: true }) ?? '';
     const parsedGoal = parsePositiveAmount(goalAmount);
 
     if (!trimmedName || parsedGoal == null) {
@@ -45,6 +48,18 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
+    const wantsAutoDebit = Boolean(autoDebit);
+    let parsedDebitDay = 1;
+    if (wantsAutoDebit) {
+      const day = parseAutoDebitDay(autoDebitDay ?? 1);
+      if (day == null) {
+        return res.status(400).json({
+          error: 'Dia do débito automático deve ser entre 1 e 31',
+        });
+      }
+      parsedDebitDay = day;
+    }
+
     const monthlyGoal = computeMonthlyGoal(parsedGoal, parsedTarget, today);
 
     const bank = await prisma.piggyBank.create({
@@ -54,7 +69,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         goalAmount: parsedGoal,
         targetDate: parsedTarget,
         monthlyGoal,
-        autoDebit: Boolean(autoDebit),
+        autoDebit: wantsAutoDebit,
+        autoDebitDay: parsedDebitDay,
         isEmergency: Boolean(isEmergency),
       },
       include: { transactions: true },
