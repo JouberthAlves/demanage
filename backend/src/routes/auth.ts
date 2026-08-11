@@ -1,5 +1,6 @@
 import { Router } from 'express';
 
+import { parseAbnt2Text, sanitizeAbnt2 } from '@/lib/abnt2';
 import {
   clearAuthCookie,
   comparePassword,
@@ -9,9 +10,13 @@ import {
   signAuthToken,
   toPublicUser,
 } from '@/lib/auth';
-import { parseAbnt2Text, sanitizeAbnt2 } from '@/lib/abnt2';
 import { parseReceiveDay } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
+import {
+  generateRecoveryCode,
+  hashRecoveryCode,
+  verifyRecoveryCode,
+} from '@/lib/recovery-code';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const authRoutes = Router();
@@ -55,18 +60,24 @@ authRoutes.post('/auth/register', async (req, res) => {
     }
 
     const passwordHash = await hashPassword(password);
+    const recoveryCode = generateRecoveryCode();
     const user = await prisma.user.create({
       data: {
         name: trimmedName,
         email: normalizedEmail,
         passwordHash,
+        recoveryCodeHash: hashRecoveryCode(recoveryCode),
+        recoveryCodeCreatedAt: new Date(),
       },
     });
 
-    const token = signAuthToken(user.id);
+    const token = signAuthToken(user.id, user.sessionVersion);
     setAuthCookie(res, token, req);
 
-    return res.status(201).json({ user: toPublicUser(user, null) });
+    return res.status(201).json({
+      user: toPublicUser(user, null),
+      recoveryCode,
+    });
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Erro ao registrar' });
@@ -100,7 +111,7 @@ authRoutes.post('/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'E-mail ou senha inválidos' });
     }
 
-    const token = signAuthToken(user.id);
+    const token = signAuthToken(user.id, user.sessionVersion);
     setAuthCookie(res, token, req);
     const salaryReceiveDay = await getSalaryReceiveDay(user.id);
 
@@ -108,6 +119,98 @@ authRoutes.post('/auth/login', async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ error: 'Erro ao entrar' });
+  }
+});
+
+authRoutes.post('/auth/recovery-code', requireAuth, async (req, res) => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+
+    const recoveryCode = generateRecoveryCode();
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        recoveryCodeHash: hashRecoveryCode(recoveryCode),
+        recoveryCodeCreatedAt: new Date(),
+      },
+    });
+
+    return res.json({ recoveryCode });
+  } catch (error) {
+    console.error(error);
+    return res
+      .status(500)
+      .json({ error: 'Erro ao gerar código de recuperação' });
+  }
+});
+
+authRoutes.post('/auth/recover-password', async (req, res) => {
+  try {
+    const { email, recoveryCode, newPassword } = req.body as {
+      email?: string;
+      recoveryCode?: string;
+      newPassword?: string;
+    };
+
+    const normalizedEmail = email?.trim().toLowerCase();
+    if (!normalizedEmail || !recoveryCode?.trim() || !newPassword) {
+      return res.status(400).json({
+        error: 'Campos obrigatórios: email, recoveryCode, newPassword',
+      });
+    }
+
+    if (
+      !sanitizeAbnt2(newPassword) ||
+      sanitizeAbnt2(newPassword) !== newPassword
+    ) {
+      return res.status(400).json({
+        error: 'Use apenas caracteres do teclado ABNT2 na senha',
+      });
+    }
+
+    if (newPassword.length < 6) {
+      return res.status(400).json({
+        error: 'A senha deve ter pelo menos 6 caracteres',
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: normalizedEmail },
+    });
+
+    if (
+      !user?.recoveryCodeHash ||
+      !verifyRecoveryCode(recoveryCode, user.recoveryCodeHash)
+    ) {
+      return res
+        .status(401)
+        .json({ error: 'E-mail ou código de recuperação inválidos' });
+    }
+
+    const passwordHash = await hashPassword(newPassword);
+    const nextRecoveryCode = generateRecoveryCode();
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        passwordHash,
+        recoveryCodeHash: hashRecoveryCode(nextRecoveryCode),
+        recoveryCodeCreatedAt: new Date(),
+        sessionVersion: { increment: 1 },
+      },
+    });
+
+    clearAuthCookie(res, req);
+    return res.json({
+      ok: true,
+      recoveryCode: nextRecoveryCode,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ error: 'Erro ao recuperar senha' });
   }
 });
 

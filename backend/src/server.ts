@@ -39,7 +39,7 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: {
-    error: 'Muitas tentativas de login. Tente novamente em alguns minutos.',
+    error: 'Muitas tentativas. Tente novamente em alguns minutos.',
   },
 });
 
@@ -59,6 +59,7 @@ app.use(requestLogger);
 
 app.use('/auth/login', authLimiter);
 app.use('/auth/register', authLimiter);
+app.use('/auth/recover-password', authLimiter);
 app.use(api);
 
 app.use(
