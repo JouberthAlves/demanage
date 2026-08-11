@@ -113,3 +113,4 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 - [x] ~~**Split cartão / PIX**~~ — Despesa em 2 cartões ou cartão+PIX por %; valida limite disponível; parte PIX no saldo; billing/comprometimento por split.
 
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
+
