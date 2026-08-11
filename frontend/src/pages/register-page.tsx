@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
+import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
 import { AuthShell } from '@/components/layout/auth-shell';
 import { Button } from '@/components/ui/button';
 import {
@@ -36,6 +37,7 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,7 +52,7 @@ export function RegisterPage() {
     );
   }
 
-  if (isAuthenticated) {
+  if (isAuthenticated && !recoveryCode) {
     return <Navigate to='/' replace />;
   }
 
@@ -68,9 +70,9 @@ export function RegisterPage() {
     setSubmitting(true);
 
     try {
-      await register(name.trim(), email.trim(), password);
+      const result = await register(name.trim(), email.trim(), password);
+      setRecoveryCode(result.recoveryCode);
       toast.success('Conta criada');
-      navigate('/', { replace: true });
     } catch (err) {
       const message = isAxiosError(err)
         ? (err.response?.data?.error ?? 'Não foi possível criar a conta')
@@ -80,6 +82,50 @@ export function RegisterPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (recoveryCode) {
+    return (
+      <AuthShell>
+        <div className='mb-8 flex flex-col items-center gap-3 text-center'>
+          <img
+            src='/favicon.svg'
+            alt='deManage'
+            className='size-16 drop-shadow-[0_0_24px_rgba(52,211,153,0.35)]'
+          />
+          <div>
+            <p className='text-2xl font-semibold tracking-tight'>Conta criada</p>
+            <p className='mt-1 text-sm text-muted-foreground'>
+              Salve seu código antes de continuar
+            </p>
+          </div>
+        </div>
+
+        <Card
+          className='w-full border-white/10 bg-card/55 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl'
+          size='sm'
+        >
+          <CardHeader>
+            <CardTitle>Seu código offline</CardTitle>
+            <CardDescription>
+              Ele permite redefinir sua senha sem e-mail ou SMS.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <RecoveryCodePanel recoveryCode={recoveryCode} />
+          </CardContent>
+          <CardFooter>
+            <Button
+              type='button'
+              className='w-full'
+              onClick={() => navigate('/', { replace: true })}
+            >
+              Já guardei, continuar
+            </Button>
+          </CardFooter>
+        </Card>
+      </AuthShell>
+    );
   }
 
   return (
