@@ -10,6 +10,11 @@ type UpdateProfileInput = {
   notes?: string | null;
 };
 
+type RegisterResult = {
+  user: AuthUser;
+  recoveryCode: string;
+};
+
 type AuthState = {
   user: AuthUser | null;
   isAuthenticated: boolean;
@@ -21,8 +26,9 @@ type AuthState = {
     name: string,
     email: string,
     password: string,
-  ) => Promise<AuthUser>;
+  ) => Promise<RegisterResult>;
   updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
+  generateRecoveryCode: () => Promise<string>;
   logout: () => Promise<void>;
 };
 
@@ -71,7 +77,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   register: async (name, email, password) => {
-    const { data } = await api.post<{ user: AuthUser }>('/auth/register', {
+    const { data } = await api.post<RegisterResult>('/auth/register', {
       name,
       email,
       password,
@@ -81,7 +87,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       isAuthenticated: true,
       isLoading: false,
     });
-    return data.user;
+    return data;
   },
 
   updateProfile: async (input) => {
@@ -97,6 +103,16 @@ export const useAuthStore = create<AuthState>((set) => ({
       isLoading: false,
     });
     return data.user;
+  },
+
+  generateRecoveryCode: async () => {
+    const { data } = await api.post<{ recoveryCode: string }>(
+      '/auth/recovery-code',
+    );
+    set((state) => ({
+      user: state.user ? { ...state.user, hasRecoveryCode: true } : null,
+    }));
+    return data.recoveryCode;
   },
 
   logout: async () => {
