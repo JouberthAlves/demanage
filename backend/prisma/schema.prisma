@@ -54,14 +54,17 @@ enum ExpenseSplitKind {
 }
 
 model User {
-  id           String      @id @default(uuid())
-  name         String
-  email        String      @unique
-  passwordHash String
-  salary       Decimal     @default(0) @db.Decimal(12, 2)
-  notes        String?
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
+  id                    String   @id @default(uuid())
+  name                  String
+  email                 String   @unique
+  passwordHash          String
+  recoveryCodeHash      String?
+  recoveryCodeCreatedAt DateTime?
+  sessionVersion        Int      @default(0)
+  salary                Decimal  @default(0) @db.Decimal(12, 2)
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
   cards        Card[]
   expenses     Expense[]
   entries      Entry[]

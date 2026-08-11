@@ -8,6 +8,7 @@ import { IncomePage } from '@/pages/income-page';
 import { LoginPage } from '@/pages/login-page';
 import { PiggyPage } from '@/pages/piggy-page';
 import { ProfilePage } from '@/pages/profile-page';
+import { RecoverPasswordPage } from '@/pages/recover-password-page';
 import { RegisterPage } from '@/pages/register-page';
 
 export const router = createBrowserRouter([
@@ -18,6 +19,10 @@ export const router = createBrowserRouter([
   {
     path: '/register',
     element: <RegisterPage />,
+  },
+  {
+    path: '/recuperar-senha',
+    element: <RecoverPasswordPage />,
   },
   {
     element: <AuthGuard />,
