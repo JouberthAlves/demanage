@@ -124,6 +124,14 @@ export function LoginPage() {
                   required
                 />
                 {error ? <FieldError>{error}</FieldError> : null}
+                <FieldDescription>
+                  <Link
+                    to='/recuperar-senha'
+                    className='underline underline-offset-4'
+                  >
+                    Esqueci minha senha
+                  </Link>
+                </FieldDescription>
               </Field>
               <Button type='submit' className='w-full' disabled={submitting}>
                 {submitting ? <Spinner data-icon='inline-start' /> : null}

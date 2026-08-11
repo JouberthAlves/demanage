@@ -19,6 +19,7 @@ export type { PublicUser };
 
 type JwtPayload = {
   userId: string;
+  sessionVersion?: number;
 };
 
 export async function hashPassword(password: string) {
@@ -29,12 +30,16 @@ export async function comparePassword(password: string, passwordHash: string) {
   return bcrypt.compare(password, passwordHash);
 }
 
-export function signAuthToken(userId: string) {
+export function signAuthToken(userId: string, sessionVersion: number) {
   const options: SignOptions = {
     expiresIn: JWT_EXPIRES_IN as SignOptions['expiresIn'],
   };
 
-  return jwt.sign({ userId } satisfies JwtPayload, JWT_SECRET, options);
+  return jwt.sign(
+    { userId, sessionVersion } satisfies JwtPayload,
+    JWT_SECRET,
+    options,
+  );
 }
 
 export function verifyAuthToken(token: string) {
@@ -114,6 +119,7 @@ export function toPublicUser(
     id: user.id,
     name: user.name,
     email: user.email,
+    hasRecoveryCode: Boolean(user.recoveryCodeHash),
     salary: Number(user.salary),
     salaryReceiveDay,
     notes: user.notes,

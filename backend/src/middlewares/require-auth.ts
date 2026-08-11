@@ -24,7 +24,7 @@ export async function requireAuth(
       where: { id: payload.userId },
     });
 
-    if (!user) {
+    if (!user || (payload.sessionVersion ?? 0) !== user.sessionVersion) {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
