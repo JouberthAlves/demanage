@@ -1,9 +1,10 @@
 import { isAxiosError } from 'axios';
 import { useQueryClient } from '@tanstack/react-query';
-import { CreditCard, Plus, Wallet } from 'lucide-react';
+import { CreditCard, KeyRound, Plus, Wallet } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
 import { PageHeader } from '@/components/layout/page-header';
 import { CardFormDialog } from '@/components/profile/card-form-dialog';
 import { CreditCardTile } from '@/components/profile/credit-card-tile';
@@ -32,6 +33,9 @@ export function ProfilePage() {
   const { isLoading: cardsLoading, isError: cardsError } = useCards();
   const user = useAuthStore((state) => state.user);
   const updateProfile = useAuthStore((state) => state.updateProfile);
+  const generateRecoveryCode = useAuthStore(
+    (state) => state.generateRecoveryCode,
+  );
   const cards = useFinanceStore((state) => state.profile.cards);
   const expenses = useFinanceStore((state) => state.expenses);
   const removeCard = useDeleteCard();
@@ -48,6 +52,8 @@ export function ProfilePage() {
   const [notes, setNotes] = useState(user?.notes ?? '');
   const [saving, setSaving] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const [generatingRecoveryCode, setGeneratingRecoveryCode] = useState(false);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
 
   useEffect(() => {
@@ -139,6 +145,27 @@ export function ProfilePage() {
         ? (err.response?.data?.error ?? 'Não foi possível remover o cartão')
         : 'Não foi possível remover o cartão';
       toast.error(message);
+    }
+  }
+
+  async function handleGenerateRecoveryCode() {
+    setGeneratingRecoveryCode(true);
+
+    try {
+      const code = await generateRecoveryCode();
+      setRecoveryCode(code);
+      toast.success(
+        user?.hasRecoveryCode
+          ? 'Novo código gerado. O anterior foi invalidado.'
+          : 'Código de recuperação gerado.',
+      );
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível gerar o código')
+        : 'Não foi possível gerar o código';
+      toast.error(message);
+    } finally {
+      setGeneratingRecoveryCode(false);
     }
   }
 
@@ -328,6 +355,41 @@ export function ProfilePage() {
           )}
         </section>
       </div>
+
+      <section className='space-y-4 rounded-2xl border border-border bg-card/20 p-4 sm:p-6'>
+        <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
+          <div className='flex gap-3'>
+            <div className='flex size-10 shrink-0 items-center justify-center rounded-xl bg-neon-green/10'>
+              <KeyRound className='size-5 text-neon-green' />
+            </div>
+            <div>
+              <h2 className='text-lg font-medium'>Recuperação de senha</h2>
+              <p className='text-sm text-muted-foreground'>
+                {user?.hasRecoveryCode
+                  ? 'Você já possui um código offline. Gere outro apenas se perdeu o atual.'
+                  : 'Gere um código offline para recuperar sua conta sem e-mail ou SMS.'}
+              </p>
+            </div>
+          </div>
+
+          <Button
+            type='button'
+            variant='secondary'
+            className='rounded-lg'
+            disabled={generatingRecoveryCode}
+            onClick={() => void handleGenerateRecoveryCode()}
+          >
+            {generatingRecoveryCode ? (
+              <Spinner data-icon='inline-start' />
+            ) : null}
+            {user?.hasRecoveryCode ? 'Gerar novo código' : 'Gerar código'}
+          </Button>
+        </div>
+
+        {recoveryCode ? (
+          <RecoveryCodePanel recoveryCode={recoveryCode} compact />
+        ) : null}
+      </section>
 
       <CardFormDialog
         open={dialogOpen}
