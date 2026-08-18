@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./docs/img/demanage-brand.png" alt="deManage" width="280" />
+  <img src="./frontend//src/assets/images/logos/logo.svg" alt="deManage" width="280" />
 </p>
 
 <p align="center"><em>Suas finanças, no controle.</em></p>
