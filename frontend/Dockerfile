@@ -1,37 +1,31 @@
 ###############################
-# THIS IS A BASIC DOCKERFILE USED IN OTHER APPS
-# YOU CAN CHANGE ADDING ROWS OR REMOVING AS NEEDED
+# deManage frontend — Vite build + nginx (same-origin /api proxy)
 ###############################
 
-# Uses Node.js 22 to build the app
 FROM node:22 AS builder
 
-# Set the working directory inside the container
 WORKDIR /app
 
-# Copies the proj file into the container
+ARG VITE_API_URL=/api
+ENV VITE_API_URL=$VITE_API_URL
+
 COPY . .
 
-# Install pnpm globally
 RUN npm i -g pnpm
-
-# Install all proj dependecies
 RUN pnpm i
-
-# Runs the build script
 RUN pnpm build
 
-# Uses nginx to server static files
 FROM nginx:alpine
 
-# Copies the static built files to nginx directory
+WORKDIR /app
+
 COPY --from=builder /app/dist /usr/share/nginx/html
+COPY nginx.conf /etc/nginx/templates/default.conf.template
+COPY entrypoint.sh /entrypoint.sh
 
-# Copies the config file to the nginx conf dir
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
-# Exposes the 80 port
+ENV PORT=80
 EXPOSE 80
 
-# Finally, starts nginx
-CMD ["nginx", "-g", "daemon off;"]
+ENTRYPOINT ["/bin/sh", "/entrypoint.sh"]
