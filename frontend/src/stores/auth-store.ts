@@ -108,6 +108,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   generateRecoveryCode: async () => {
     const { data } = await api.post<{ recoveryCode: string }>(
       '/auth/recovery-code',
+      {},
     );
     set((state) => ({
       user: state.user ? { ...state.user, hasRecoveryCode: true } : null,
