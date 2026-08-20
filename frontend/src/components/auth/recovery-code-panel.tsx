@@ -8,14 +8,47 @@ type RecoveryCodePanelProps = {
   compact?: boolean;
 };
 
+function copyWithSelectionFallback(value: string) {
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.readOnly = true;
+  textarea.style.position = 'fixed';
+  textarea.style.inset = '0';
+  textarea.style.width = '1px';
+  textarea.style.height = '1px';
+  textarea.style.opacity = '0';
+  textarea.style.pointerEvents = 'none';
+
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  textarea.setSelectionRange(0, value.length);
+
+  try {
+    return document.execCommand('copy');
+  } finally {
+    textarea.remove();
+  }
+}
+
 export function RecoveryCodePanel({
   recoveryCode,
   compact = false,
 }: RecoveryCodePanelProps) {
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(recoveryCode);
-      toast.success('Código copiado');
+      if (window.isSecureContext && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(recoveryCode);
+        toast.success('Código copiado');
+        return;
+      }
+
+      if (copyWithSelectionFallback(recoveryCode)) {
+        toast.success('Código copiado');
+        return;
+      }
+
+      throw new Error('Clipboard unavailable');
     } catch {
       toast.error('Não foi possível copiar automaticamente');
     }
