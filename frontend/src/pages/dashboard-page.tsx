@@ -11,16 +11,10 @@ import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { usePiggyBanks } from '@/hooks/use-piggy-banks';
-import {
-  formatCurrencyCompact,
-  formatPercent,
-  getFirstName,
-  moneyValueClass,
-} from '@/lib/format';
+import { formatCurrencyCompact, formatPercent, getFirstName, moneyValueClass } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
 import {
   selectAverageMonthlyExpense,
-  selectMonthlyBalanceOutflows,
   selectMonthlyExpenses,
   selectMonthlyIncome,
   selectRecurringShare,
@@ -32,11 +26,10 @@ export function DashboardPage() {
   const history = useFinanceStore((state) => state.history);
   const income = useFinanceStore(selectMonthlyIncome);
   const expenses = useFinanceStore(selectMonthlyExpenses);
-  const balanceOutflows = useFinanceStore(selectMonthlyBalanceOutflows);
   const averageExpense = useFinanceStore(selectAverageMonthlyExpense);
   const recurringShare = useFinanceStore(selectRecurringShare);
   const { data: piggyBanks = [] } = usePiggyBanks();
-  const balance = income - balanceOutflows;
+  const balance = income - expenses;
   const hasHistory = history.length > 0;
   const piggyTotal = useMemo(
     () => piggyBanks.reduce((sum, bank) => sum + bank.balance, 0),
@@ -59,11 +52,11 @@ export function DashboardPage() {
         title={balance >= 0 ? 'Saldo positivo' : 'Saldo negativo'}
         description={
           balance >= 0
-            ? 'Entradas já creditadas cobrem as saídas já no saldo. Valores guardados no cofrinho reduzem o saldo disponível, mas não contam como despesa.'
-            : 'O saldo disponível está negativo. Valores guardados no cofrinho reduzem o saldo, mas ficam separados das despesas.'
+            ? 'Entradas já creditadas cobrem as saídas já no saldo. Despesas no cartão entram só como fatura.'
+            : 'As saídas já no saldo estão acima das entradas. Vale revisar cartões e recorrências.'
         }
       >
-        <div className='grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+        <div className='grid min-w-0 gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'>
           <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
             <p className='text-xs text-muted-foreground'>Saldo até hoje</p>
             <p
@@ -88,7 +81,7 @@ export function DashboardPage() {
           </div>
           <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4 sm:col-span-2 lg:col-span-1'>
             <p className='text-xs text-muted-foreground'>
-              Despesas / entradas (já no saldo)
+              Saídas / entradas (já no saldo)
             </p>
             <p
               title={shareLabel}
@@ -101,9 +94,8 @@ export function DashboardPage() {
       </PageHero>
 
       <p className='text-sm text-muted-foreground'>
-        Cofrinho é reserva, não despesa. Se o depósito descontar do saldo, ele
-        afeta apenas o saldo disponível. Despesas vinculadas a cartão só entram
-        no saldo quando viram fatura.
+        Despesas vinculadas a cartão não entram no saldo até virarem fatura no
+        fechamento.
       </p>
 
       <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
@@ -115,9 +107,9 @@ export function DashboardPage() {
           icon={<ArrowUpRight className='size-4 text-neon-green' />}
         />
         <KpiCard
-          label='Despesas já no saldo'
+          label='Saídas já no saldo'
           value={formatCurrencyCompact(expenses)}
-          hint='Cofrinho não entra como gasto'
+          hint='Após o dia de desconto (sem cartão aberto)'
           tone='amber'
           icon={<ArrowDownRight className='size-4 text-neon-amber' />}
         />
@@ -148,8 +140,8 @@ export function DashboardPage() {
         </SectionPanel>
 
         <SectionPanel
-          title='Composição das despesas'
-          description='Despesas já no saldo por categoria, sem cofrinho'
+          title='Composição no saldo'
+          description='Despesas já no saldo por categoria'
         >
           <CategoryDonutChart />
         </SectionPanel>
@@ -157,7 +149,7 @@ export function DashboardPage() {
 
       <SectionPanel
         title='Suas maiores despesas'
-        description='Top categorias por valor mensal — cofrinho fica fora do ranking'
+        description='Top categorias por valor mensal — use o olho para ver os itens'
       >
         <TopExpensesBarChart />
       </SectionPanel>

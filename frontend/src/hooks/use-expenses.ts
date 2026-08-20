@@ -8,10 +8,7 @@ import {
   updateExpense,
   type ExpensePayload,
 } from '@/lib/expenses-api';
-import {
-  isPiggyReserveExpense,
-  useFinanceStore,
-} from '@/stores/finance-store';
+import { useFinanceStore } from '@/stores/finance-store';
 
 export const EXPENSES_QUERY_KEY = ['expenses'] as const;
 
@@ -29,10 +26,7 @@ export function useExpenses() {
     }
   }, [query.data, setExpenses]);
 
-  return {
-    ...query,
-    data: query.data?.filter((expense) => !isPiggyReserveExpense(expense)),
-  };
+  return query;
 }
 
 export function useCreateExpense() {

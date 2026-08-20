@@ -16,10 +16,7 @@ type FinanceActions = {
   clearAll: () => void;
 };
 
-export type FinanceStore = FinanceState &
-  FinanceActions & {
-    balanceOnlyExpenses: RecurringExpense[];
-  };
+export type FinanceStore = FinanceState & FinanceActions;
 
 const emptyFinanceState: FinanceState = {
   profile: {
@@ -43,34 +40,21 @@ function clearLegacyStorage() {
   }
 }
 
-export function isPiggyReserveExpense(expense: RecurringExpense) {
-  return expense.category === 'cofrinho';
-}
-
 clearLegacyStorage();
 
 export const useFinanceStore = create<FinanceStore>((set) => ({
   ...emptyFinanceState,
-  balanceOnlyExpenses: [],
 
   setCards: (cards) =>
     set((state) => ({
       profile: { ...state.profile, cards },
     })),
 
-  setExpenses: (expenses) =>
-    set({
-      expenses: expenses.filter((expense) => !isPiggyReserveExpense(expense)),
-      balanceOnlyExpenses: expenses.filter(isPiggyReserveExpense),
-    }),
+  setExpenses: (expenses) => set({ expenses }),
 
   setIncomes: (incomes) => set({ incomes }),
 
-  clearAll: () =>
-    set({
-      ...emptyFinanceState,
-      balanceOnlyExpenses: [],
-    }),
+  clearAll: () => set({ ...emptyFinanceState }),
 }));
 
 export function selectMonthlyIncome(state: FinanceState) {
@@ -85,15 +69,6 @@ export function selectMonthlyExpenses(state: FinanceState) {
     (sum, expense) => sum + expenseContributionThisMonth(expense),
     0,
   );
-}
-
-export function selectMonthlyBalanceOutflows(state: FinanceStore) {
-  const piggyReserveOutflows = state.balanceOnlyExpenses.reduce(
-    (sum, expense) => sum + expenseContributionThisMonth(expense),
-    0,
-  );
-
-  return selectMonthlyExpenses(state) + piggyReserveOutflows;
 }
 
 export function selectAverageMonthlyExpense(state: FinanceState) {
