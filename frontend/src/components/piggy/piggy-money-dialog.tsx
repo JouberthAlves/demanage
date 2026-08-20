@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { CurrencyInput } from '@/components/ui/currency-input';
 import {
   Dialog,
@@ -38,10 +39,14 @@ export function PiggyMoneyDialog({
   const deposit = useDepositPiggyBank();
   const withdraw = useWithdrawPiggyBank();
   const [amount, setAmount] = useState('');
+  const [confirmBalanceDeduction, setConfirmBalanceDeduction] = useState(false);
   const submitting = deposit.isPending || withdraw.isPending;
 
   useEffect(() => {
-    if (open) setAmount('');
+    if (open) {
+      setAmount('');
+      setConfirmBalanceDeduction(false);
+    }
   }, [open, mode, bank?.id]);
 
   const monthlyHint = useMemo(() => {
@@ -59,6 +64,11 @@ export function PiggyMoneyDialog({
     const value = parseCurrencyInput(amount);
     if (!value || value <= 0) {
       toast.error('Informe um valor válido');
+      return;
+    }
+
+    if (mode === 'deposit' && !confirmBalanceDeduction) {
+      toast.error('Confirme que o valor será descontado do seu saldo');
       return;
     }
 
@@ -98,7 +108,7 @@ export function PiggyMoneyDialog({
           </DialogTitle>
           <DialogDescription>
             {isDeposit
-              ? `Isso cria uma despesa "Cofrinho" e reduz o saldo do mês. Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta.`
+              ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.`
               : bank?.isEmergency
                 ? 'Atenção: este é um cofre de emergência. O valor volta ao saldo do mês.'
                 : 'O valor volta ao saldo do mês como entrada de resgate.'}
@@ -132,6 +142,36 @@ export function PiggyMoneyDialog({
             />
           </div>
 
+          {isDeposit ? (
+            <div className='rounded-lg border border-border bg-black/20 p-3'>
+              <div className='flex items-start gap-3'>
+                <Checkbox
+                  id='piggy-confirm-balance-deduction'
+                  checked={confirmBalanceDeduction}
+                  onCheckedChange={(checked) =>
+                    setConfirmBalanceDeduction(checked === true)
+                  }
+                  aria-describedby='piggy-confirm-balance-deduction-description'
+                />
+                <div className='space-y-1'>
+                  <Label
+                    htmlFor='piggy-confirm-balance-deduction'
+                    className='cursor-pointer leading-snug'
+                  >
+                    Deseja que esse valor desconte do seu saldo?
+                  </Label>
+                  <p
+                    id='piggy-confirm-balance-deduction-description'
+                    className='text-xs text-muted-foreground'
+                  >
+                    Ao confirmar, será criada uma despesa “Cofrinho” com esse
+                    valor no mês atual.
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           {!isDeposit && bank ? (
             <p className='text-sm text-muted-foreground'>
               Disponível no cofre: {formatCurrency(bank.balance)}
@@ -149,7 +189,9 @@ export function PiggyMoneyDialog({
             <Button
               type='submit'
               variant={isDeposit ? 'default' : 'destructive'}
-              disabled={submitting}
+              disabled={
+                submitting || (isDeposit && !confirmBalanceDeduction)
+              }
             >
               {submitting ? <Spinner data-icon='inline-start' /> : null}
               {isDeposit ? 'Confirmar depósito' : 'Sacar'}
