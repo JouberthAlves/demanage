@@ -48,6 +48,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~Auth / login real~~ — JWT em cookie httpOnly; `POST /auth/register|login|logout`, `GET /auth/me`; telas `/login` e `/register` (shadcn Field/Card); rotas do app protegidas.
 - [x] ~~Recuperação de senha por código offline~~ — Código local de alta entropia exibido uma única vez, hash no banco, geração/rotação pelo Perfil, fluxo `Esqueci minha senha`, rotação após uso e invalidação de sessões antigas.
+- [x] ~~Compatibilidade do código offline em navegador mobile~~ — Corrige resolução de API `localhost` para o host da LAN em development, CORS LAN somente em development, envio explícito do POST e fallback de clipboard fora de secure context.
 - [x] ~~API CRUD Express + Prisma~~ — `Entry`, `Expense`, `Card` (GET/POST/PATCH/DELETE). Perfil via `PATCH /auth/me` (salva `salary` e sincroniza entrada mensal "Salário").
 - [x] ~~Frontend: trocar Zustand/localStorage pela API~~ — Entradas, Despesas, Cartões e perfil na API; finance store sem persist.
 - [x] ~~Inputs monetários BRL~~ — máscara `R$ 1.234,56` em perfil, despesas, entradas e cartões.
