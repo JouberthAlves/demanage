@@ -9,7 +9,13 @@ import {
   countDecimalPlaces,
   enrichAccountingWithQuote,
 } from '@/lib/asset-accounting';
-import { dateOnlyUtc, decimal, money, ZERO } from '@/lib/decimal';
+import {
+  dateOnlyUtc,
+  decimal,
+  type DecimalLike,
+  money,
+  ZERO,
+} from '@/lib/decimal';
 import { getAssetQuote } from '@/lib/market-data';
 import { prisma } from '@/lib/prisma';
 
@@ -161,7 +167,7 @@ function assertTransactionTimelineValid(
   transactions: Array<{
     id: string;
     type: AssetTransactionType;
-    quantity: unknown;
+    quantity: DecimalLike;
     date: Date;
   }>,
 ) {
