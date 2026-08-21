@@ -71,8 +71,10 @@ export function serializePiggyBank(
     autoDebit: bank.autoDebit,
     autoDebitDay: bank.autoDebitDay,
     isEmergency: bank.isEmergency,
-    yieldEnabled: bank.yieldEnabled,
-    cdiPercent: Number(bank.cdiPercent),
+    yieldEnabled: Boolean(bank.yieldEnabled),
+    cdiPercent: Number.isFinite(Number(bank.cdiPercent))
+      ? Number(bank.cdiPercent)
+      : 0,
     interestAccruedThrough:
       bank.interestAccruedThrough?.toISOString().slice(0, 10) ?? null,
     archivedAt: bank.archivedAt?.toISOString() ?? null,
@@ -331,12 +333,13 @@ export async function processPiggyAutoDebits(userId: string) {
     const balance = balanceDecimalFromTransactions(bank.transactions);
     const goalAmount =
       bank.goalAmount == null ? null : decimal(bank.goalAmount);
-    if (goalAmount == null || bank.monthlyGoal.lte(0)) continue;
-    const remaining = goalAmount.minus(balance);
-    if (remaining.lte(0)) continue;
-    const amount = bank.monthlyGoal.lte(remaining)
-      ? bank.monthlyGoal
-      : remaining;
+    if (bank.monthlyGoal.lte(0)) continue;
+    let amount = bank.monthlyGoal;
+    if (goalAmount != null) {
+      const remaining = goalAmount.minus(balance);
+      if (remaining.lte(0)) continue;
+      if (amount.gt(remaining)) amount = remaining;
+    }
 
     try {
       await depositToPiggyBank({

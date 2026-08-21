@@ -11,16 +11,21 @@ import { requireAuth } from '@/middlewares/require-auth';
 const router = Router();
 
 router.get('/settings', requireAuth, async (req: Request, res: Response) => {
-  const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ error: 'Não autenticado' });
-  const settings = await prisma.patrimonySettings.findUnique({
-    where: { userId },
-  });
-  if (!settings) return res.json(null);
-  return res.json({
-    baseDate: settings.baseDate.toISOString().slice(0, 10),
-    openingCashBrl: settings.openingCashBrl.toString(),
-  });
+  try {
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: 'Não autenticado' });
+    const settings = await prisma.patrimonySettings.findUnique({
+      where: { userId },
+    });
+    if (!settings) return res.json(null);
+    return res.json({
+      baseDate: settings.baseDate.toISOString().slice(0, 10),
+      openingCashBrl: settings.openingCashBrl.toString(),
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
 });
 
 router.put('/settings', requireAuth, async (req: Request, res: Response) => {

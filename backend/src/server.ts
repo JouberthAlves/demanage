@@ -132,6 +132,12 @@ app.use(
   },
 );
 
-httpServer.listen(API_PORT, () => {
+function onListen() {
   console.log(`deManage API running on ${API_PORT}`);
-});
+}
+
+if (NODE_ENV === 'production') {
+  httpServer.listen(Number(API_PORT), '::', onListen);
+} else {
+  httpServer.listen(API_PORT, onListen);
+}

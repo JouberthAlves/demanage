@@ -39,7 +39,25 @@ export function lastCompletedWeekday(now = new Date()) {
   return target;
 }
 
+function isPrismaUniqueConflict(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error != null &&
+    'code' in error &&
+    error.code === 'P2002'
+  );
+}
+
 export async function catchUpPiggyInterest(userId: string) {
+  try {
+    return await accruePiggyInterest(userId);
+  } catch (error) {
+    console.error(error);
+    return { createdCount: 0, stale: true };
+  }
+}
+
+async function accruePiggyInterest(userId: string) {
   const banks = await prisma.piggyBank.findMany({
     where: {
       userId,
@@ -98,24 +116,28 @@ export async function catchUpPiggyInterest(userId: string) {
         decimal(bank.cdiPercent),
       );
       if (interest.gt(0)) {
-        const created = await prisma.piggyTransaction.create({
-          data: {
-            piggyBankId: bank.id,
-            userId,
-            type: 'interest',
-            source: 'yield',
-            amount: interest,
-            date: day,
-            note: `Rendimento diário · ${bank.cdiPercent.toString()}% do CDI`,
-            cdiRate: rate,
-            cdiPercent: bank.cdiPercent,
-            baseBalance: balance,
-            resultingBalance: balance.plus(interest),
-            interestKey,
-          },
-        });
-        transactions.push(created);
-        createdCount += 1;
+        try {
+          const created = await prisma.piggyTransaction.create({
+            data: {
+              piggyBankId: bank.id,
+              userId,
+              type: 'interest',
+              source: 'yield',
+              amount: interest,
+              date: day,
+              note: `Rendimento diário · ${bank.cdiPercent.toString()}% do CDI`,
+              cdiRate: rate,
+              cdiPercent: bank.cdiPercent,
+              baseBalance: balance,
+              resultingBalance: balance.plus(interest),
+              interestKey,
+            },
+          });
+          transactions.push(created);
+          createdCount += 1;
+        } catch (error) {
+          if (!isPrismaUniqueConflict(error)) throw error;
+        }
       }
       lastProcessed = day;
     }
