@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 
-import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
 import { parseAbnt2Text } from '@/lib/abnt2';
+import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
 import {
   parseEndsAt,
   parseReceiveDay,
@@ -64,9 +64,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Categoria inválida' });
     }
 
-    if (category === 'cofrinho') {
+    if (category === 'cofrinho' || category === 'investimento') {
       return res.status(400).json({
-        error: 'Depósitos no cofrinho são feitos pela aba Cofrinho',
+        error: 'Investimentos são lançados pelas abas Cofrinho ou Moedas',
       });
     }
 

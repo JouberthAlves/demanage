@@ -49,23 +49,25 @@ type PiggyFormDialogProps = {
 type FormState = {
   name: string;
   goalAmount: string;
-  skipGoal: boolean;
   targetDate: string;
   autoDebit: boolean;
   autoDebitDay: string;
   monthlyDebitAmount: string;
   isEmergency: boolean;
+  yieldEnabled: boolean;
+  cdiPercent: string;
 };
 
 const emptyForm: FormState = {
   name: '',
   goalAmount: '',
-  skipGoal: false,
   targetDate: '',
   autoDebit: false,
   autoDebitDay: '1',
   monthlyDebitAmount: '',
   isEmergency: false,
+  yieldEnabled: false,
+  cdiPercent: '100',
 };
 
 const AUTO_DEBIT_DAYS = Array.from({ length: 31 }, (_, index) =>
@@ -90,13 +92,14 @@ export function PiggyFormDialog({
         goalAmount: piggyHasGoal(bank.goalAmount)
           ? formatBrlInputValue(bank.goalAmount)
           : '',
-        skipGoal: !piggyHasGoal(bank.goalAmount),
         targetDate: bank.targetDate ?? '',
         autoDebit: bank.autoDebit,
         autoDebitDay: String(bank.autoDebitDay || 1),
         monthlyDebitAmount:
           bank.monthlyGoal > 0 ? formatBrlInputValue(bank.monthlyGoal) : '',
         isEmergency: bank.isEmergency,
+        yieldEnabled: bank.yieldEnabled,
+        cdiPercent: String(bank.cdiPercent || 100),
       });
       return;
     }
@@ -104,11 +107,10 @@ export function PiggyFormDialog({
   }, [bank, open]);
 
   const previewMonthly = useMemo(() => {
-    if (form.skipGoal) return 0;
     const goal = form.goalAmount ? parseCurrencyInput(form.goalAmount) : 0;
     if (!goal || !form.targetDate) return 0;
     return computeMonthlyGoal(goal, form.targetDate);
-  }, [form.goalAmount, form.skipGoal, form.targetDate]);
+  }, [form.goalAmount, form.targetDate]);
 
   const previewMonths = form.targetDate
     ? monthsUntilTarget(form.targetDate)
@@ -120,17 +122,14 @@ export function PiggyFormDialog({
       toast.error('Informe o nome do cofre');
       return;
     }
-    const goalAmount = form.skipGoal
-      ? null
-      : parseCurrencyInput(form.goalAmount);
-    if (!form.skipGoal && (!goalAmount || goalAmount <= 0)) {
-      toast.error(
-        'Informe a meta final ou marque que não deseja informar meta',
-      );
+
+    const goalAmount = form.goalAmount
+      ? parseCurrencyInput(form.goalAmount)
+      : null;
+    if (form.goalAmount && (!goalAmount || goalAmount <= 0)) {
+      toast.error('A meta precisa ser maior que zero');
       return;
     }
-
-    const targetDate = form.skipGoal ? null : form.targetDate || null;
 
     const autoDebitDay = Number(form.autoDebitDay);
     if (
@@ -150,14 +149,25 @@ export function PiggyFormDialog({
       }
     }
 
+    const cdiPercent = Number(form.cdiPercent.replace(',', '.'));
+    if (
+      form.yieldEnabled &&
+      (!Number.isFinite(cdiPercent) || cdiPercent < 0 || cdiPercent > 1000)
+    ) {
+      toast.error('Informe um % do CDI entre 0 e 1000');
+      return;
+    }
+
     const payload = {
       name: form.name.trim().slice(0, 50),
       goalAmount,
-      targetDate,
+      targetDate: form.targetDate || null,
       monthlyGoal: form.autoDebit ? monthlyGoal : 0,
       autoDebit: form.autoDebit,
       autoDebitDay: form.autoDebit ? autoDebitDay : 1,
       isEmergency: form.isEmergency,
+      yieldEnabled: form.yieldEnabled,
+      cdiPercent: form.yieldEnabled ? cdiPercent : 0,
     };
 
     try {
@@ -179,12 +189,12 @@ export function PiggyFormDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-h-[min(90dvh,720px)] overflow-y-auto rounded-xl sm:max-w-md'>
+      <DialogContent className='max-h-[min(90dvh,760px)] overflow-y-auto rounded-xl sm:max-w-md'>
         <DialogHeader>
           <DialogTitle>{bank ? 'Editar cofre' : 'Novo cofre'}</DialogTitle>
           <DialogDescription>
-            A meta e a data são opcionais. Sem meta, o cofre só acumula saldo —
-            sem barra de progresso.
+            Meta e data são opcionais. O rendimento também é opcional e usa o
+            CDI bruto diário informado pelo Banco Central.
           </DialogDescription>
         </DialogHeader>
 
@@ -200,60 +210,35 @@ export function PiggyFormDialog({
               onChange={(event) =>
                 setForm((current) => ({ ...current, name: event.target.value }))
               }
-              placeholder='Ex: Viagem'
+              placeholder='Ex: Reserva'
               maxLength={50}
               className='rounded-lg'
             />
-            <p className='text-xs text-muted-foreground'>
-              {form.name.length}/50
-            </p>
           </div>
 
           <div className='flex flex-col gap-2'>
-            <Label htmlFor='piggy-goal'>Meta final</Label>
+            <Label htmlFor='piggy-goal'>Meta final (opcional)</Label>
             <CurrencyInput
               id='piggy-goal'
               value={form.goalAmount}
               onValueChange={(goalAmount) =>
                 setForm((current) => ({ ...current, goalAmount }))
               }
-              disabled={form.skipGoal}
               className='rounded-lg'
             />
-            <label
-              htmlFor='piggy-skip-goal'
-              className='flex cursor-pointer items-start gap-2 text-sm'
-            >
-              <Checkbox
-                id='piggy-skip-goal'
-                checked={form.skipGoal}
-                onCheckedChange={(checked) =>
-                  setForm((current) => ({
-                    ...current,
-                    skipGoal: checked === true,
-                    goalAmount: checked === true ? '' : current.goalAmount,
-                    targetDate: checked === true ? '' : current.targetDate,
-                  }))
-                }
-                className='mt-0.5'
-              />
-              <span className='text-muted-foreground text-xs'>Deseja não informar meta?</span>
-            </label>
           </div>
 
-          {form.skipGoal ? null : (
-            <div className='flex flex-col gap-2'>
-              <Label htmlFor='piggy-date'>Data de conclusão (opcional)</Label>
-              <DatePicker
-                id='piggy-date'
-                value={form.targetDate}
-                onValueChange={(targetDate) =>
-                  setForm((current) => ({ ...current, targetDate }))
-                }
-                placeholder='Quando quer atingir a meta'
-              />
-            </div>
-          )}
+          <div className='flex flex-col gap-2'>
+            <Label htmlFor='piggy-date'>Data de conclusão (opcional)</Label>
+            <DatePicker
+              id='piggy-date'
+              value={form.targetDate}
+              onValueChange={(targetDate) =>
+                setForm((current) => ({ ...current, targetDate }))
+              }
+              placeholder='Sem data obrigatória'
+            />
+          </div>
 
           {previewMonthly > 0 ? (
             <p className='rounded-lg border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground'>
@@ -264,6 +249,51 @@ export function PiggyFormDialog({
               · {previewMonths} mês{previewMonths === 1 ? '' : 'es'}
             </p>
           ) : null}
+
+          <div className='rounded-xl border border-border p-3'>
+            <label
+              htmlFor='piggy-yield'
+              className='flex cursor-pointer items-start gap-2 text-sm'
+            >
+              <Checkbox
+                id='piggy-yield'
+                checked={form.yieldEnabled}
+                onCheckedChange={(checked) =>
+                  setForm((current) => ({
+                    ...current,
+                    yieldEnabled: checked === true,
+                  }))
+                }
+                className='mt-0.5'
+              />
+              <span className='flex flex-col gap-1'>
+                <span>Este Cofrinho rende?</span>
+                <span className='text-xs text-muted-foreground'>
+                  O rendimento é calculado diariamente e capitalizado no saldo.
+                </span>
+              </span>
+            </label>
+            {form.yieldEnabled ? (
+              <div className='mt-3 flex flex-col gap-2 pl-6'>
+                <Label htmlFor='piggy-cdi-percent'>Quantos % do CDI?</Label>
+                <Input
+                  id='piggy-cdi-percent'
+                  inputMode='decimal'
+                  value={form.cdiPercent}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      cdiPercent: event.target.value,
+                    }))
+                  }
+                  placeholder='100'
+                />
+                <p className='text-xs text-muted-foreground'>
+                  Ex.: 100 = 100% do CDI; 120 = 120% do CDI. Sem desconto de IR.
+                </p>
+              </div>
+            ) : null}
+          </div>
 
           <div className='flex flex-col gap-3'>
             <label
@@ -284,8 +314,7 @@ export function PiggyFormDialog({
               <span className='flex flex-col gap-1'>
                 <span>Débito automático mensal</span>
                 <span className='text-xs text-muted-foreground'>
-                  Não debita ao criar o cofre — só a partir do próximo ciclo do
-                  dia escolhido. Até lá, use Guardar quando quiser.
+                  Cria uma transferência interna para o Cofrinho no dia escolhido.
                 </span>
               </span>
             </label>
@@ -310,6 +339,7 @@ export function PiggyFormDialog({
                     />
                   </div>
                 ) : null}
+
                 <div className='flex flex-col gap-2'>
                   <Label>Dia do débito</Label>
                   <Select
@@ -333,9 +363,6 @@ export function PiggyFormDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  <p className='text-xs text-muted-foreground'>
-                    Em meses curtos, usa o último dia disponível.
-                  </p>
                 </div>
               </div>
             ) : null}

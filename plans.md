@@ -113,5 +113,6 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~**Split cartão / PIX**~~ — Despesa em 2 cartões ou cartão+PIX por %; valida limite disponível; parte PIX no saldo; billing/comprometimento por split.
 
-- [ ] Seed / histórico mensal no DB (gráficos do dashboard)
+- [x] ~~**Patrimônio, Moedas e rendimento CDI**~~ — Separa orçamento de patrimônio; adiciona `/patrimonio` e `/moedas`, posições BTC/USD com preço médio e P&L, transferências internas ligadas ao financeiro, histórico patrimonial com benchmarks 100% CDI/IPCA, cache/fallback de mercado e Cofrinhos com rendimento diário em `% do CDI` auditável e idempotente. Inclui migration, testes contábeis e CI com PostgreSQL.
 
+- [ ] Seed / histórico mensal no DB (gráficos do dashboard)

@@ -1,6 +1,7 @@
 import type { PiggyBank, PiggyTransaction } from '@prisma/client';
 
 import { todayInSaoPaulo } from '@/lib/card-billing';
+import { decimal, money, ZERO } from '@/lib/decimal';
 import { parseDateOnly } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 
@@ -33,13 +34,21 @@ export function computeMonthlyGoal(
   return Math.round((goalAmount / months) * 100) / 100;
 }
 
+export function balanceDecimalFromTransactions(
+  transactions: Pick<PiggyTransaction, 'type' | 'amount'>[],
+) {
+  return transactions.reduce((sum, transaction) => {
+    const amount = decimal(transaction.amount);
+    return transaction.type === 'withdraw'
+      ? sum.minus(amount)
+      : sum.plus(amount);
+  }, ZERO);
+}
+
 export function balanceFromTransactions(
   transactions: Pick<PiggyTransaction, 'type' | 'amount'>[],
 ) {
-  return transactions.reduce((sum, tx) => {
-    const amount = Number(tx.amount);
-    return tx.type === 'deposit' ? sum + amount : sum - amount;
-  }, 0);
+  return Number(balanceDecimalFromTransactions(transactions));
 }
 
 export function serializePiggyBank(
@@ -62,6 +71,10 @@ export function serializePiggyBank(
     autoDebit: bank.autoDebit,
     autoDebitDay: bank.autoDebitDay,
     isEmergency: bank.isEmergency,
+    yieldEnabled: bank.yieldEnabled,
+    cdiPercent: Number(bank.cdiPercent),
+    interestAccruedThrough:
+      bank.interestAccruedThrough?.toISOString().slice(0, 10) ?? null,
     archivedAt: bank.archivedAt?.toISOString() ?? null,
     completedAt: bank.completedAt?.toISOString() ?? null,
     balance,
@@ -72,26 +85,34 @@ export function serializePiggyBank(
   };
 }
 
-export function serializePiggyTransaction(tx: PiggyTransaction) {
+export function serializePiggyTransaction(transaction: PiggyTransaction) {
   return {
-    id: tx.id,
-    piggyBankId: tx.piggyBankId,
-    type: tx.type,
-    source: tx.source,
-    amount: Number(tx.amount),
-    date: tx.date.toISOString().slice(0, 10),
-    expenseId: tx.expenseId,
-    entryId: tx.entryId,
-    note: tx.note,
-    createdAt: tx.createdAt.toISOString(),
+    id: transaction.id,
+    piggyBankId: transaction.piggyBankId,
+    type: transaction.type,
+    source: transaction.source,
+    amount: Number(transaction.amount),
+    date: transaction.date.toISOString().slice(0, 10),
+    expenseId: transaction.expenseId,
+    entryId: transaction.entryId,
+    note: transaction.note,
+    cdiRate:
+      transaction.cdiRate == null ? null : Number(transaction.cdiRate),
+    cdiPercent:
+      transaction.cdiPercent == null ? null : Number(transaction.cdiPercent),
+    baseBalance:
+      transaction.baseBalance == null ? null : Number(transaction.baseBalance),
+    resultingBalance:
+      transaction.resultingBalance == null
+        ? null
+        : Number(transaction.resultingBalance),
+    createdAt: transaction.createdAt.toISOString(),
   };
 }
 
 export function parseTargetDate(value: unknown) {
   const date = parseDateOnly(value, 'INVALID_TARGET_DATE');
-  if (!date) {
-    throw new Error('INVALID_TARGET_DATE');
-  }
+  if (!date) throw new Error('INVALID_TARGET_DATE');
   return date;
 }
 
@@ -121,27 +142,23 @@ export async function depositToPiggyBank({
     where: { id: piggyBankId, userId },
     include: { transactions: true },
   });
+  if (!bank) throw new Error('NOT_FOUND');
+  if (bank.archivedAt) throw new Error('ARCHIVED');
 
-  if (!bank) {
-    throw new Error('NOT_FOUND');
-  }
-
-  if (bank.archivedAt) {
-    throw new Error('ARCHIVED');
-  }
-
-  const currentBalance = balanceFromTransactions(bank.transactions);
-  const goalAmount = piggyGoalAmount(bank.goalAmount);
-  const remaining = goalAmount != null ? Math.max(goalAmount - currentBalance, 0) : null;
-
-  if (remaining != null && remaining <= 0) {
+  const currentBalance = balanceDecimalFromTransactions(bank.transactions);
+  const goalAmount =
+    bank.goalAmount == null ? null : decimal(bank.goalAmount);
+  const remaining =
+    goalAmount == null ? null : goalAmount.minus(currentBalance);
+  if (remaining != null && remaining.lte(0)) {
     throw new Error('ALREADY_COMPLETE');
   }
 
+  const requested = money(amount);
   const depositAmount =
-    remaining != null ? Math.min(amount, remaining) : amount;
+    remaining == null || requested.lte(remaining) ? requested : remaining;
   const day = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0),
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12),
   );
 
   const result = await prisma.$transaction(async (tx) => {
@@ -150,9 +167,10 @@ export async function depositToPiggyBank({
         userId,
         name: `Cofrinho · ${bank.name}`,
         amount: depositAmount,
-        category: 'cofrinho',
+        category: 'investimento',
         frequency: 'unica',
-        notes: note || `Depósito no cofrinho ${bank.name}`,
+        occurredAt: day,
+        notes: note || `Transferência interna para o cofrinho ${bank.name}`,
       },
     });
 
@@ -169,10 +187,9 @@ export async function depositToPiggyBank({
       },
     });
 
-    const nextBalance = currentBalance + depositAmount;
+    const nextBalance = currentBalance.plus(depositAmount);
     const completed =
-      goalAmount != null && nextBalance >= goalAmount && !bank.completedAt;
-
+      goalAmount != null && nextBalance.gte(goalAmount) && !bank.completedAt;
     const updatedBank = await tx.piggyBank.update({
       where: { id: bank.id },
       data: completed ? { completedAt: day } : {},
@@ -183,7 +200,7 @@ export async function depositToPiggyBank({
       bank: updatedBank,
       transaction: piggyTx,
       completed,
-      depositAmount,
+      depositAmount: Number(depositAmount),
     };
   });
 
@@ -209,22 +226,16 @@ export async function withdrawFromPiggyBank({
     where: { id: piggyBankId, userId },
     include: { transactions: true },
   });
+  if (!bank) throw new Error('NOT_FOUND');
+  if (bank.archivedAt) throw new Error('ARCHIVED');
 
-  if (!bank) {
-    throw new Error('NOT_FOUND');
-  }
-
-  if (bank.archivedAt) {
-    throw new Error('ARCHIVED');
-  }
-
-  const currentBalance = balanceFromTransactions(bank.transactions);
-  if (amount > currentBalance) {
+  const currentBalance = balanceDecimalFromTransactions(bank.transactions);
+  const requested = money(amount);
+  if (requested.gt(currentBalance)) {
     throw new Error('INSUFFICIENT_BALANCE');
   }
-
   const day = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0),
+    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12),
   );
 
   const result = await prisma.$transaction(async (tx) => {
@@ -232,7 +243,7 @@ export async function withdrawFromPiggyBank({
       data: {
         userId,
         name: `Resgate · ${bank.name}`,
-        amount,
+        amount: requested,
         type: 'outro',
         frequency: 'unica',
         date: day,
@@ -245,30 +256,28 @@ export async function withdrawFromPiggyBank({
         userId,
         type: 'withdraw',
         source: 'manual',
-        amount,
+        amount: requested,
         date: day,
         entryId: entry.id,
         note,
       },
     });
 
+    const goalAmount =
+      bank.goalAmount == null ? null : decimal(bank.goalAmount);
+    const nextBalance = currentBalance.minus(requested);
     const updatedBank = await tx.piggyBank.update({
       where: { id: bank.id },
       data: {
         completedAt:
-          piggyGoalAmount(bank.goalAmount) != null &&
-          currentBalance - amount < Number(bank.goalAmount)
+          goalAmount != null && nextBalance.lt(goalAmount)
             ? null
             : bank.completedAt,
       },
       include: { transactions: true },
     });
 
-    return {
-      bank: updatedBank,
-      transaction: piggyTx,
-      entry,
-    };
+    return { bank: updatedBank, transaction: piggyTx, entry };
   });
 
   return result;
@@ -280,10 +289,6 @@ export function parseAutoDebitDay(value: unknown): number | null {
   return day;
 }
 
-/**
- * Auto-débito no dia escolhido (America/Sao_Paulo).
- * Cofres criados neste mês, no dia do débito ou depois, esperam o próximo ciclo.
- */
 export async function processPiggyAutoDebits(userId: string) {
   const now = new Date();
   const todaySp = todayInSaoPaulo(now);
@@ -291,9 +296,10 @@ export async function processPiggyAutoDebits(userId: string) {
   const monthIndex = todaySp.getUTCMonth();
   const todayDay = todaySp.getUTCDate();
   const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
-
-  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 12, 0, 0));
-  const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59));
+  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 12));
+  const monthEnd = new Date(
+    Date.UTC(year, monthIndex + 1, 0, 23, 59, 59),
+  );
 
   const banks = await prisma.piggyBank.findMany({
     where: {
@@ -304,52 +310,46 @@ export async function processPiggyAutoDebits(userId: string) {
     },
     include: { transactions: true },
   });
-
   let createdCount = 0;
 
   for (const bank of banks) {
     const debitDay = Math.min(bank.autoDebitDay || 1, lastDay);
     if (todayDay !== debitDay) continue;
-
     const debitInstant = new Date(
-      Date.UTC(year, monthIndex, debitDay, 12, 0, 0),
+      Date.UTC(year, monthIndex, debitDay, 12),
     );
-    // Criado no dia do débito ou depois neste mês → próximo ciclo
-    if (bank.createdAt.getTime() >= debitInstant.getTime()) {
-      continue;
-    }
-
+    if (bank.createdAt.getTime() >= debitInstant.getTime()) continue;
     const already = bank.transactions.some(
-      (tx) =>
-        tx.type === 'deposit' &&
-        tx.source === 'auto_debit' &&
-        tx.date >= monthStart &&
-        tx.date <= monthEnd,
+      (transaction) =>
+        transaction.type === 'deposit' &&
+        transaction.source === 'auto_debit' &&
+        transaction.date >= monthStart &&
+        transaction.date <= monthEnd,
     );
     if (already) continue;
 
-    const balance = balanceFromTransactions(bank.transactions);
-    const goalAmount = piggyGoalAmount(bank.goalAmount);
-    if (goalAmount == null || Number(bank.monthlyGoal) <= 0) continue;
-
-    const remaining = goalAmount - balance;
-    if (remaining <= 0) continue;
-
-    const amount = Math.min(Number(bank.monthlyGoal), remaining);
-    if (amount <= 0) continue;
+    const balance = balanceDecimalFromTransactions(bank.transactions);
+    const goalAmount =
+      bank.goalAmount == null ? null : decimal(bank.goalAmount);
+    if (goalAmount == null || bank.monthlyGoal.lte(0)) continue;
+    const remaining = goalAmount.minus(balance);
+    if (remaining.lte(0)) continue;
+    const amount = bank.monthlyGoal.lte(remaining)
+      ? bank.monthlyGoal
+      : remaining;
 
     try {
       await depositToPiggyBank({
         userId,
         piggyBankId: bank.id,
-        amount,
+        amount: Number(amount),
         source: 'auto_debit',
         note: 'Débito automático mensal',
         date: now,
       });
       createdCount += 1;
     } catch {
-      // ignora falhas pontuais (ex.: já completo)
+      // Uma falha pontual não deve interromper os demais cofres.
     }
   }
 

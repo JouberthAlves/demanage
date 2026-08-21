@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 
+import { parseAbnt2Text } from '@/lib/abnt2';
+import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import {
   serializePiggyBank,
   serializePiggyTransaction,
   withdrawFromPiggyBank,
 } from '@/lib/piggy';
-import { parseAbnt2Text } from '@/lib/abnt2';
 import { parsePositiveAmount } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -15,15 +16,13 @@ router.post('/:id/withdraw', requireAuth, async (req: Request, res: Response) =>
   try {
     const userId = req.user?.id;
     const id = String(req.params.id);
-    if (!userId) {
-      return res.status(401).json({ error: 'Não autenticado' });
-    }
-
+    if (!userId) return res.status(401).json({ error: 'Não autenticado' });
     const amount = parsePositiveAmount(req.body?.amount);
     if (amount == null) {
       return res.status(400).json({ error: 'Valor deve ser maior que zero' });
     }
 
+    await catchUpPiggyInterest(userId);
     const result = await withdrawFromPiggyBank({
       userId,
       piggyBankId: id,

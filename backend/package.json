@@ -9,6 +9,7 @@
     "build": "tsc",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
+    "test": "tsx --test src/**/*.test.ts",
     "format": "prettier --write \"src/**/*.{ts,js}\""
   },
   "keywords": [],

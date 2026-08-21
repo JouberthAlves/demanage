@@ -13,6 +13,7 @@ enum ExpenseCategory {
   divida
   outro
   cofrinho
+  investimento
 }
 
 enum ExpenseFrequency {
@@ -41,16 +42,29 @@ enum CustomTagScope {
 enum PiggyTransactionType {
   deposit
   withdraw
+  interest
 }
 
 enum PiggyTransactionSource {
   manual
   auto_debit
+  yield
 }
 
 enum ExpenseSplitKind {
   card
   pix
+}
+
+enum Asset {
+  BTC
+  USD
+}
+
+enum AssetTransactionType {
+  BUY
+  SELL
+  MANUAL_ADJUSTMENT
 }
 
 model User {
@@ -65,11 +79,13 @@ model User {
   notes                 String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
-  cards        Card[]
-  expenses     Expense[]
-  entries      Entry[]
-  customTags   CustomTag[]
-  piggyBanks   PiggyBank[]
+  cards                  Card[]
+  expenses               Expense[]
+  entries                Entry[]
+  customTags             CustomTag[]
+  piggyBanks             PiggyBank[]
+  assetTransactions      AssetTransaction[]
+  patrimonySettings      PatrimonySettings?
 }
 
 model Card {
@@ -106,32 +122,32 @@ model CustomTag {
 }
 
 model Expense {
-  id          String           @id @default(uuid())
-  userId      String
-  cardId      String?
-  customTagId String?
-  name        String
-  amount      Decimal          @db.Decimal(12, 2)
-  category    ExpenseCategory
-  frequency   ExpenseFrequency @default(mensal)
-  /// Dia do mês em que a despesa entra no saldo (1-31). Null em despesas únicas.
-  dueDay      Int?
-  /// Primeira data de desconto (define mês/ano de início da recorrência).
-  startsAt    DateTime?
-  /// Data em que a recorrência deixa de valer. Null = sem término.
-  endsAt      DateTime?
-  notes       String?
-  isInvoice   Boolean          @default(false)
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  card        Card?            @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  customTag   CustomTag?       @relation(fields: [customTagId], references: [id], onDelete: SetNull)
-  splits      ExpenseSplit[]
+  id               String           @id @default(uuid())
+  userId           String
+  cardId           String?
+  customTagId      String?
+  name             String
+  amount           Decimal          @db.Decimal(12, 2)
+  category         ExpenseCategory
+  frequency        ExpenseFrequency @default(mensal)
+  dueDay           Int?
+  startsAt         DateTime?
+  endsAt           DateTime?
+  occurredAt       DateTime?
+  notes            String?
+  isInvoice        Boolean          @default(false)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card             Card?            @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  customTag        CustomTag?        @relation(fields: [customTagId], references: [id], onDelete: SetNull)
+  splits           ExpenseSplit[]
+  assetTransaction AssetTransaction?
 
   @@index([userId])
   @@index([cardId])
   @@index([customTagId])
+  @@index([userId, occurredAt])
 }
 
 model ExpenseSplit {
@@ -152,66 +168,116 @@ model ExpenseSplit {
 }
 
 model Entry {
-  id          String         @id @default(uuid())
-  userId      String
-  customTagId String?
-  name        String
-  amount      Decimal        @db.Decimal(12, 2)
-  type        EntryType
-  frequency   EntryFrequency
-  /// Dia do mês em que a entrada entra no saldo (1-31). Null em entradas únicas.
-  receiveDay  Int?
-  /// Primeira data de recebimento (define mês/ano de início da recorrência).
-  startsAt    DateTime?
-  /// Data em que a recorrência deixa de valer. Null = sem término (ex.: salário).
-  endsAt      DateTime?
-  date        DateTime?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
-  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customTag   CustomTag?     @relation(fields: [customTagId], references: [id], onDelete: SetNull)
+  id               String         @id @default(uuid())
+  userId           String
+  customTagId      String?
+  name             String
+  amount           Decimal        @db.Decimal(12, 2)
+  type             EntryType
+  frequency        EntryFrequency
+  receiveDay       Int?
+  startsAt         DateTime?
+  endsAt           DateTime?
+  date             DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customTag        CustomTag?      @relation(fields: [customTagId], references: [id], onDelete: SetNull)
+  assetTransaction AssetTransaction?
 
   @@index([userId])
   @@index([customTagId])
 }
 
 model PiggyBank {
-  id          String             @id @default(uuid())
-  userId      String
-  name        String
-  goalAmount  Decimal?           @db.Decimal(12, 2)
-  targetDate  DateTime?
-  monthlyGoal Decimal            @db.Decimal(12, 2) @default(0)
-  autoDebit   Boolean            @default(false)
-  /// Dia do mês (1-31) em que o auto-débito tenta debitar. Meses curtos usam o último dia.
-  autoDebitDay Int               @default(1)
-  isEmergency Boolean            @default(false)
-  archivedAt  DateTime?
-  completedAt DateTime?
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  transactions PiggyTransaction[]
+  id                     String             @id @default(uuid())
+  userId                 String
+  name                   String
+  goalAmount             Decimal?           @db.Decimal(12, 2)
+  targetDate             DateTime?
+  monthlyGoal            Decimal            @db.Decimal(12, 2) @default(0)
+  autoDebit              Boolean            @default(false)
+  autoDebitDay           Int                @default(1)
+  isEmergency            Boolean            @default(false)
+  yieldEnabled           Boolean            @default(false)
+  cdiPercent             Decimal            @db.Decimal(8, 4) @default(0)
+  interestAccruedThrough DateTime?
+  archivedAt             DateTime?
+  completedAt            DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+  user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions           PiggyTransaction[]
 
   @@index([userId])
   @@index([userId, archivedAt])
 }
 
 model PiggyTransaction {
-  id          String                 @id @default(uuid())
-  piggyBankId String
-  userId      String
-  type        PiggyTransactionType
-  source      PiggyTransactionSource @default(manual)
-  amount      Decimal                @db.Decimal(12, 2)
-  date        DateTime
-  expenseId   String?
-  entryId     String?
-  note        String?
-  createdAt   DateTime               @default(now())
-  piggyBank   PiggyBank              @relation(fields: [piggyBankId], references: [id], onDelete: Cascade)
+  id               String                 @id @default(uuid())
+  piggyBankId      String
+  userId           String
+  type             PiggyTransactionType
+  source           PiggyTransactionSource @default(manual)
+  amount           Decimal                @db.Decimal(12, 2)
+  date             DateTime
+  expenseId        String?
+  entryId          String?
+  note             String?
+  cdiRate          Decimal?               @db.Decimal(12, 8)
+  cdiPercent       Decimal?               @db.Decimal(8, 4)
+  baseBalance      Decimal?               @db.Decimal(18, 8)
+  resultingBalance Decimal?               @db.Decimal(18, 8)
+  interestKey      String?                @unique
+  createdAt        DateTime               @default(now())
+  piggyBank        PiggyBank              @relation(fields: [piggyBankId], references: [id], onDelete: Cascade)
 
   @@index([piggyBankId])
   @@index([userId])
   @@index([piggyBankId, type, source, date])
+}
+
+model PatrimonySettings {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  baseDate       DateTime
+  openingCashBrl Decimal  @db.Decimal(18, 2)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model AssetTransaction {
+  id             String               @id @default(uuid())
+  userId         String
+  asset          Asset
+  type           AssetTransactionType
+  quantity       Decimal              @db.Decimal(30, 12)
+  cashAmountBrl  Decimal              @db.Decimal(18, 8)
+  feeAmountBrl   Decimal              @db.Decimal(18, 8) @default(0)
+  feePercent     Decimal?             @db.Decimal(12, 8)
+  costBasisKnown Boolean              @default(true)
+  date           DateTime
+  note           String?
+  expenseId      String?              @unique
+  entryId        String?              @unique
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  user           User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expense        Expense?             @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  entry          Entry?               @relation(fields: [entryId], references: [id], onDelete: SetNull)
+
+  @@index([userId, asset, date])
+}
+
+model MarketDataCache {
+  id        String   @id @default(uuid())
+  provider  String
+  key       String
+  at        DateTime
+  value     Decimal  @db.Decimal(30, 12)
+  fetchedAt DateTime @default(now())
+
+  @@unique([provider, key, at])
+  @@index([provider, key, at])
 }
