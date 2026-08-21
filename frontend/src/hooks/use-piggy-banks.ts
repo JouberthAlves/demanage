@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
 
 import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
 import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
@@ -19,17 +20,30 @@ export const PIGGY_BANKS_QUERY_KEY = ['piggy-banks'] as const;
 
 export function usePiggyBanks(includeArchived = false) {
   const queryClient = useQueryClient();
-
-  return useQuery({
+  const maintenanceStarted = useRef(false);
+  const query = useQuery({
     queryKey: [...PIGGY_BANKS_QUERY_KEY, { includeArchived }],
-    queryFn: async () => {
-      const auto = await processPiggyAutoDebit();
-      if (auto.createdCount > 0) {
-        void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-      }
-      return listPiggyBanks(includeArchived);
-    },
+    queryFn: () => listPiggyBanks(includeArchived),
+    staleTime: 30_000,
   });
+
+  useEffect(() => {
+    if (!query.isSuccess || maintenanceStarted.current) return;
+    maintenanceStarted.current = true;
+
+    void processPiggyAutoDebit()
+      .then((result) => {
+        if (result.createdCount > 0) {
+          void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
+        }
+        if (result.createdCount > 0 || result.interestCreatedCount > 0) {
+          void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
+        }
+      })
+      .catch(() => undefined);
+  }, [query.isSuccess, queryClient]);
+
+  return query;
 }
 
 export function usePiggyTransactions(piggyBankId: string | null) {

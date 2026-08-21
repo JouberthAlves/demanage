@@ -75,8 +75,10 @@ export async function listPiggyTransactions(id: string) {
 }
 
 export async function processPiggyAutoDebit() {
-  const { data } = await api.post<{ createdCount: number }>(
-    '/piggy-banks/process-auto-debit',
-  );
+  const { data } = await api.post<{
+    createdCount: number;
+    interestCreatedCount: number;
+    interestStale: boolean;
+  }>('/piggy-banks/process-auto-debit');
   return data;
 }
