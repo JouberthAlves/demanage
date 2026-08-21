@@ -35,6 +35,9 @@ import type {
 } from '@/types/patrimony';
 
 const DAY_MS = 86_400_000;
+const SATS_PER_BTC = 100_000_000;
+
+type BtcQuantityUnit = 'BTC' | 'SATS';
 
 function dateInput(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -44,11 +47,35 @@ function daysAgo(days: number) {
   return dateInput(new Date(Date.now() - days * DAY_MS));
 }
 
+function normalizeBtcQuantity(raw: string, unit: BtcQuantityUnit) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  if (unit === 'BTC') {
+    return trimmed.includes(',')
+      ? trimmed.replace(/\./g, '').replace(',', '.')
+      : trimmed;
+  }
+
+  const negative = trimmed.startsWith('-');
+  const digits = trimmed.replace(/^-/, '').replace(/[.,\s]/g, '');
+  if (!/^\d+$/.test(digits)) return null;
+
+  const sats = Number(digits);
+  if (!Number.isSafeInteger(sats) || sats === 0) return null;
+
+  const btc = (sats / SATS_PER_BTC)
+    .toFixed(8)
+    .replace(/0+$/, '')
+    .replace(/\.$/, '');
+  return negative ? `-${btc}` : btc;
+}
+
 function formatQuantity(asset: Asset, raw: string) {
   const value = Number(raw);
   if (!Number.isFinite(value)) return '0';
   if (asset === 'BTC' && Math.abs(value) < 0.001) {
-    return `${Math.round(value * 100_000_000).toLocaleString('pt-BR')} sats`;
+    return `${Math.round(value * SATS_PER_BTC).toLocaleString('pt-BR')} sats`;
   }
   return `${value.toLocaleString('pt-BR', {
     maximumFractionDigits: asset === 'BTC' ? 8 : 4,
@@ -134,6 +161,7 @@ export function CurrenciesPage() {
   const [asset, setAsset] = useState<Asset>('BTC');
   const [type, setType] = useState<AssetTransactionType>('BUY');
   const [quantity, setQuantity] = useState('');
+  const [btcQuantityUnit, setBtcQuantityUnit] = useState<BtcQuantityUnit>('BTC');
   const [cash, setCash] = useState('');
   const [fee, setFee] = useState('');
   const [feePercent, setFeePercent] = useState('');
@@ -179,8 +207,21 @@ export function CurrenciesPage() {
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (!quantity || (type !== 'MANUAL_ADJUSTMENT' && !cash)) {
-      toast.error('Informe quantidade e valor da operação');
+    const normalizedQuantity =
+      asset === 'BTC'
+        ? normalizeBtcQuantity(quantity, btcQuantityUnit)
+        : quantity.trim();
+
+    if (!normalizedQuantity) {
+      toast.error(
+        asset === 'BTC' && btcQuantityUnit === 'SATS'
+          ? 'Informe uma quantidade válida de sats'
+          : 'Informe uma quantidade válida',
+      );
+      return;
+    }
+    if (type !== 'MANUAL_ADJUSTMENT' && !cash) {
+      toast.error('Informe o valor da operação em BRL');
       return;
     }
     try {
@@ -188,7 +229,7 @@ export function CurrenciesPage() {
         asset,
         payload: {
           type,
-          quantity,
+          quantity: normalizedQuantity,
           cashAmountBrl: cash || '0',
           feeAmountBrl: fee || undefined,
           feePercent: feePercent || undefined,
@@ -295,9 +336,23 @@ export function CurrenciesPage() {
               <LineChart data={chartRows ?? []}>
                 <CartesianGrid strokeDasharray='3 3' opacity={0.15} />
                 <XAxis dataKey='date' minTickGap={28} />
-                <YAxis width={72} tickFormatter={(value) => `R$${Number(value).toLocaleString('pt-BR', { notation: 'compact' })}`} />
+                <YAxis
+                  width={72}
+                  domain={['dataMin', 'dataMax']}
+                  tickFormatter={(value) =>
+                    `R$${Number(value).toLocaleString('pt-BR', {
+                      notation: 'compact',
+                    })}`
+                  }
+                />
                 <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                <Line dataKey='valor' type='monotone' dot={false} stroke='currentColor' />
+                <Line
+                  dataKey='valor'
+                  type='monotone'
+                  dot={false}
+                  activeDot={false}
+                  stroke='currentColor'
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -360,8 +415,66 @@ export function CurrenciesPage() {
             </select>
           </div>
           <div className='space-y-2'>
-            <Label htmlFor='asset-quantity'>Quantidade {asset === 'BTC' ? '(BTC, até 8 casas)' : '(USD)'}</Label>
-            <Input id='asset-quantity' value={quantity} onChange={(event) => setQuantity(event.target.value.replace(',', '.'))} placeholder={asset === 'BTC' ? '0.00010000' : '100.00'} />
+            <div className='flex flex-wrap items-center justify-between gap-2'>
+              <Label htmlFor='asset-quantity'>
+                Quantidade{' '}
+                {asset === 'BTC'
+                  ? btcQuantityUnit === 'SATS'
+                    ? '(sats, inteiro)'
+                    : '(BTC, até 8 casas)'
+                  : '(USD)'}
+              </Label>
+              {asset === 'BTC' ? (
+                <div className='flex gap-1'>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant={btcQuantityUnit === 'BTC' ? 'default' : 'outline'}
+                    onClick={() => {
+                      setBtcQuantityUnit('BTC');
+                      setQuantity('');
+                    }}
+                  >
+                    BTC
+                  </Button>
+                  <Button
+                    type='button'
+                    size='sm'
+                    variant={btcQuantityUnit === 'SATS' ? 'default' : 'outline'}
+                    onClick={() => {
+                      setBtcQuantityUnit('SATS');
+                      setQuantity('');
+                    }}
+                  >
+                    sats
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+            <Input
+              id='asset-quantity'
+              inputMode={asset === 'BTC' && btcQuantityUnit === 'SATS' ? 'numeric' : 'decimal'}
+              value={quantity}
+              onChange={(event) =>
+                setQuantity(
+                  asset === 'BTC'
+                    ? event.target.value
+                    : event.target.value.replace(',', '.'),
+                )
+              }
+              placeholder={
+                asset === 'BTC'
+                  ? btcQuantityUnit === 'SATS'
+                    ? '1.000.411'
+                    : '0,01000411'
+                  : '100.00'
+              }
+            />
+            {asset === 'BTC' && btcQuantityUnit === 'SATS' ? (
+              <p className='text-xs text-muted-foreground'>
+                1 sat = 0,00000001 BTC. Ex.: 1.000.411 sats = 0,01000411 BTC.
+              </p>
+            ) : null}
           </div>
           <div className='space-y-2'>
             <Label htmlFor='asset-cash'>Total efetivo em BRL</Label>
