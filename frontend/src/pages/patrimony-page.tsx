@@ -274,12 +274,44 @@ export function PatrimonyPage() {
                 <LineChart data={chartData}>
                   <CartesianGrid strokeDasharray='3 3' opacity={0.15} />
                   <XAxis dataKey='date' minTickGap={28} />
-                  <YAxis width={76} tickFormatter={(value) => `R$${Number(value).toLocaleString('pt-BR', { notation: 'compact' })}`} />
+                  <YAxis
+                    width={76}
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={(value) =>
+                      `R$${Number(value).toLocaleString('pt-BR', {
+                        notation: 'compact',
+                      })}`
+                    }
+                  />
                   <Tooltip formatter={(value) => formatCurrency(Number(value))} />
                   <Legend />
-                  <Line name='Patrimônio' dataKey='patrimonio' type='monotone' dot={false} stroke='#34D399' strokeWidth={2} />
-                  <Line name='100% CDI' dataKey='cdi' type='monotone' dot={false} stroke='#60A5FA' strokeWidth={2} />
-                  <Line name='IPCA' dataKey='ipca' type='monotone' dot={false} stroke='#FFB800' strokeWidth={2} />
+                  <Line
+                    name='Patrimônio'
+                    dataKey='patrimonio'
+                    type='monotone'
+                    dot={false}
+                    activeDot={false}
+                    stroke='#34D399'
+                    strokeWidth={2}
+                  />
+                  <Line
+                    name='100% CDI'
+                    dataKey='cdi'
+                    type='monotone'
+                    dot={false}
+                    activeDot={false}
+                    stroke='#60A5FA'
+                    strokeWidth={2}
+                  />
+                  <Line
+                    name='IPCA'
+                    dataKey='ipca'
+                    type='monotone'
+                    dot={false}
+                    activeDot={false}
+                    stroke='#FFB800'
+                    strokeWidth={2}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             </div>
