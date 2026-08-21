@@ -1,4 +1,8 @@
-import type { Asset, AssetTransaction } from '@prisma/client';
+import type {
+  Asset,
+  AssetTransaction,
+  AssetTransactionType,
+} from '@prisma/client';
 
 import {
   calculateAssetAccounting,
@@ -64,6 +68,11 @@ export type CreateAssetTransactionInput = {
   note?: string | null;
 };
 
+export type UpdateAssetTransactionInput = Omit<
+  CreateAssetTransactionInput,
+  'userId' | 'asset'
+>;
+
 export class AssetValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -116,11 +125,12 @@ function parseQuantity(value: unknown, asset: Asset, allowNegative: boolean) {
   }
 }
 
-export async function createAssetTransaction(
-  input: CreateAssetTransactionInput,
+function parseTransactionValues(
+  asset: Asset,
+  input: UpdateAssetTransactionInput,
 ) {
   const allowNegative = input.type === 'MANUAL_ADJUSTMENT';
-  const quantity = parseQuantity(input.quantity, input.asset, allowNegative);
+  const quantity = parseQuantity(input.quantity, asset, allowNegative);
   const cash = parseNonNegative(input.cashAmountBrl, 'Valor em BRL');
   const feePercent =
     input.feePercent == null || input.feePercent === ''
@@ -139,6 +149,57 @@ export async function createAssetTransaction(
     );
   }
   const date = parseDate(input.date);
+  const costBasisKnown =
+    input.type === 'MANUAL_ADJUSTMENT'
+      ? Boolean(input.costBasisKnown && cash.gt(0))
+      : true;
+
+  return { quantity, cash, feePercent, fee, date, costBasisKnown };
+}
+
+function assertTransactionTimelineValid(
+  transactions: Array<{
+    id: string;
+    type: AssetTransactionType;
+    quantity: unknown;
+    date: Date;
+  }>,
+) {
+  const ordered = [...transactions].sort((left, right) => {
+    const dateDiff = left.date.getTime() - right.date.getTime();
+    return dateDiff !== 0 ? dateDiff : left.id.localeCompare(right.id);
+  });
+  let balance = ZERO;
+
+  for (const transaction of ordered) {
+    const quantity = decimal(transaction.quantity);
+    if (transaction.type === 'BUY') {
+      balance = balance.plus(quantity);
+      continue;
+    }
+    if (transaction.type === 'SELL') {
+      if (quantity.gt(balance)) {
+        throw new AssetValidationError(
+          'A edição deixaria uma venda sem saldo disponível nessa data',
+        );
+      }
+      balance = balance.minus(quantity);
+      continue;
+    }
+    balance = balance.plus(quantity);
+    if (balance.lt(0)) {
+      throw new AssetValidationError(
+        'A edição deixaria a posição negativa nessa data',
+      );
+    }
+  }
+}
+
+export async function createAssetTransaction(
+  input: CreateAssetTransactionInput,
+) {
+  const parsed = parseTransactionValues(input.asset, input);
+  const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
 
   const existing = await prisma.assetTransaction.findMany({
     where: { userId: input.userId, asset: input.asset },
@@ -157,11 +218,6 @@ export async function createAssetTransaction(
       'Ajuste removeria mais unidades do que a posição atual',
     );
   }
-
-  const costBasisKnown =
-    input.type === 'MANUAL_ADJUSTMENT'
-      ? Boolean(input.costBasisKnown && cash.gt(0))
-      : true;
 
   return prisma.$transaction(async (tx) => {
     let expenseId: string | null = null;
@@ -200,6 +256,128 @@ export async function createAssetTransaction(
       data: {
         userId: input.userId,
         asset: input.asset,
+        type: input.type,
+        quantity,
+        cashAmountBrl: cash,
+        feeAmountBrl: fee,
+        feePercent,
+        costBasisKnown,
+        date,
+        note: input.note,
+        expenseId,
+        entryId,
+      },
+    });
+  });
+}
+
+export async function updateAssetTransaction(
+  userId: string,
+  transactionId: string,
+  input: UpdateAssetTransactionInput,
+) {
+  const target = await prisma.assetTransaction.findFirst({
+    where: { id: transactionId, userId },
+  });
+  if (!target) {
+    throw new AssetValidationError('Movimentação não encontrada');
+  }
+
+  const parsed = parseTransactionValues(target.asset, input);
+  const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
+  const remaining = await prisma.assetTransaction.findMany({
+    where: { userId, asset: target.asset, id: { not: target.id } },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+  });
+
+  assertTransactionTimelineValid([
+    ...remaining,
+    {
+      id: target.id,
+      type: input.type,
+      quantity,
+      date,
+    },
+  ]);
+
+  return prisma.$transaction(async (tx) => {
+    let expenseId = target.expenseId;
+    let entryId = target.entryId;
+
+    if (input.type === 'BUY') {
+      if (entryId) {
+        await tx.entry.deleteMany({ where: { id: entryId, userId } });
+        entryId = null;
+      }
+      if (expenseId) {
+        await tx.expense.update({
+          where: { id: expenseId },
+          data: {
+            name: `Compra ${target.asset}`,
+            amount: money(cash),
+            category: 'investimento',
+            frequency: 'unica',
+            occurredAt: date,
+            notes: input.note || `Transferência interna para ${target.asset}`,
+          },
+        });
+      } else {
+        const expense = await tx.expense.create({
+          data: {
+            userId,
+            name: `Compra ${target.asset}`,
+            amount: money(cash),
+            category: 'investimento',
+            frequency: 'unica',
+            occurredAt: date,
+            notes: input.note || `Transferência interna para ${target.asset}`,
+          },
+        });
+        expenseId = expense.id;
+      }
+    } else if (input.type === 'SELL') {
+      if (expenseId) {
+        await tx.expense.deleteMany({ where: { id: expenseId, userId } });
+        expenseId = null;
+      }
+      if (entryId) {
+        await tx.entry.update({
+          where: { id: entryId },
+          data: {
+            name: `Venda ${target.asset}`,
+            amount: money(cash),
+            type: 'outro',
+            frequency: 'unica',
+            date,
+          },
+        });
+      } else {
+        const entry = await tx.entry.create({
+          data: {
+            userId,
+            name: `Venda ${target.asset}`,
+            amount: money(cash),
+            type: 'outro',
+            frequency: 'unica',
+            date,
+          },
+        });
+        entryId = entry.id;
+      }
+    } else {
+      if (expenseId) {
+        await tx.expense.deleteMany({ where: { id: expenseId, userId } });
+        expenseId = null;
+      }
+      if (entryId) {
+        await tx.entry.deleteMany({ where: { id: entryId, userId } });
+        entryId = null;
+      }
+    }
+
+    return tx.assetTransaction.update({
+      where: { id: target.id },
+      data: {
         type: input.type,
         quantity,
         cashAmountBrl: cash,
