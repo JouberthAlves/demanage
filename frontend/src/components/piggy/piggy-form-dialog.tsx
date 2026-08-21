@@ -33,7 +33,11 @@ import {
   formatCurrency,
   parseCurrencyInput,
 } from '@/lib/format';
-import { computeMonthlyGoal, monthsUntilTarget } from '@/lib/piggy-math';
+import {
+  computeMonthlyGoal,
+  monthsUntilTarget,
+  piggyHasGoal,
+} from '@/lib/piggy-math';
 import type { PiggyBank } from '@/types/finance';
 
 type PiggyFormDialogProps = {
@@ -45,18 +49,22 @@ type PiggyFormDialogProps = {
 type FormState = {
   name: string;
   goalAmount: string;
+  skipGoal: boolean;
   targetDate: string;
   autoDebit: boolean;
   autoDebitDay: string;
+  monthlyDebitAmount: string;
   isEmergency: boolean;
 };
 
 const emptyForm: FormState = {
   name: '',
   goalAmount: '',
+  skipGoal: false,
   targetDate: '',
   autoDebit: false,
   autoDebitDay: '1',
+  monthlyDebitAmount: '',
   isEmergency: false,
 };
 
@@ -79,10 +87,15 @@ export function PiggyFormDialog({
     if (bank) {
       setForm({
         name: bank.name,
-        goalAmount: formatBrlInputValue(bank.goalAmount),
-        targetDate: bank.targetDate,
+        goalAmount: piggyHasGoal(bank.goalAmount)
+          ? formatBrlInputValue(bank.goalAmount)
+          : '',
+        skipGoal: !piggyHasGoal(bank.goalAmount),
+        targetDate: bank.targetDate ?? '',
         autoDebit: bank.autoDebit,
         autoDebitDay: String(bank.autoDebitDay || 1),
+        monthlyDebitAmount:
+          bank.monthlyGoal > 0 ? formatBrlInputValue(bank.monthlyGoal) : '',
         isEmergency: bank.isEmergency,
       });
       return;
@@ -91,10 +104,11 @@ export function PiggyFormDialog({
   }, [bank, open]);
 
   const previewMonthly = useMemo(() => {
+    if (form.skipGoal) return 0;
     const goal = form.goalAmount ? parseCurrencyInput(form.goalAmount) : 0;
     if (!goal || !form.targetDate) return 0;
     return computeMonthlyGoal(goal, form.targetDate);
-  }, [form.goalAmount, form.targetDate]);
+  }, [form.goalAmount, form.skipGoal, form.targetDate]);
 
   const previewMonths = form.targetDate
     ? monthsUntilTarget(form.targetDate)
@@ -106,15 +120,17 @@ export function PiggyFormDialog({
       toast.error('Informe o nome do cofre');
       return;
     }
-    const goalAmount = parseCurrencyInput(form.goalAmount);
-    if (!goalAmount || goalAmount <= 0) {
-      toast.error('Informe a meta final');
+    const goalAmount = form.skipGoal
+      ? null
+      : parseCurrencyInput(form.goalAmount);
+    if (!form.skipGoal && (!goalAmount || goalAmount <= 0)) {
+      toast.error(
+        'Informe a meta final ou marque que não deseja informar meta',
+      );
       return;
     }
-    if (!form.targetDate) {
-      toast.error('Informe a data de conclusão');
-      return;
-    }
+
+    const targetDate = form.skipGoal ? null : form.targetDate || null;
 
     const autoDebitDay = Number(form.autoDebitDay);
     if (
@@ -125,10 +141,20 @@ export function PiggyFormDialog({
       return;
     }
 
+    let monthlyGoal = previewMonthly;
+    if (form.autoDebit && monthlyGoal <= 0) {
+      monthlyGoal = parseCurrencyInput(form.monthlyDebitAmount);
+      if (!monthlyGoal || monthlyGoal <= 0) {
+        toast.error('Informe o valor do débito automático');
+        return;
+      }
+    }
+
     const payload = {
       name: form.name.trim().slice(0, 50),
       goalAmount,
-      targetDate: form.targetDate,
+      targetDate,
+      monthlyGoal: form.autoDebit ? monthlyGoal : 0,
       autoDebit: form.autoDebit,
       autoDebitDay: form.autoDebit ? autoDebitDay : 1,
       isEmergency: form.isEmergency,
@@ -157,8 +183,8 @@ export function PiggyFormDialog({
         <DialogHeader>
           <DialogTitle>{bank ? 'Editar cofre' : 'Novo cofre'}</DialogTitle>
           <DialogDescription>
-            Defina a meta final e a data — a meta mensal é calculada
-            automaticamente.
+            A meta e a data são opcionais. Sem meta, o cofre só acumula saldo —
+            sem barra de progresso.
           </DialogDescription>
         </DialogHeader>
 
@@ -191,21 +217,43 @@ export function PiggyFormDialog({
               onValueChange={(goalAmount) =>
                 setForm((current) => ({ ...current, goalAmount }))
               }
+              disabled={form.skipGoal}
               className='rounded-lg'
             />
+            <label
+              htmlFor='piggy-skip-goal'
+              className='flex cursor-pointer items-start gap-2 text-sm'
+            >
+              <Checkbox
+                id='piggy-skip-goal'
+                checked={form.skipGoal}
+                onCheckedChange={(checked) =>
+                  setForm((current) => ({
+                    ...current,
+                    skipGoal: checked === true,
+                    goalAmount: checked === true ? '' : current.goalAmount,
+                    targetDate: checked === true ? '' : current.targetDate,
+                  }))
+                }
+                className='mt-0.5'
+              />
+              <span className='text-muted-foreground text-xs'>Deseja não informar meta?</span>
+            </label>
           </div>
 
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='piggy-date'>Data de conclusão</Label>
-            <DatePicker
-              id='piggy-date'
-              value={form.targetDate}
-              onValueChange={(targetDate) =>
-                setForm((current) => ({ ...current, targetDate }))
-              }
-              placeholder='Quando quer atingir a meta'
-            />
-          </div>
+          {form.skipGoal ? null : (
+            <div className='flex flex-col gap-2'>
+              <Label htmlFor='piggy-date'>Data de conclusão (opcional)</Label>
+              <DatePicker
+                id='piggy-date'
+                value={form.targetDate}
+                onValueChange={(targetDate) =>
+                  setForm((current) => ({ ...current, targetDate }))
+                }
+                placeholder='Quando quer atingir a meta'
+              />
+            </div>
+          )}
 
           {previewMonthly > 0 ? (
             <p className='rounded-lg border border-border bg-black/20 px-3 py-2 text-sm text-muted-foreground'>
@@ -243,32 +291,52 @@ export function PiggyFormDialog({
             </label>
 
             {form.autoDebit ? (
-              <div className='flex flex-col gap-2 pl-6'>
-                <Label>Dia do débito</Label>
-                <Select
-                  value={form.autoDebitDay}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    setForm((current) => ({
-                      ...current,
-                      autoDebitDay: value,
-                    }));
-                  }}
-                >
-                  <SelectTrigger className='rounded-lg'>
-                    <SelectValue placeholder='Dia' />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {AUTO_DEBIT_DAYS.map((day) => (
-                      <SelectItem key={day} value={day}>
-                        Dia {day.padStart(2, '0')}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className='text-xs text-muted-foreground'>
-                  Em meses curtos, usa o último dia disponível.
-                </p>
+              <div className='flex flex-col gap-3 pl-6'>
+                {previewMonthly <= 0 ? (
+                  <div className='flex flex-col gap-2'>
+                    <Label htmlFor='piggy-monthly-debit'>
+                      Valor do débito mensal
+                    </Label>
+                    <CurrencyInput
+                      id='piggy-monthly-debit'
+                      value={form.monthlyDebitAmount}
+                      onValueChange={(monthlyDebitAmount) =>
+                        setForm((current) => ({
+                          ...current,
+                          monthlyDebitAmount,
+                        }))
+                      }
+                      className='rounded-lg'
+                    />
+                  </div>
+                ) : null}
+                <div className='flex flex-col gap-2'>
+                  <Label>Dia do débito</Label>
+                  <Select
+                    value={form.autoDebitDay}
+                    onValueChange={(value) => {
+                      if (!value) return;
+                      setForm((current) => ({
+                        ...current,
+                        autoDebitDay: value,
+                      }));
+                    }}
+                  >
+                    <SelectTrigger className='rounded-lg'>
+                      <SelectValue placeholder='Dia' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {AUTO_DEBIT_DAYS.map((day) => (
+                        <SelectItem key={day} value={day}>
+                          Dia {day.padStart(2, '0')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className='text-xs text-muted-foreground'>
+                    Em meses curtos, usa o último dia disponível.
+                  </p>
+                </div>
               </div>
             ) : null}
           </div>

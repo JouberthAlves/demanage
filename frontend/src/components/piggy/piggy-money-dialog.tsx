@@ -21,6 +21,7 @@ import {
 } from '@/hooks/use-piggy-banks';
 import { celebrateGoal } from '@/lib/confetti';
 import { formatCurrency, parseCurrencyInput } from '@/lib/format';
+import { piggyHasGoal } from '@/lib/piggy-math';
 import type { PiggyBank } from '@/types/finance';
 
 type PiggyMoneyDialogProps = {
@@ -50,7 +51,10 @@ export function PiggyMoneyDialog({
   }, [open, mode, bank?.id]);
 
   const monthlyHint = useMemo(() => {
-    if (!bank || mode !== 'deposit' || bank.remaining <= 0) return null;
+    if (!bank || mode !== 'deposit' || !piggyHasGoal(bank.goalAmount)) {
+      return null;
+    }
+    if (bank.remaining <= 0) return null;
     return {
       monthly: bank.monthlyGoal,
       remaining: bank.remaining,
@@ -74,7 +78,10 @@ export function PiggyMoneyDialog({
 
     try {
       if (mode === 'deposit') {
-        const result = await deposit.mutateAsync({ id: bank.id, amount: value });
+        const result = await deposit.mutateAsync({
+          id: bank.id,
+          amount: value,
+        });
         toast.success(
           `Guardado ${formatCurrency(result.depositAmount)} em ${bank.name}`,
         );
@@ -108,7 +115,9 @@ export function PiggyMoneyDialog({
           </DialogTitle>
           <DialogDescription>
             {isDeposit
-              ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.`
+              ? piggyHasGoal(bank?.goalAmount)
+                ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.`
+                : 'Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.'
               : bank?.isEmergency
                 ? 'Atenção: este é um cofre de emergência. O valor volta ao saldo do mês.'
                 : 'O valor volta ao saldo do mês como entrada de resgate.'}
@@ -189,9 +198,7 @@ export function PiggyMoneyDialog({
             <Button
               type='submit'
               variant={isDeposit ? 'default' : 'destructive'}
-              disabled={
-                submitting || (isDeposit && !confirmBalanceDeduction)
-              }
+              disabled={submitting || (isDeposit && !confirmBalanceDeduction)}
             >
               {submitting ? <Spinner data-icon='inline-start' /> : null}
               {isDeposit ? 'Confirmar depósito' : 'Sacar'}

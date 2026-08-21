@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 
 import { prisma } from '@/lib/prisma';
-import { balanceFromTransactions, serializePiggyBank } from '@/lib/piggy';
+import {
+  balanceFromTransactions,
+  piggyGoalAmount,
+  serializePiggyBank,
+} from '@/lib/piggy';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
@@ -28,8 +32,11 @@ router.post('/:id/archive', requireAuth, async (req: Request, res: Response) => 
     }
 
     const balance = balanceFromTransactions(bank.transactions);
+    const goalAmount = piggyGoalAmount(bank.goalAmount);
     const goalReached =
-      Boolean(bank.completedAt) || balance >= Number(bank.goalAmount);
+      goalAmount == null ||
+      Boolean(bank.completedAt) ||
+      balance >= goalAmount;
 
     if (!goalReached) {
       return res.status(400).json({

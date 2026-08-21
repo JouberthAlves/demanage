@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "PiggyBank" ALTER COLUMN "goalAmount" DROP NOT NULL,
+ALTER COLUMN "targetDate" DROP NOT NULL,
+ALTER COLUMN "monthlyGoal" SET DEFAULT 0;

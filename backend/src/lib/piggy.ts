@@ -13,7 +13,19 @@ export function monthsUntilTarget(from: Date, targetDate: Date) {
   return Math.max(1, months);
 }
 
-export function computeMonthlyGoal(goalAmount: number, targetDate: Date, from = new Date()) {
+export function piggyGoalAmount(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return amount;
+}
+
+export function computeMonthlyGoal(
+  goalAmount: number | null,
+  targetDate: Date | null,
+  from = new Date(),
+) {
+  if (!goalAmount || goalAmount <= 0 || !targetDate) return 0;
   const months = monthsUntilTarget(
     new Date(Date.UTC(from.getFullYear(), from.getMonth(), 1)),
     targetDate,
@@ -35,14 +47,17 @@ export function serializePiggyBank(
 ) {
   const transactions = bank.transactions ?? [];
   const balance = balanceFromTransactions(transactions);
-  const goalAmount = Number(bank.goalAmount);
+  const goalAmount = piggyGoalAmount(bank.goalAmount);
   const monthlyGoal = Number(bank.monthlyGoal);
+  const hasGoal = goalAmount != null;
 
   return {
     id: bank.id,
     name: bank.name,
     goalAmount,
-    targetDate: bank.targetDate.toISOString().slice(0, 10),
+    targetDate: bank.targetDate
+      ? bank.targetDate.toISOString().slice(0, 10)
+      : null,
     monthlyGoal,
     autoDebit: bank.autoDebit,
     autoDebitDay: bank.autoDebitDay,
@@ -50,8 +65,8 @@ export function serializePiggyBank(
     archivedAt: bank.archivedAt?.toISOString() ?? null,
     completedAt: bank.completedAt?.toISOString() ?? null,
     balance,
-    progress: goalAmount > 0 ? Math.min(balance / goalAmount, 1) : 0,
-    remaining: Math.max(goalAmount - balance, 0),
+    progress: hasGoal ? Math.min(balance / goalAmount, 1) : 0,
+    remaining: hasGoal ? Math.max(goalAmount - balance, 0) : 0,
     createdAt: bank.createdAt.toISOString(),
     updatedAt: bank.updatedAt.toISOString(),
   };
@@ -78,6 +93,11 @@ export function parseTargetDate(value: unknown) {
     throw new Error('INVALID_TARGET_DATE');
   }
   return date;
+}
+
+export function parseOptionalTargetDate(value: unknown): Date | null {
+  if (value == null || value === '') return null;
+  return parseTargetDate(value);
 }
 
 type DepositParams = {
@@ -111,14 +131,15 @@ export async function depositToPiggyBank({
   }
 
   const currentBalance = balanceFromTransactions(bank.transactions);
-  const goalAmount = Number(bank.goalAmount);
-  const remaining = Math.max(goalAmount - currentBalance, 0);
+  const goalAmount = piggyGoalAmount(bank.goalAmount);
+  const remaining = goalAmount != null ? Math.max(goalAmount - currentBalance, 0) : null;
 
-  if (remaining <= 0) {
+  if (remaining != null && remaining <= 0) {
     throw new Error('ALREADY_COMPLETE');
   }
 
-  const depositAmount = Math.min(amount, remaining);
+  const depositAmount =
+    remaining != null ? Math.min(amount, remaining) : amount;
   const day = new Date(
     Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0),
   );
@@ -149,7 +170,8 @@ export async function depositToPiggyBank({
     });
 
     const nextBalance = currentBalance + depositAmount;
-    const completed = nextBalance >= goalAmount && !bank.completedAt;
+    const completed =
+      goalAmount != null && nextBalance >= goalAmount && !bank.completedAt;
 
     const updatedBank = await tx.piggyBank.update({
       where: { id: bank.id },
@@ -234,6 +256,7 @@ export async function withdrawFromPiggyBank({
       where: { id: bank.id },
       data: {
         completedAt:
+          piggyGoalAmount(bank.goalAmount) != null &&
           currentBalance - amount < Number(bank.goalAmount)
             ? null
             : bank.completedAt,
@@ -306,7 +329,10 @@ export async function processPiggyAutoDebits(userId: string) {
     if (already) continue;
 
     const balance = balanceFromTransactions(bank.transactions);
-    const remaining = Number(bank.goalAmount) - balance;
+    const goalAmount = piggyGoalAmount(bank.goalAmount);
+    if (goalAmount == null || Number(bank.monthlyGoal) <= 0) continue;
+
+    const remaining = goalAmount - balance;
     if (remaining <= 0) continue;
 
     const amount = Math.min(Number(bank.monthlyGoal), remaining);

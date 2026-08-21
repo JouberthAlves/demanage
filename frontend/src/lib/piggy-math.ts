@@ -10,7 +10,16 @@ export function monthsUntilTarget(targetDate: string, from = new Date()) {
   return Math.max(1, months);
 }
 
-export function computeMonthlyGoal(goalAmount: number, targetDate: string) {
+export function piggyHasGoal(
+  goalAmount: number | null | undefined,
+): goalAmount is number {
+  return goalAmount != null && goalAmount > 0;
+}
+
+export function computeMonthlyGoal(
+  goalAmount: number,
+  targetDate: string | null | undefined,
+) {
   if (!Number.isFinite(goalAmount) || goalAmount <= 0 || !targetDate) {
     return 0;
   }
