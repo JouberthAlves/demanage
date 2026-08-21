@@ -22,7 +22,12 @@ export type CustomTag = {
 };
 
 export type ExpenseCategory =
-  'assinatura' | 'parcela' | 'divida' | 'outro' | 'cofrinho';
+  | 'assinatura'
+  | 'parcela'
+  | 'divida'
+  | 'outro'
+  | 'cofrinho'
+  | 'investimento';
 
 export type PiggyBank = {
   id: string;
@@ -33,6 +38,9 @@ export type PiggyBank = {
   autoDebit: boolean;
   autoDebitDay: number;
   isEmergency: boolean;
+  yieldEnabled: boolean;
+  cdiPercent: number;
+  interestAccruedThrough: string | null;
   archivedAt: string | null;
   completedAt: string | null;
   balance: number;
@@ -45,17 +53,21 @@ export type PiggyBank = {
 export type PiggyTransaction = {
   id: string;
   piggyBankId: string;
-  type: 'deposit' | 'withdraw';
-  source: 'manual' | 'auto_debit';
+  type: 'deposit' | 'withdraw' | 'interest';
+  source: 'manual' | 'auto_debit' | 'yield';
   amount: number;
   date: string;
   expenseId: string | null;
   entryId: string | null;
   note: string | null;
+  cdiRate: number | null;
+  cdiPercent: number | null;
+  baseBalance: number | null;
+  resultingBalance: number | null;
   createdAt: string;
 };
-export type ExpenseFrequency = 'mensal' | 'semanal' | 'unica';
 
+export type ExpenseFrequency = 'mensal' | 'semanal' | 'unica';
 export type ExpenseSplitKind = 'card' | 'pix';
 
 export type ExpenseSplit = {
@@ -74,13 +86,9 @@ export type RecurringExpense = {
   category: ExpenseCategory;
   frequency: ExpenseFrequency;
   cardId?: string;
-  /** Dia do mês (1-31) em que a despesa entra no saldo. */
   dueDay?: number;
-  /** YYYY-MM-DD — primeira data de desconto (mês/ano de início). */
   startsAt?: string;
-  /** YYYY-MM-DD — após essa data a recorrência para. */
   endsAt?: string;
-  /** Data de registro (YYYY-MM-DD), usada em despesas únicas. */
   registeredAt?: string;
   notes?: string;
   isInvoice?: boolean;
@@ -98,11 +106,8 @@ export type Income = {
   amount: number;
   type: IncomeType;
   frequency: IncomeFrequency;
-  /** Dia do mês (1-31) em que a entrada entra no saldo. */
   receiveDay?: number;
-  /** YYYY-MM-DD — primeira data de recebimento (mês/ano de início). */
   startsAt?: string;
-  /** YYYY-MM-DD — após essa data a recorrência para. */
   endsAt?: string;
   date?: string;
   customTagId?: string;

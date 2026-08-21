@@ -14,6 +14,7 @@ export const EXPENSE_CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   divida: 'Dívida',
   outro: 'Outro',
   cofrinho: 'Cofrinho',
+  investimento: 'Investimento',
 };
 
 export const EXPENSE_CATEGORY_COLORS: Record<ExpenseCategory, string> = {
@@ -22,11 +23,12 @@ export const EXPENSE_CATEGORY_COLORS: Record<ExpenseCategory, string> = {
   divida: '#F43F5E',
   outro: '#A3A3A3',
   cofrinho: '#A78BFA',
+  investimento: '#34D399',
 };
 
-/** Categorias pré-definidas no select (sem "Outro"/cofrinho). */
+/** Categorias criadas manualmente pelo formulário de despesas. */
 export const BUILTIN_EXPENSE_CATEGORY_LABELS: Record<
-  Exclude<ExpenseCategory, 'outro' | 'cofrinho'>,
+  Exclude<ExpenseCategory, 'outro' | 'cofrinho' | 'investimento'>,
   string
 > = {
   assinatura: 'Assinatura',
@@ -46,7 +48,6 @@ export const INCOME_TYPE_LABELS: Record<Income['type'], string> = {
   outro: 'Outro',
 };
 
-/** Tipos pré-definidos no select de Entradas (sem "Outro"). */
 export const BUILTIN_INCOME_TYPE_LABELS: Record<
   Exclude<Income['type'], 'salario' | 'outro'>,
   string
@@ -76,10 +77,7 @@ export const MONTH_LABELS: Record<number, string> = {
 };
 
 export const MONTH_OPTIONS = Object.entries(MONTH_LABELS).map(
-  ([value, label]) => ({
-    value: Number(value),
-    label,
-  }),
+  ([value, label]) => ({ value: Number(value), label }),
 );
 
 export const TAG_COLOR_OPTIONS = [

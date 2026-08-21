@@ -25,6 +25,7 @@ export type ApiExpense = {
   dueDay: number | null;
   startsAt?: string | null;
   endsAt?: string | null;
+  occurredAt?: string | null;
   notes: string | null;
   isInvoice?: boolean;
   createdAt?: string;
@@ -82,6 +83,7 @@ function mapSplits(splits?: ApiExpenseSplit[]): ExpenseSplit[] | undefined {
 }
 
 export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
+  const registeredAt = expense.occurredAt ?? expense.createdAt;
   return {
     id: expense.id,
     name: expense.name,
@@ -92,9 +94,7 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     dueDay: expense.dueDay ?? undefined,
     startsAt: mapDateOnly(expense.startsAt),
     endsAt: mapDateOnly(expense.endsAt),
-    registeredAt: expense.createdAt
-      ? toLocalDateOnly(expense.createdAt)
-      : undefined,
+    registeredAt: registeredAt ? toLocalDateOnly(registeredAt) : undefined,
     notes: expense.notes ?? undefined,
     isInvoice: Boolean(expense.isInvoice),
     customTagId: expense.customTagId ?? undefined,
