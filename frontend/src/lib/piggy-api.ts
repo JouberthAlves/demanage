@@ -9,6 +9,8 @@ export type PiggyBankPayload = {
   autoDebit?: boolean;
   autoDebitDay?: number;
   isEmergency?: boolean;
+  yieldEnabled?: boolean;
+  cdiPercent?: number;
 };
 
 export async function listPiggyBanks(includeArchived = false) {

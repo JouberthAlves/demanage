@@ -9,12 +9,11 @@ export function AppBottomNav() {
       className='fixed inset-x-0 bottom-0 z-40 border-t border-border bg-background/95 backdrop-blur md:hidden'
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
-      <ul className='grid h-16 grid-cols-5'>
+      <ul className='flex h-16 overflow-x-auto overscroll-x-contain'>
         {APP_NAV_ITEMS.map((item) => {
           const Icon = item.icon;
-
           return (
-            <li key={item.to} className='min-w-0'>
+            <li key={item.to} className='min-w-[72px] flex-1'>
               <NavLink
                 to={item.to}
                 end={item.end}
@@ -30,10 +29,8 @@ export function AppBottomNav() {
                     {isActive ? (
                       <span className='absolute top-0 h-0.5 w-8 rounded-full bg-neon-amber' />
                     ) : null}
-                    <Icon
-                      className={cn('size-5', isActive && 'text-neon-amber')}
-                    />
-                    <span className='truncate'>{item.label}</span>
+                    <Icon className={cn('size-5', isActive && 'text-neon-amber')} />
+                    <span className='max-w-[68px] truncate'>{item.label}</span>
                   </>
                 )}
               </NavLink>
