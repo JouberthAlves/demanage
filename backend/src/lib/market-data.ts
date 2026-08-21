@@ -35,6 +35,54 @@ const PROVIDERS = {
   IPCA: 'ibge_sidra_1737_2266',
 } as const;
 
+const QUOTE_TTL_MS = 5 * 60 * 1000;
+const PROVIDER_COOLDOWN_MS = 2 * 60 * 1000;
+const HISTORY_MAX_GAP_MS = 3 * 86_400_000;
+
+const inflight = new Map<string, Promise<unknown>>();
+const cooldownUntil = new Map<string, number>();
+
+function singleFlight<T>(key: string, run: () => Promise<T>): Promise<T> {
+  const existing = inflight.get(key);
+  if (existing) return existing as Promise<T>;
+  const promise = run().finally(() => {
+    inflight.delete(key);
+  });
+  inflight.set(key, promise);
+  return promise;
+}
+
+function hostOf(url: string) {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+}
+
+function isCoolingDown(url: string) {
+  return Date.now() < (cooldownUntil.get(hostOf(url)) ?? 0);
+}
+
+function markCooldown(url: string) {
+  cooldownUntil.set(hostOf(url), Date.now() + PROVIDER_COOLDOWN_MS);
+}
+
+function isFreshQuote(cached: { fetchedAt: Date } | null) {
+  if (!cached) return false;
+  return Date.now() - cached.fetchedAt.getTime() < QUOTE_TTL_MS;
+}
+
+function isFreshHistory(points: MarketPoint[], from: Date, to: Date) {
+  if (points.length === 0) return false;
+  const first = parseDateInput(points[0].date);
+  const last = parseDateInput(points[points.length - 1].date);
+  return (
+    last.getTime() >= to.getTime() - HISTORY_MAX_GAP_MS &&
+    first.getTime() <= from.getTime() + 4 * 86_400_000
+  );
+}
+
 function parseDateInput(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) throw new MarketDataError('Data inválida');
@@ -75,6 +123,9 @@ function tlsCauseCode(error: unknown): string {
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
+  if (isCoolingDown(url)) {
+    throw new MarketDataError('Provider em cooldown');
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
   try {
@@ -83,6 +134,9 @@ async function fetchJson<T>(url: string): Promise<T> {
       headers: { 'user-agent': 'deManage/1.0' },
     });
     if (!response.ok) {
+      if (response.status === 429 || response.status === 503) {
+        markCooldown(url);
+      }
       throw new MarketDataError(`Provider respondeu ${response.status}`);
     }
     const contentType = response.headers.get('content-type') ?? '';
@@ -125,6 +179,9 @@ function parseBcbRows(rows: BcbRow[]): MarketPoint[] {
 }
 
 async function fetchBcbRows(url: string): Promise<BcbRow[]> {
+  if (isCoolingDown(url)) {
+    throw new MarketDataError('Provider em cooldown');
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
   try {
@@ -134,6 +191,9 @@ async function fetchBcbRows(url: string): Promise<BcbRow[]> {
     });
     if (response.status === 404) return [];
     if (!response.ok) {
+      if (response.status === 429 || response.status === 503) {
+        markCooldown(url);
+      }
       throw new MarketDataError(`Provider respondeu ${response.status}`);
     }
     const contentType = response.headers.get('content-type') ?? '';
@@ -245,29 +305,7 @@ async function fetchBtcBrlQuote(): Promise<string> {
   return decimal(value).toString();
 }
 
-export async function getAssetQuote(asset: Asset): Promise<MarketQuote> {
-  if (asset === 'BTC') {
-    try {
-      const parsed = await fetchBtcBrlQuote();
-      const asOf = await cacheQuote(PROVIDERS.BTC, 'BTC_BRL_QUOTE', parsed);
-      return {
-        provider: PROVIDERS.BTC,
-        stale: false,
-        value: parsed,
-        asOf: asOf.toISOString(),
-      };
-    } catch (error) {
-      const cached = await latestCached(PROVIDERS.BTC, 'BTC_BRL_QUOTE');
-      if (!cached) throw error;
-      return {
-        provider: PROVIDERS.BTC,
-        stale: true,
-        value: cached.value.toString(),
-        asOf: cached.at.toISOString(),
-      };
-    }
-  }
-
+async function fetchUsdBrlQuoteLive() {
   try {
     const data = await fetchJson<{ USDBRL?: { bid?: string } }>(
       'https://economia.awesomeapi.com.br/json/last/USD-BRL',
@@ -276,24 +314,70 @@ export async function getAssetQuote(asset: Asset): Promise<MarketQuote> {
     if (!Number.isFinite(bid) || bid <= 0) {
       throw new MarketDataError('Cotação USD inválida');
     }
-    const parsed = decimal(bid).toString();
-    const asOf = await cacheQuote(PROVIDERS.USD, 'USD_BRL_QUOTE', parsed);
-    return {
-      provider: PROVIDERS.USD,
-      stale: false,
-      value: parsed,
-      asOf: asOf.toISOString(),
-    };
-  } catch (error) {
-    const cached = await latestCached(PROVIDERS.USD, 'USD_BRL_QUOTE');
-    if (!cached) throw error;
-    return {
-      provider: PROVIDERS.USD,
-      stale: true,
-      value: cached.value.toString(),
-      asOf: cached.at.toISOString(),
-    };
+    return decimal(bid).toString();
+  } catch {
+    const rows = await fetchBcbRows(
+      'https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados/ultimos/5?formato=json',
+    );
+    const last = parseBcbRows(rows).at(-1);
+    if (!last) throw new MarketDataError('Cotação USD inválida');
+    return last.value;
   }
+}
+
+function quoteFromCache(
+  provider: string,
+  cached: { value: { toString(): string }; at: Date },
+  stale: boolean,
+): MarketQuote {
+  return {
+    provider,
+    stale,
+    value: cached.value.toString(),
+    asOf: cached.at.toISOString(),
+  };
+}
+
+export async function getAssetQuote(asset: Asset): Promise<MarketQuote> {
+  return singleFlight(`quote:${asset}`, async () => {
+    if (asset === 'BTC') {
+      const cached = await latestCached(PROVIDERS.BTC, 'BTC_BRL_QUOTE');
+      if (cached && isFreshQuote(cached)) {
+        return quoteFromCache(PROVIDERS.BTC, cached, false);
+      }
+      try {
+        const parsed = await fetchBtcBrlQuote();
+        const asOf = await cacheQuote(PROVIDERS.BTC, 'BTC_BRL_QUOTE', parsed);
+        return {
+          provider: PROVIDERS.BTC,
+          stale: false,
+          value: parsed,
+          asOf: asOf.toISOString(),
+        };
+      } catch (error) {
+        if (!cached) throw error;
+        return quoteFromCache(PROVIDERS.BTC, cached, true);
+      }
+    }
+
+    const cached = await latestCached(PROVIDERS.USD, 'USD_BRL_QUOTE');
+    if (cached && isFreshQuote(cached)) {
+      return quoteFromCache(PROVIDERS.USD, cached, false);
+    }
+    try {
+      const parsed = await fetchUsdBrlQuoteLive();
+      const asOf = await cacheQuote(PROVIDERS.USD, 'USD_BRL_QUOTE', parsed);
+      return {
+        provider: PROVIDERS.USD,
+        stale: false,
+        value: parsed,
+        asOf: asOf.toISOString(),
+      };
+    } catch (error) {
+      if (!cached) throw error;
+      return quoteFromCache(PROVIDERS.USD, cached, true);
+    }
+  });
 }
 
 export async function getAssetHistory(
@@ -330,85 +414,165 @@ function usdOnOrBefore(
   return found;
 }
 
+async function fetchBtcBrlHistoryFromCoinbase(from: Date, to: Date) {
+  const url =
+    `https://api.exchange.coinbase.com/products/BTC-BRL/candles` +
+    `?granularity=86400&start=${from.toISOString()}&end=${addDays(to, 1).toISOString()}`;
+  const rows = await fetchJson<number[][]>(url);
+  if (!Array.isArray(rows)) {
+    throw new MarketDataError('Histórico BTC inválido');
+  }
+  const points: MarketPoint[] = [];
+  for (const row of rows) {
+    const time = Number(row[0]);
+    const close = Number(row[4]);
+    if (!Number.isFinite(time) || !Number.isFinite(close) || close <= 0) {
+      continue;
+    }
+    const day = dateKey(new Date(time * 1000));
+    if (day < dateKey(from) || day > dateKey(to)) continue;
+    points.push({ date: day, value: decimal(close).toFixed(2) });
+  }
+  const deduped = dedupePoints(points);
+  if (deduped.length === 0) throw new MarketDataError('Sem histórico BTC');
+  return deduped;
+}
+
 async function getBtcHistory(from: Date, to: Date): Promise<MarketSeries> {
   const provider = PROVIDERS.BTC;
   const key = 'BTC_BRL_DAILY';
-  try {
-    const period1 = Math.floor(from.getTime() / 1000);
-    const period2 = Math.floor(addDays(to, 1).getTime() / 1000);
-    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?period1=${period1}&period2=${period2}&interval=1d`;
-    const [usdSeries, yahoo] = await Promise.all([
-      getUsdHistory(from, to),
-      fetchJson<YahooChart>(yahooUrl),
-    ]);
-    const usdByDay = new Map(
-      [...usdSeries.points]
-        .sort((left, right) => left.date.localeCompare(right.date))
-        .map((point) => [point.date, decimal(point.value)]),
+  return singleFlight(
+    `btc-history:${dateKey(from)}:${dateKey(to)}`,
+    async () => {
+      const cached = await cachedRange(provider, key, from, to);
+      if (isFreshHistory(cached, from, to)) {
+        return { provider, stale: false, points: cached };
+      }
+      try {
+        const period1 = Math.floor(from.getTime() / 1000);
+        const period2 = Math.floor(addDays(to, 1).getTime() / 1000);
+        const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?period1=${period1}&period2=${period2}&interval=1d`;
+        const [usdSeries, yahoo] = await Promise.all([
+          getUsdHistory(from, to),
+          fetchJson<YahooChart>(yahooUrl),
+        ]);
+        const usdByDay = new Map(
+          [...usdSeries.points]
+            .sort((left, right) => left.date.localeCompare(right.date))
+            .map((point) => [point.date, decimal(point.value)]),
+        );
+        const result = yahoo.chart?.result?.[0];
+        const timestamps = result?.timestamp ?? [];
+        const closes = result?.indicators?.quote?.[0]?.close ?? [];
+        const byDay = new Map<string, string>();
+        for (let index = 0; index < timestamps.length; index += 1) {
+          const close = Number(closes[index]);
+          if (!Number.isFinite(close) || close <= 0) continue;
+          const day = dateKey(new Date(timestamps[index] * 1000));
+          if (day < dateKey(from) || day > dateKey(to)) continue;
+          const usd = usdOnOrBefore(usdByDay, day);
+          if (!usd) continue;
+          byDay.set(day, decimal(close).mul(usd).toFixed(2));
+        }
+        const points = [...byDay.entries()]
+          .sort(([left], [right]) => left.localeCompare(right))
+          .map(([date, value]) => ({ date, value }));
+        if (points.length === 0) {
+          throw new MarketDataError('Sem histórico BTC');
+        }
+        await storePoints(provider, key, points);
+        return { provider, stale: usdSeries.stale, points };
+      } catch {
+        try {
+          const points = await fetchBtcBrlHistoryFromCoinbase(from, to);
+          await storePoints(provider, key, points);
+          return { provider, stale: false, points };
+        } catch (error) {
+          if (cached.length === 0) throw error;
+          return { provider, stale: true, points: cached };
+        }
+      }
+    },
+  );
+}
+
+async function fetchUsdHistoryFromAwesomeApi(from: Date, to: Date) {
+  const points: MarketPoint[] = [];
+  let cursor = from;
+  while (cursor <= to) {
+    const chunkEnd = new Date(
+      Math.min(to.getTime(), addDays(cursor, 359).getTime()),
     );
-    const result = yahoo.chart?.result?.[0];
-    const timestamps = result?.timestamp ?? [];
-    const closes = result?.indicators?.quote?.[0]?.close ?? [];
-    const byDay = new Map<string, string>();
-    for (let index = 0; index < timestamps.length; index += 1) {
-      const close = Number(closes[index]);
-      if (!Number.isFinite(close) || close <= 0) continue;
-      const day = dateKey(new Date(timestamps[index] * 1000));
-      if (day < dateKey(from) || day > dateKey(to)) continue;
-      const usd = usdOnOrBefore(usdByDay, day);
-      if (!usd) continue;
-      byDay.set(day, decimal(close).mul(usd).toFixed(2));
+    const count = Math.min(360, daysBetween(cursor, chunkEnd));
+    const url = `https://economia.awesomeapi.com.br/json/daily/USD-BRL/${count}?start_date=${yyyymmdd(cursor)}&end_date=${yyyymmdd(chunkEnd)}`;
+    const rows = await fetchJson<
+      Array<{ bid?: string; timestamp?: string; create_date?: string }>
+    >(url);
+    for (const row of rows) {
+      const bid = Number(row.bid);
+      if (!Number.isFinite(bid) || bid <= 0) continue;
+      const timestamp = Number(row.timestamp);
+      const date =
+        Number.isFinite(timestamp) && timestamp > 0
+          ? dateKey(new Date(timestamp * 1000))
+          : row.create_date?.slice(0, 10);
+      if (!date || date < dateKey(from) || date > dateKey(to)) continue;
+      points.push({ date, value: decimal(bid).toString() });
     }
-    const points = [...byDay.entries()]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([date, value]) => ({ date, value }));
-    if (points.length === 0) throw new MarketDataError('Sem histórico BTC');
-    await storePoints(provider, key, points);
-    return { provider, stale: usdSeries.stale, points };
-  } catch (error) {
-    const points = await cachedRange(provider, key, from, to);
-    if (points.length === 0) throw error;
-    return { provider, stale: true, points };
+    cursor = addDays(chunkEnd, 1);
   }
+  const deduped = dedupePoints(points);
+  if (deduped.length === 0) throw new MarketDataError('Sem histórico USD');
+  return deduped;
+}
+
+async function fetchUsdHistoryFromBcb(from: Date, to: Date) {
+  const points: MarketPoint[] = [];
+  let cursor = addDays(from, -7);
+  while (cursor <= to) {
+    const chunkEnd = new Date(
+      Math.min(to.getTime(), addDays(cursor, 359).getTime()),
+    );
+    const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.1/dados?formato=json&dataInicial=${ddmmyyyy(cursor)}&dataFinal=${ddmmyyyy(chunkEnd)}`;
+    const rows = await fetchBcbRows(url);
+    points.push(...parseBcbRows(rows));
+    cursor = addDays(chunkEnd, 1);
+  }
+  const fromKey = dateKey(from);
+  const toKey = dateKey(to);
+  const deduped = dedupePoints(points).filter(
+    (point) => point.date >= fromKey && point.date <= toKey,
+  );
+  if (deduped.length === 0) throw new MarketDataError('Sem histórico USD');
+  return deduped;
 }
 
 async function getUsdHistory(from: Date, to: Date): Promise<MarketSeries> {
   const provider = PROVIDERS.USD;
   const key = 'USD_BRL_DAILY';
-  try {
-    const points: MarketPoint[] = [];
-    let cursor = from;
-    while (cursor <= to) {
-      const chunkEnd = new Date(
-        Math.min(to.getTime(), addDays(cursor, 359).getTime()),
-      );
-      const count = Math.min(360, daysBetween(cursor, chunkEnd));
-      const url = `https://economia.awesomeapi.com.br/json/daily/USD-BRL/${count}?start_date=${yyyymmdd(cursor)}&end_date=${yyyymmdd(chunkEnd)}`;
-      const rows = await fetchJson<
-        Array<{ bid?: string; timestamp?: string; create_date?: string }>
-      >(url);
-      for (const row of rows) {
-        const bid = Number(row.bid);
-        if (!Number.isFinite(bid) || bid <= 0) continue;
-        const timestamp = Number(row.timestamp);
-        const date =
-          Number.isFinite(timestamp) && timestamp > 0
-            ? dateKey(new Date(timestamp * 1000))
-            : row.create_date?.slice(0, 10);
-        if (!date || date < dateKey(from) || date > dateKey(to)) continue;
-        points.push({ date, value: decimal(bid).toString() });
+  return singleFlight(
+    `usd-history:${dateKey(from)}:${dateKey(to)}`,
+    async () => {
+      const cached = await cachedRange(provider, key, from, to);
+      if (isFreshHistory(cached, from, to)) {
+        return { provider, stale: false, points: cached };
       }
-      cursor = addDays(chunkEnd, 1);
-    }
-    const deduped = dedupePoints(points);
-    if (deduped.length === 0) throw new MarketDataError('Sem histórico USD');
-    await storePoints(provider, key, deduped);
-    return { provider, stale: false, points: deduped };
-  } catch (error) {
-    const points = await cachedRange(provider, key, from, to);
-    if (points.length === 0) throw error;
-    return { provider, stale: true, points };
-  }
+      try {
+        const points = await fetchUsdHistoryFromAwesomeApi(from, to);
+        await storePoints(provider, key, points);
+        return { provider, stale: false, points };
+      } catch {
+        try {
+          const points = await fetchUsdHistoryFromBcb(from, to);
+          await storePoints(provider, key, points);
+          return { provider, stale: false, points };
+        } catch (error) {
+          if (cached.length === 0) throw error;
+          return { provider, stale: true, points: cached };
+        }
+      }
+    },
+  );
 }
 
 export async function getCdiHistory(
