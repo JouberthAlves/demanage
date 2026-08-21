@@ -34,6 +34,7 @@ import {
   usePiggyTransactions,
 } from '@/hooks/use-piggy-banks';
 import { formatCurrency, formatPercent } from '@/lib/format';
+import { piggyHasGoal } from '@/lib/piggy-math';
 import type { PiggyBank } from '@/types/finance';
 
 export function PiggyPage() {
@@ -104,7 +105,7 @@ export function PiggyPage() {
       <title>Cofrinho | deManage</title>
       <PageHeader
         title='Cofrinho'
-        description='Guarde com meta mensal. Cada depósito vira despesa Cofrinho e reduz o saldo.'
+        description='Guarde no cofre. Meta e data são opcionais. Cada depósito vira despesa Cofrinho e reduz o saldo.'
         actions={
           <Button onClick={openCreate} className='rounded-lg'>
             <Plus data-icon='inline-start' />
@@ -116,17 +117,17 @@ export function PiggyPage() {
       <PageHero
         eyebrow='Reservas'
         title={`${banks.length} cofre${banks.length === 1 ? '' : 's'}`}
-        description='Meta mensal = meta final ÷ meses até a data. Auto-débito no dia que você escolher, se ligado.'
+        description='Com meta e data, a meta mensal é calculada. Sem meta, o cofre só guarda saldo — sem barra de progresso.'
       >
-          <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
-            <p className='text-xs text-muted-foreground'>Total nos cofres</p>
-            <p
-              title={formatCurrency(totalBalance)}
-              className='mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold tabular-nums text-violet-300'
-            >
-              {formatCurrency(totalBalance)}
-            </p>
-          </div>
+        <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
+          <p className='text-xs text-muted-foreground'>Total nos cofres</p>
+          <p
+            title={formatCurrency(totalBalance)}
+            className='mt-2 min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-semibold tabular-nums text-violet-300'
+          >
+            {formatCurrency(totalBalance)}
+          </p>
+        </div>
       </PageHero>
 
       {isLoading ? (
@@ -145,7 +146,7 @@ export function PiggyPage() {
             </div>
             <p className='font-medium'>Nenhum cofre ainda</p>
             <p className='text-sm text-muted-foreground'>
-              Crie um cofre com meta e data para começar a guardar.
+              Crie um cofre para começar a guardar. Meta e data são opcionais.
             </p>
             <Button onClick={openCreate} className='rounded-lg'>
               <Plus data-icon='inline-start' />
@@ -156,7 +157,20 @@ export function PiggyPage() {
       ) : (
         <div className='grid gap-4 lg:grid-cols-2'>
           {banks.map((bank) => {
-            const goalDone = Boolean(bank.completedAt) || bank.progress >= 1;
+            const hasGoal = piggyHasGoal(bank.goalAmount);
+            const goalDone =
+              hasGoal && (Boolean(bank.completedAt) || bank.progress >= 1);
+
+            const goalLine = hasGoal
+              ? [
+                  `Meta ${formatCurrency(bank.goalAmount ?? 0)}`,
+                  bank.targetDate
+                    ? `até ${bank.targetDate.split('-').reverse().join('/')}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
+              : 'Sem meta';
 
             return (
               <SectionPanel key={bank.id}>
@@ -194,8 +208,7 @@ export function PiggyPage() {
                         ) : null}
                       </div>
                       <p className='mt-1 text-sm text-muted-foreground'>
-                        Meta {formatCurrency(bank.goalAmount)} · até{' '}
-                        {bank.targetDate.split('-').reverse().join('/')}
+                        {goalLine}
                       </p>
                     </div>
                     <Button
@@ -208,29 +221,40 @@ export function PiggyPage() {
                     </Button>
                   </div>
 
-                  <div>
-                    <div className='mb-1 flex justify-between text-sm'>
-                      <span className='text-muted-foreground'>Progresso</span>
+                  {hasGoal ? (
+                    <div>
+                      <div className='mb-1 flex justify-between text-sm'>
+                        <span className='text-muted-foreground'>Progresso</span>
+                        <span className='font-medium tabular-nums'>
+                          {formatCurrency(bank.balance)} ·{' '}
+                          {formatPercent(bank.progress)}
+                        </span>
+                      </div>
+                      <div className='h-2 overflow-hidden rounded-full bg-white/5'>
+                        <div
+                          className='h-full rounded-full bg-violet-400 transition-all'
+                          style={{
+                            width: `${Math.min(bank.progress * 100, 100)}%`,
+                          }}
+                        />
+                      </div>
+                      <p className='mt-2 text-xs text-muted-foreground'>
+                        {bank.monthlyGoal > 0
+                          ? `Meta mensal ${formatCurrency(bank.monthlyGoal)}`
+                          : 'Sem data de conclusão'}
+                        {bank.remaining > 0
+                          ? ` · faltam ${formatCurrency(bank.remaining)}`
+                          : ''}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className='text-sm'>
+                      <span className='text-muted-foreground'>Saldo · </span>
                       <span className='font-medium tabular-nums'>
-                        {formatCurrency(bank.balance)} ·{' '}
-                        {formatPercent(bank.progress)}
+                        {formatCurrency(bank.balance)}
                       </span>
-                    </div>
-                    <div className='h-2 overflow-hidden rounded-full bg-white/5'>
-                      <div
-                        className='h-full rounded-full bg-violet-400 transition-all'
-                        style={{
-                          width: `${Math.min(bank.progress * 100, 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <p className='mt-2 text-xs text-muted-foreground'>
-                      Meta mensal {formatCurrency(bank.monthlyGoal)}
-                      {bank.remaining > 0
-                        ? ` · faltam ${formatCurrency(bank.remaining)}`
-                        : ''}
                     </p>
-                  </div>
+                  )}
 
                   <div className='flex flex-wrap gap-2'>
                     <Button
@@ -268,9 +292,11 @@ export function PiggyPage() {
                         )
                       }
                     >
-                      {historyBankId === bank.id ? 'Ocultar histórico' : 'Histórico'}
+                      {historyBankId === bank.id
+                        ? 'Ocultar histórico'
+                        : 'Histórico'}
                     </Button>
-                    {goalDone ? (
+                    {goalDone || !hasGoal ? (
                       <Button
                         size='sm'
                         variant='outline'
@@ -303,9 +329,7 @@ export function PiggyPage() {
                               <div>
                                 <p className='font-medium'>
                                   {tx.type === 'deposit' ? 'Depósito' : 'Saque'}
-                                  {tx.source === 'auto_debit'
-                                    ? ' · auto'
-                                    : ''}
+                                  {tx.source === 'auto_debit' ? ' · auto' : ''}
                                 </p>
                                 <p className='text-xs text-muted-foreground'>
                                   {tx.date.split('-').reverse().join('/')}

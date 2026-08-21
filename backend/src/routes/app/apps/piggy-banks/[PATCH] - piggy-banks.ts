@@ -4,7 +4,8 @@ import { parseAbnt2Text } from '@/lib/abnt2';
 import {
   computeMonthlyGoal,
   parseAutoDebitDay,
-  parseTargetDate,
+  parseOptionalTargetDate,
+  piggyGoalAmount,
   serializePiggyBank,
 } from '@/lib/piggy';
 import { parsePositiveAmount } from '@/lib/validate';
@@ -34,29 +35,53 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Cofre arquivado não pode ser editado' });
     }
 
-    const { name, goalAmount, targetDate, autoDebit, autoDebitDay, isEmergency } =
+    const { name, goalAmount, targetDate, monthlyGoal: monthlyGoalInput, autoDebit, autoDebitDay, isEmergency } =
       req.body;
 
-    let nextGoal = Number(existing.goalAmount);
+    let nextGoal = piggyGoalAmount(existing.goalAmount);
     if (goalAmount !== undefined) {
-      const parsed = parsePositiveAmount(goalAmount);
-      if (parsed == null) {
-        return res.status(400).json({ error: 'Meta final deve ser maior que zero' });
+      if (goalAmount == null || goalAmount === '') {
+        nextGoal = null;
+      } else {
+        const parsed = parsePositiveAmount(goalAmount);
+        if (parsed == null) {
+          return res.status(400).json({ error: 'Meta final deve ser maior que zero' });
+        }
+        nextGoal = parsed;
       }
-      nextGoal = parsed;
     }
 
     let nextTarget = existing.targetDate;
     if (targetDate !== undefined) {
       try {
-        nextTarget = parseTargetDate(targetDate);
+        nextTarget = parseOptionalTargetDate(targetDate);
       } catch {
         return res.status(400).json({ error: 'Data de conclusão inválida' });
       }
     }
 
+    if (nextGoal == null) {
+      nextTarget = null;
+    }
+
+    const computedMonthly = computeMonthlyGoal(nextGoal, nextTarget);
+    let monthlyGoal = computedMonthly;
     const nextAutoDebit =
       autoDebit !== undefined ? Boolean(autoDebit) : existing.autoDebit;
+
+    if (nextAutoDebit && monthlyGoal <= 0) {
+      const parsedMonthly = parsePositiveAmount(
+        monthlyGoalInput !== undefined
+          ? monthlyGoalInput
+          : existing.monthlyGoal,
+      );
+      if (parsedMonthly == null) {
+        return res.status(400).json({
+          error: 'Informe o valor do débito automático',
+        });
+      }
+      monthlyGoal = parsedMonthly;
+    }
 
     let nextAutoDebitDay = existing.autoDebitDay;
     if (autoDebitDay !== undefined || (autoDebit !== undefined && nextAutoDebit)) {
@@ -71,8 +96,6 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       if (day != null) nextAutoDebitDay = day;
     }
 
-    const monthlyGoal = computeMonthlyGoal(nextGoal, nextTarget);
-
     let nextName: string | undefined;
     if (name !== undefined) {
       const parsed = parseAbnt2Text(name, { maxLength: 50, required: true });
@@ -86,10 +109,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       where: { id },
       data: {
         ...(nextName !== undefined ? { name: nextName } : {}),
-        ...(goalAmount !== undefined ? { goalAmount: nextGoal } : {}),
-        ...(targetDate !== undefined ? { targetDate: nextTarget } : {}),
+        goalAmount: nextGoal,
+        targetDate: nextTarget,
         monthlyGoal,
-        ...(autoDebit !== undefined ? { autoDebit: nextAutoDebit } : {}),
+        autoDebit: nextAutoDebit,
         autoDebitDay: nextAutoDebitDay,
         ...(isEmergency !== undefined
           ? { isEmergency: Boolean(isEmergency) }

@@ -22,17 +22,13 @@ export type CustomTag = {
 };
 
 export type ExpenseCategory =
-  | 'assinatura'
-  | 'parcela'
-  | 'divida'
-  | 'outro'
-  | 'cofrinho';
+  'assinatura' | 'parcela' | 'divida' | 'outro' | 'cofrinho';
 
 export type PiggyBank = {
   id: string;
   name: string;
-  goalAmount: number;
-  targetDate: string;
+  goalAmount: number | null;
+  targetDate: string | null;
   monthlyGoal: number;
   autoDebit: boolean;
   autoDebitDay: number;

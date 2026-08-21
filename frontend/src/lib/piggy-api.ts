@@ -3,8 +3,9 @@ import type { PiggyBank, PiggyTransaction } from '@/types/finance';
 
 export type PiggyBankPayload = {
   name: string;
-  goalAmount: number;
-  targetDate: string;
+  goalAmount: number | null;
+  targetDate: string | null;
+  monthlyGoal?: number | null;
   autoDebit?: boolean;
   autoDebitDay?: number;
   isEmergency?: boolean;
