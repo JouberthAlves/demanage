@@ -1,4 +1,6 @@
 import {
+  BadgeDollarSign,
+  Landmark,
   LayoutDashboard,
   PiggyBank,
   Receipt,
@@ -20,4 +22,6 @@ export const APP_NAV_ITEMS: AppNavItem[] = [
   { to: '/despesas', label: 'Despesas', icon: Receipt },
   { to: '/cofrinho', label: 'Cofrinho', icon: PiggyBank },
   { to: '/entradas', label: 'Entradas', icon: TrendingUp },
+  { to: '/moedas', label: 'Moedas', icon: BadgeDollarSign },
+  { to: '/patrimonio', label: 'Patrimônio', icon: Landmark },
 ];

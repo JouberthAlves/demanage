@@ -28,7 +28,6 @@ export default [
         'dist',
         'coverage',
         'src/generated',
-        'src/server.ts'
       ],
       plugins: {
         'simple-import-sort': simpleImportSort,
@@ -36,6 +35,7 @@ export default [
       rules: {
         'no-unused-vars': 'off',
         '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+        '@typescript-eslint/no-empty-object-type': 'off',
         'simple-import-sort/imports': [
           'warn',
           {
@@ -48,6 +48,6 @@ export default [
         ],
         'simple-import-sort/exports': 'warn',
       },
-    }
+    },
   ),
 ];

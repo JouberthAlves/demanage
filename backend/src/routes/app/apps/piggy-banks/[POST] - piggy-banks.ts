@@ -1,39 +1,52 @@
 import { Router, Request, Response } from 'express';
 
 import { parseAbnt2Text } from '@/lib/abnt2';
-import { prisma } from '@/lib/prisma';
 import {
   computeMonthlyGoal,
   parseAutoDebitDay,
   parseOptionalTargetDate,
   serializePiggyBank,
 } from '@/lib/piggy';
+import { prisma } from '@/lib/prisma';
 import { parsePositiveAmount } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
 
+function parseCdiPercent(value: unknown) {
+  if (value == null || value === '') return 0;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1000) return null;
+  return Math.round(parsed * 10_000) / 10_000;
+}
+
 router.post('/', requireAuth, async (req: Request, res: Response) => {
   try {
     const userId = req.user?.id;
-    if (!userId) {
-      return res.status(401).json({ error: 'Não autenticado' });
-    }
+    if (!userId) return res.status(401).json({ error: 'Não autenticado' });
 
-    const { name, goalAmount, targetDate, autoDebit, autoDebitDay, isEmergency } =
-      req.body;
-    const trimmedName = parseAbnt2Text(name, { maxLength: 50, required: true }) ?? '';
-
+    const {
+      name,
+      goalAmount,
+      targetDate,
+      autoDebit,
+      autoDebitDay,
+      isEmergency,
+      yieldEnabled,
+    } = req.body;
+    const trimmedName =
+      parseAbnt2Text(name, { maxLength: 50, required: true }) ?? '';
     if (!trimmedName) {
       return res.status(400).json({ error: 'Campos obrigatórios: name' });
     }
 
-    const skipGoal = goalAmount == null || goalAmount === '';
     let parsedGoal: number | null = null;
-    if (!skipGoal) {
+    if (goalAmount != null && goalAmount !== '') {
       parsedGoal = parsePositiveAmount(goalAmount);
       if (parsedGoal == null) {
-        return res.status(400).json({ error: 'Meta final deve ser maior que zero' });
+        return res
+          .status(400)
+          .json({ error: 'Meta final deve ser maior que zero' });
       }
     }
 
@@ -42,10 +55,6 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       parsedTarget = parseOptionalTargetDate(targetDate);
     } catch {
       return res.status(400).json({ error: 'Data de conclusão inválida' });
-    }
-
-    if (parsedGoal == null) {
-      parsedTarget = null;
     }
 
     if (parsedTarget) {
@@ -66,9 +75,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     if (wantsAutoDebit && monthlyGoal <= 0) {
       const parsedMonthly = parsePositiveAmount(req.body?.monthlyGoal);
       if (parsedMonthly == null) {
-        return res.status(400).json({
-          error: 'Informe o valor do débito automático',
-        });
+        return res
+          .status(400)
+          .json({ error: 'Informe o valor do débito automático' });
       }
       monthlyGoal = parsedMonthly;
     }
@@ -84,6 +93,14 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       parsedDebitDay = day;
     }
 
+    const cdiPercent = parseCdiPercent(req.body?.cdiPercent);
+    if (cdiPercent == null) {
+      return res
+        .status(400)
+        .json({ error: '% do CDI deve estar entre 0 e 1000' });
+    }
+    const wantsYield = Boolean(yieldEnabled);
+
     const bank = await prisma.piggyBank.create({
       data: {
         userId,
@@ -94,6 +111,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         autoDebit: wantsAutoDebit,
         autoDebitDay: parsedDebitDay,
         isEmergency: Boolean(isEmergency),
+        yieldEnabled: wantsYield,
+        cdiPercent: wantsYield ? cdiPercent : 0,
       },
       include: { transactions: true },
     });

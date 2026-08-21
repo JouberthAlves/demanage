@@ -4,10 +4,10 @@ const EXPENSE_CATEGORIES = new Set([
   'divida',
   'outro',
   'cofrinho',
+  'investimento',
 ]);
 
 const ENTRY_TYPES = new Set(['salario', 'freelance', 'outro']);
-
 const FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 
 /** Prisma Decimal(12, 2) — máximo absoluto < 10^10. */
@@ -15,13 +15,9 @@ export const MAX_MONEY_AMOUNT = 9_999_999_999.99;
 
 export function parsePositiveAmount(value: unknown): number | null {
   const amount = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(amount) || amount <= 0) {
-    return null;
-  }
+  if (!Number.isFinite(amount) || amount <= 0) return null;
   const rounded = Math.round(amount * 100) / 100;
-  if (rounded > MAX_MONEY_AMOUNT) {
-    return null;
-  }
+  if (rounded > MAX_MONEY_AMOUNT) return null;
   return rounded;
 }
 
