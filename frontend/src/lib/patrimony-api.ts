@@ -49,6 +49,17 @@ export async function createAssetTransaction(
   return data;
 }
 
+export async function updateAssetTransaction(
+  id: string,
+  payload: AssetTransactionPayload,
+) {
+  const { data } = await api.patch<AssetTransaction>(
+    `/assets/transactions/${id}`,
+    payload,
+  );
+  return data;
+}
+
 export async function deleteAssetTransaction(id: string) {
   await api.delete(`/assets/transactions/${id}`);
 }
