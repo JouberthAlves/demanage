@@ -52,11 +52,16 @@ router.get(
     const asset = parseAsset(String(req.params.asset).toUpperCase());
     if (!userId) return res.status(401).json({ error: 'Não autenticado' });
     if (!asset) return res.status(400).json({ error: 'Ativo inválido' });
-    const transactions = await prisma.assetTransaction.findMany({
-      where: { userId, asset },
-      orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-    });
-    return res.json(transactions.map(serializeAssetTransaction));
+    try {
+      const transactions = await prisma.assetTransaction.findMany({
+        where: { userId, asset },
+        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
+      });
+      return res.json(transactions.map(serializeAssetTransaction));
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
   },
 );
 

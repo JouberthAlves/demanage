@@ -275,7 +275,17 @@ export function PatrimonyPage() {
                   <CartesianGrid strokeDasharray='3 3' opacity={0.15} />
                   <XAxis dataKey='date' minTickGap={28} />
                   <YAxis width={76} tickFormatter={(value) => `R$${Number(value).toLocaleString('pt-BR', { notation: 'compact' })}`} />
-                  <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                  <Tooltip
+                    contentStyle={{
+                      background: '#111',
+                      border: '1px solid rgba(255,255,255,0.08)',
+                      borderRadius: 12,
+                      color: '#f5f5f5',
+                    }}
+                    labelStyle={{ color: '#f5f5f5' }}
+                    itemStyle={{ color: '#f5f5f5' }}
+                    formatter={(value) => formatCurrency(Number(value))}
+                  />
                   <Legend />
                   <Line name='Patrimônio' dataKey='patrimonio' type='monotone' dot={false} stroke='#34D399' strokeWidth={2} />
                   <Line name='100% CDI' dataKey='cdi' type='monotone' dot={false} stroke='#60A5FA' strokeWidth={2} />
