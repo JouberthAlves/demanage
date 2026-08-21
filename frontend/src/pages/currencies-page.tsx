@@ -1,24 +1,24 @@
 import { isAxiosError } from 'axios';
 import { ArrowDownToLine, ArrowUpFromLine, RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { toast } from 'sonner';
 
+import { CurrencyHistoryChart } from '@/components/currencies/currency-history-chart';
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
   useAssetHistory,
@@ -291,15 +291,13 @@ export function CurrenciesPage() {
             />
           </div>
           <div className='h-72'>
-            <ResponsiveContainer width='100%' height='100%'>
-              <LineChart data={chartRows ?? []}>
-                <CartesianGrid strokeDasharray='3 3' opacity={0.15} />
-                <XAxis dataKey='date' minTickGap={28} />
-                <YAxis width={72} tickFormatter={(value) => `R$${Number(value).toLocaleString('pt-BR', { notation: 'compact' })}`} />
-                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                <Line dataKey='valor' type='monotone' dot={false} stroke='currentColor' />
-              </LineChart>
-            </ResponsiveContainer>
+            <CurrencyHistoryChart
+              asset={asset}
+              data={chartRows ?? []}
+              isLoading={
+                asset === 'BTC' ? btcHistory.isLoading : usdHistory.isLoading
+              }
+            />
           </div>
         </SectionPanel>
 
@@ -348,16 +346,23 @@ export function CurrenciesPage() {
           </div>
           <div className='space-y-2'>
             <Label htmlFor='asset-type'>Tipo</Label>
-            <select
-              id='asset-type'
+            <Select
               value={type}
-              onChange={(event) => setType(event.target.value as AssetTransactionType)}
-              className='h-9 w-full rounded-lg border border-input bg-background px-3 text-sm'
+              onValueChange={(value) => {
+                if (!value) return;
+                setType(value as AssetTransactionType);
+                if (value !== 'MANUAL_ADJUSTMENT') setCostBasisKnown(false);
+              }}
             >
-              <option value='BUY'>Compra</option>
-              <option value='SELL'>Venda</option>
-              <option value='MANUAL_ADJUSTMENT'>Ajuste manual</option>
-            </select>
+              <SelectTrigger id='asset-type' className='rounded-lg'>
+                <SelectValue placeholder='Tipo' />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value='BUY'>Compra</SelectItem>
+                <SelectItem value='SELL'>Venda</SelectItem>
+                <SelectItem value='MANUAL_ADJUSTMENT'>Ajuste manual</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className='space-y-2'>
             <Label htmlFor='asset-quantity'>Quantidade {asset === 'BTC' ? '(BTC, até 8 casas)' : '(USD)'}</Label>
@@ -384,9 +389,22 @@ export function CurrenciesPage() {
             <Input id='asset-note' value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} />
           </div>
           {type === 'MANUAL_ADJUSTMENT' ? (
-            <label className='flex items-center gap-2 text-sm lg:col-span-2'>
-              <input type='checkbox' checked={costBasisKnown} onChange={(event) => setCostBasisKnown(event.target.checked)} />
-              Informei também o custo real deste saldo manual
+            <label
+              htmlFor='asset-cost-basis'
+              className='flex cursor-pointer items-start gap-2 text-sm lg:col-span-2'
+            >
+              <Checkbox
+                id='asset-cost-basis'
+                checked={costBasisKnown}
+                onCheckedChange={(checked) => setCostBasisKnown(checked === true)}
+                className='mt-0.5'
+              />
+              <span className='flex flex-col gap-1'>
+                <span>Informei também o custo real deste saldo manual</span>
+                <span className='text-xs text-muted-foreground'>
+                  Marque se o valor em BRL é o custo conhecido deste ajuste.
+                </span>
+              </span>
             </label>
           ) : null}
           <div className='lg:col-span-2'>

@@ -29,7 +29,7 @@ export class MarketDataError extends Error {
 }
 
 const PROVIDERS = {
-  BTC: 'coingecko',
+  BTC: 'coinbase',
   USD: 'awesomeapi',
   CDI: 'bcb_sgs_12',
   IPCA: 'ibge_sidra_1737_2266',
@@ -65,6 +65,15 @@ function ddmmyyyy(date: Date) {
   return `${day}/${month}/${year}`;
 }
 
+function tlsCauseCode(error: unknown): string {
+  const cause =
+    error instanceof Error && 'cause' in error ? error.cause : error;
+  if (cause && typeof cause === 'object' && 'code' in cause) {
+    return String(cause.code);
+  }
+  return '';
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10_000);
@@ -76,7 +85,81 @@ async function fetchJson<T>(url: string): Promise<T> {
     if (!response.ok) {
       throw new MarketDataError(`Provider respondeu ${response.status}`);
     }
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('text/html')) {
+      throw new MarketDataError('Provider bloqueado pela rede');
+    }
     return (await response.json()) as T;
+  } catch (error) {
+    if (error instanceof MarketDataError) throw error;
+    const code = tlsCauseCode(error);
+    if (
+      code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+      code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
+    ) {
+      throw new MarketDataError(
+        'A rede corporativa interceptou o HTTPS deste provider',
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+type BcbRow = { data?: string; valor?: string };
+
+function parseBcbRows(rows: BcbRow[]): MarketPoint[] {
+  const points: MarketPoint[] = [];
+  for (const row of rows) {
+    if (!row.data || row.valor == null) continue;
+    const [day, month, year] = row.data.split('/');
+    const value = Number(row.valor.replace(',', '.'));
+    if (!Number.isFinite(value) || value < 0) continue;
+    points.push({
+      date: `${year}-${month}-${day}`,
+      value: decimal(value).toString(),
+    });
+  }
+  return points;
+}
+
+async function fetchBcbRows(url: string): Promise<BcbRow[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'user-agent': 'deManage/1.0' },
+    });
+    if (response.status === 404) return [];
+    if (!response.ok) {
+      throw new MarketDataError(`Provider respondeu ${response.status}`);
+    }
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('text/html')) {
+      throw new MarketDataError('Provider bloqueado pela rede');
+    }
+    const body = (await response.json()) as
+      | BcbRow[]
+      | { erro?: { statusCode?: number } };
+    if (!Array.isArray(body)) {
+      if (body.erro?.statusCode === 404) return [];
+      throw new MarketDataError('Resposta CDI inválida');
+    }
+    return body;
+  } catch (error) {
+    if (error instanceof MarketDataError) throw error;
+    const code = tlsCauseCode(error);
+    if (
+      code === 'SELF_SIGNED_CERT_IN_CHAIN' ||
+      code === 'UNABLE_TO_VERIFY_LEAF_SIGNATURE'
+    ) {
+      throw new MarketDataError(
+        'A rede corporativa interceptou o HTTPS deste provider',
+      );
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }
@@ -141,17 +224,31 @@ async function latestCached(provider: string, key: string) {
   });
 }
 
+async function fetchBtcBrlQuote(): Promise<string> {
+  try {
+    const data = await fetchJson<{ data?: { amount?: string } }>(
+      'https://api.coinbase.com/v2/prices/BTC-BRL/spot',
+    );
+    const value = Number(data.data?.amount);
+    if (Number.isFinite(value) && value > 0) return decimal(value).toString();
+  } catch {
+    // Coinbase às vezes cai; Mercado Bitcoin é o fallback em BRL.
+  }
+
+  const data = await fetchJson<{ ticker?: { last?: string } }>(
+    'https://www.mercadobitcoin.net/api/BTC/ticker/',
+  );
+  const value = Number(data.ticker?.last);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new MarketDataError('Cotação BTC inválida');
+  }
+  return decimal(value).toString();
+}
+
 export async function getAssetQuote(asset: Asset): Promise<MarketQuote> {
   if (asset === 'BTC') {
     try {
-      const data = await fetchJson<{ bitcoin?: { brl?: number } }>(
-        'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=brl',
-      );
-      const value = data.bitcoin?.brl;
-      if (!Number.isFinite(value) || !value || value <= 0) {
-        throw new MarketDataError('Cotação BTC inválida');
-      }
-      const parsed = decimal(value).toString();
+      const parsed = await fetchBtcBrlQuote();
       const asOf = await cacheQuote(PROVIDERS.BTC, 'BTC_BRL_QUOTE', parsed);
       return {
         provider: PROVIDERS.BTC,
@@ -210,35 +307,64 @@ export async function getAssetHistory(
   return asset === 'BTC' ? getBtcHistory(from, to) : getUsdHistory(from, to);
 }
 
+type YahooChart = {
+  chart?: {
+    result?: Array<{
+      timestamp?: number[];
+      indicators?: { quote?: Array<{ close?: Array<number | null> }> };
+    }>;
+  };
+};
+
+function usdOnOrBefore(
+  usdByDay: Map<string, ReturnType<typeof decimal>>,
+  day: string,
+) {
+  const exact = usdByDay.get(day);
+  if (exact) return exact;
+  let found: ReturnType<typeof decimal> | undefined;
+  for (const key of usdByDay.keys()) {
+    if (key > day) break;
+    found = usdByDay.get(key);
+  }
+  return found;
+}
+
 async function getBtcHistory(from: Date, to: Date): Promise<MarketSeries> {
   const provider = PROVIDERS.BTC;
   const key = 'BTC_BRL_DAILY';
   try {
-    const url = new URL(
-      'https://api.coingecko.com/api/v3/coins/bitcoin/market_chart/range',
+    const period1 = Math.floor(from.getTime() / 1000);
+    const period2 = Math.floor(addDays(to, 1).getTime() / 1000);
+    const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/BTC-USD?period1=${period1}&period2=${period2}&interval=1d`;
+    const [usdSeries, yahoo] = await Promise.all([
+      getUsdHistory(from, to),
+      fetchJson<YahooChart>(yahooUrl),
+    ]);
+    const usdByDay = new Map(
+      [...usdSeries.points]
+        .sort((left, right) => left.date.localeCompare(right.date))
+        .map((point) => [point.date, decimal(point.value)]),
     );
-    url.searchParams.set('vs_currency', 'brl');
-    url.searchParams.set('from', String(Math.floor(from.getTime() / 1000)));
-    url.searchParams.set(
-      'to',
-      String(Math.floor(addDays(to, 1).getTime() / 1000)),
-    );
-    const data = await fetchJson<{ prices?: Array<[number, number]> }>(
-      url.toString(),
-    );
+    const result = yahoo.chart?.result?.[0];
+    const timestamps = result?.timestamp ?? [];
+    const closes = result?.indicators?.quote?.[0]?.close ?? [];
     const byDay = new Map<string, string>();
-    for (const [timestamp, price] of data.prices ?? []) {
-      if (!Number.isFinite(price) || price <= 0) continue;
-      const keyDay = dateKey(new Date(timestamp));
-      if (keyDay < dateKey(from) || keyDay > dateKey(to)) continue;
-      byDay.set(keyDay, decimal(price).toString());
+    for (let index = 0; index < timestamps.length; index += 1) {
+      const close = Number(closes[index]);
+      if (!Number.isFinite(close) || close <= 0) continue;
+      const day = dateKey(new Date(timestamps[index] * 1000));
+      if (day < dateKey(from) || day > dateKey(to)) continue;
+      const usd = usdOnOrBefore(usdByDay, day);
+      if (!usd) continue;
+      byDay.set(day, decimal(close).mul(usd).toFixed(2));
     }
     const points = [...byDay.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([date, value]) => ({ date, value }));
     if (points.length === 0) throw new MarketDataError('Sem histórico BTC');
     await storePoints(provider, key, points);
-    return { provider, stale: false, points };
+    return { provider, stale: usdSeries.stale, points };
   } catch (error) {
     const points = await cachedRange(provider, key, from, to);
     if (points.length === 0) throw error;
@@ -297,7 +423,8 @@ export async function getCdiHistory(
 
   try {
     const points: MarketPoint[] = [];
-    let cursor = from;
+    const requestFrom = addDays(from, -14);
+    let cursor = requestFrom;
     while (cursor <= to) {
       const chunkEnd = new Date(
         Math.min(
@@ -312,21 +439,18 @@ export async function getCdiHistory(
           ).getTime(),
         ),
       );
-      const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=${encodeURIComponent(ddmmyyyy(cursor))}&dataFinal=${encodeURIComponent(ddmmyyyy(chunkEnd))}`;
-      const rows = await fetchJson<Array<{ data?: string; valor?: string }>>(url);
-      for (const row of rows) {
-        if (!row.data || row.valor == null) continue;
-        const [day, month, year] = row.data.split('/');
-        const value = Number(row.valor.replace(',', '.'));
-        if (!Number.isFinite(value) || value < 0) continue;
-        points.push({
-          date: `${year}-${month}-${day}`,
-          value: decimal(value).toString(),
-        });
-      }
+      const url = `https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados?formato=json&dataInicial=${ddmmyyyy(cursor)}&dataFinal=${ddmmyyyy(chunkEnd)}`;
+      const rows = await fetchBcbRows(url);
+      points.push(...parseBcbRows(rows));
       cursor = addDays(chunkEnd, 1);
     }
-    const deduped = dedupePoints(points);
+    let deduped = dedupePoints(points);
+    if (deduped.length === 0) {
+      const latest = await fetchBcbRows(
+        'https://api.bcb.gov.br/dados/serie/bcdata.sgs.12/dados/ultimos/30?formato=json',
+      );
+      deduped = dedupePoints(parseBcbRows(latest));
+    }
     if (deduped.length === 0) throw new MarketDataError('Sem histórico CDI');
     await storePoints(provider, key, deduped);
     return { provider, stale: false, points: deduped };
