@@ -13,6 +13,7 @@ import {
   getPatrimonySettings,
   savePatrimonySettings,
   type AssetTransactionPayload,
+  updateAssetTransaction,
 } from '@/lib/patrimony-api';
 import type { Asset, PatrimonySettings } from '@/types/patrimony';
 
@@ -56,6 +57,20 @@ export function useCreateAssetTransaction() {
       asset: Asset;
       payload: AssetTransactionPayload;
     }) => createAssetTransaction(asset, payload),
+    onSuccess: () => invalidateAssetRelated(queryClient),
+  });
+}
+
+export function useUpdateAssetTransaction() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      payload,
+    }: {
+      id: string;
+      payload: AssetTransactionPayload;
+    }) => updateAssetTransaction(id, payload),
     onSuccess: () => invalidateAssetRelated(queryClient),
   });
 }
