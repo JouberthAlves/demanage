@@ -8,6 +8,7 @@ import {
   deleteAssetTransaction,
   parseAsset,
   serializeAssetTransaction,
+  updateAssetTransaction,
 } from '@/lib/assets';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -101,6 +102,52 @@ router.post(
         note,
       });
       return res.status(201).json(serializeAssetTransaction(transaction));
+    } catch (err) {
+      if (err instanceof AssetValidationError) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error(err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+);
+
+router.patch(
+  '/transactions/:id',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Não autenticado' });
+      const type = req.body?.type;
+      if (
+        type !== 'BUY' &&
+        type !== 'SELL' &&
+        type !== 'MANUAL_ADJUSTMENT'
+      ) {
+        return res
+          .status(400)
+          .json({ error: 'Tipo de movimentação inválido' });
+      }
+      const note =
+        typeof req.body?.note === 'string'
+          ? parseAbnt2Text(req.body.note, { maxLength: 500 }) || null
+          : null;
+      const transaction = await updateAssetTransaction(
+        userId,
+        String(req.params.id),
+        {
+          type,
+          quantity: req.body?.quantity,
+          cashAmountBrl: req.body?.cashAmountBrl,
+          feeAmountBrl: req.body?.feeAmountBrl,
+          feePercent: req.body?.feePercent,
+          costBasisKnown: req.body?.costBasisKnown,
+          date: req.body?.date,
+          note,
+        },
+      );
+      return res.json(serializeAssetTransaction(transaction));
     } catch (err) {
       if (err instanceof AssetValidationError) {
         return res.status(400).json({ error: err.message });

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 
+import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { processPiggyAutoDebits } from '@/lib/piggy';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -15,8 +16,13 @@ router.post(
         return res.status(401).json({ error: 'Não autenticado' });
       }
 
-      const result = await processPiggyAutoDebits(userId);
-      return res.json(result);
+      const interest = await catchUpPiggyInterest(userId);
+      const autoDebit = await processPiggyAutoDebits(userId);
+      return res.json({
+        createdCount: autoDebit.createdCount,
+        interestCreatedCount: interest.createdCount,
+        interestStale: interest.stale,
+      });
     } catch (err) {
       console.error(err);
       return res.status(500).json({ error: 'Internal server error' });
