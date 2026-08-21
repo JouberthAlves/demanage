@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 
-import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { prisma } from '@/lib/prisma';
 import {
   serializePiggyBank,
@@ -15,7 +14,6 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     const userId = req.user?.id;
     if (!userId) return res.status(401).json({ error: 'Não autenticado' });
 
-    await catchUpPiggyInterest(userId);
     const includeArchived = req.query.includeArchived === 'true';
     const banks = await prisma.piggyBank.findMany({
       where: {
@@ -41,7 +39,6 @@ router.get(
       const id = String(req.params.id);
       if (!userId) return res.status(401).json({ error: 'Não autenticado' });
 
-      await catchUpPiggyInterest(userId);
       const bank = await prisma.piggyBank.findFirst({
         where: { id, userId },
       });
