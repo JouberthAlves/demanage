@@ -62,9 +62,17 @@ export function LoginPage() {
       toast.success('Login realizado');
       navigate('/', { replace: true });
     } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível entrar')
-        : 'Não foi possível entrar';
+      const timedOut =
+        isAxiosError(err) &&
+        (err.code === 'ECONNABORTED' ||
+          err.code === 'ERR_NETWORK' ||
+          err.response?.status === 504 ||
+          err.response?.status === 502);
+      const message = timedOut
+        ? 'A API não respondeu. Tenta de novo em alguns segundos.'
+        : isAxiosError(err)
+          ? (err.response?.data?.error ?? 'Não foi possível entrar')
+          : 'Não foi possível entrar';
       setError(message);
       toast.error(message);
     } finally {
