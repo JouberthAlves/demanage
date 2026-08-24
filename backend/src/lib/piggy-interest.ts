@@ -28,6 +28,17 @@ export function calculateCdiInterest(
   );
 }
 
+export function lastCompletedWeekday(now = new Date()) {
+  const target = dateOnlyUtc(now);
+  target.setUTCDate(target.getUTCDate() - 1);
+
+  while (target.getUTCDay() === 0 || target.getUTCDay() === 6) {
+    target.setUTCDate(target.getUTCDate() - 1);
+  }
+
+  return target;
+}
+
 function isPrismaUniqueConflict(error: unknown) {
   return (
     typeof error === 'object' &&
@@ -61,17 +72,17 @@ async function accruePiggyInterest(userId: string) {
 
   let createdCount = 0;
   let stale = false;
-  const today = dateOnlyUtc(new Date());
+  const target = lastCompletedWeekday();
 
   for (const bank of banks) {
     const start = bank.interestAccruedThrough
       ? new Date(bank.interestAccruedThrough.getTime() + 86_400_000)
       : dateOnlyUtc(bank.createdAt);
-    if (start > today) continue;
+    if (start > target) continue;
 
     let series: Awaited<ReturnType<typeof getCdiHistory>>;
     try {
-      series = await getCdiHistory(dateKey(start), dateKey(today));
+      series = await getCdiHistory(dateKey(start), dateKey(target));
       stale ||= series.stale;
     } catch {
       stale = true;
@@ -83,7 +94,7 @@ async function accruePiggyInterest(userId: string) {
 
     for (const point of series.points) {
       const day = dateOnlyUtc(point.date);
-      if (day < start || day > today) continue;
+      if (day < start || day > target) continue;
       const interestKey = `${bank.id}:${point.date}`;
       if (transactions.some((tx) => tx.interestKey === interestKey)) {
         lastProcessed = day;

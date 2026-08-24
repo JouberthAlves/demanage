@@ -1,24 +1,24 @@
 import { isAxiosError } from 'axios';
 import { ArrowDownToLine, ArrowUpFromLine, RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { toast } from 'sonner';
 
-import { CurrencyHistoryChart } from '@/components/currencies/currency-history-chart';
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
   useAssetHistory,
@@ -26,15 +26,20 @@ import {
   useAssetsSummary,
   useCreateAssetTransaction,
   useDeleteAssetTransaction,
+  useUpdateAssetTransaction,
 } from '@/hooks/use-patrimony';
 import { formatCurrency } from '@/lib/format';
 import type {
   Asset,
   AssetPosition,
+  AssetTransaction,
   AssetTransactionType,
 } from '@/types/patrimony';
 
 const DAY_MS = 86_400_000;
+const SATS_PER_BTC = 100_000_000;
+
+type BtcQuantityUnit = 'BTC' | 'SATS';
 
 function dateInput(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -44,11 +49,35 @@ function daysAgo(days: number) {
   return dateInput(new Date(Date.now() - days * DAY_MS));
 }
 
+function normalizeBtcQuantity(raw: string, unit: BtcQuantityUnit) {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  if (unit === 'BTC') {
+    return trimmed.includes(',')
+      ? trimmed.replace(/\./g, '').replace(',', '.')
+      : trimmed;
+  }
+
+  const negative = trimmed.startsWith('-');
+  const digits = trimmed.replace(/^-/, '').replace(/[.,\s]/g, '');
+  if (!/^\d+$/.test(digits)) return null;
+
+  const sats = Number(digits);
+  if (!Number.isSafeInteger(sats) || sats === 0) return null;
+
+  const btc = (sats / SATS_PER_BTC)
+    .toFixed(8)
+    .replace(/0+$/, '')
+    .replace(/\.$/, '');
+  return negative ? `-${btc}` : btc;
+}
+
 function formatQuantity(asset: Asset, raw: string) {
   const value = Number(raw);
   if (!Number.isFinite(value)) return '0';
   if (asset === 'BTC' && Math.abs(value) < 0.001) {
-    return `${Math.round(value * 100_000_000).toLocaleString('pt-BR')} sats`;
+    return `${Math.round(value * SATS_PER_BTC).toLocaleString('pt-BR')} sats`;
   }
   return `${value.toLocaleString('pt-BR', {
     maximumFractionDigits: asset === 'BTC' ? 8 : 4,
@@ -134,16 +163,19 @@ export function CurrenciesPage() {
   const [asset, setAsset] = useState<Asset>('BTC');
   const [type, setType] = useState<AssetTransactionType>('BUY');
   const [quantity, setQuantity] = useState('');
+  const [btcQuantityUnit, setBtcQuantityUnit] = useState<BtcQuantityUnit>('BTC');
   const [cash, setCash] = useState('');
   const [fee, setFee] = useState('');
   const [feePercent, setFeePercent] = useState('');
   const [date, setDate] = useState(dateInput(new Date()));
   const [note, setNote] = useState('');
   const [costBasisKnown, setCostBasisKnown] = useState(false);
+  const [editingTransactionId, setEditingTransactionId] = useState<string | null>(null);
   const [calcBrl, setCalcBrl] = useState('');
   const [from, setFrom] = useState(daysAgo(30));
   const [to, setTo] = useState(dateInput(new Date()));
   const createTransaction = useCreateAssetTransaction();
+  const updateTransaction = useUpdateAssetTransaction();
   const deleteTransaction = useDeleteAssetTransaction();
   const btcHistory = useAssetHistory('BTC', from, to);
   const usdHistory = useAssetHistory('USD', from, to);
@@ -177,37 +209,122 @@ export function CurrenciesPage() {
     setTo(dateInput(new Date()));
   }
 
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!quantity || (type !== 'MANUAL_ADJUSTMENT' && !cash)) {
-      toast.error('Informe quantidade e valor da operação');
+  function resetTransactionForm() {
+    setEditingTransactionId(null);
+    setType('BUY');
+    setQuantity('');
+    setBtcQuantityUnit('BTC');
+    setCash('');
+    setFee('');
+    setFeePercent('');
+    setDate(dateInput(new Date()));
+    setNote('');
+    setCostBasisKnown(false);
+  }
+
+  function chooseAsset(nextAsset: Asset) {
+    if (editingTransactionId) resetTransactionForm();
+    setAsset(nextAsset);
+  }
+
+  function switchBtcUnit(nextUnit: BtcQuantityUnit) {
+    if (nextUnit === btcQuantityUnit) return;
+    const normalized = normalizeBtcQuantity(quantity, btcQuantityUnit);
+    setBtcQuantityUnit(nextUnit);
+    if (!normalized) {
+      setQuantity('');
       return;
     }
+    if (nextUnit === 'BTC') {
+      setQuantity(normalized);
+      return;
+    }
+    const sats = Number(normalized) * SATS_PER_BTC;
+    setQuantity(Number.isSafeInteger(sats) ? String(Math.round(sats)) : '');
+  }
+
+  function startEditing(transaction: AssetTransaction) {
+    setAsset(transaction.asset);
+    setEditingTransactionId(transaction.id);
+    setType(transaction.type);
+    const quantityValue = Number(transaction.quantity);
+    if (
+      transaction.asset === 'BTC' &&
+      Number.isFinite(quantityValue) &&
+      Math.abs(quantityValue) < 0.001
+    ) {
+      setBtcQuantityUnit('SATS');
+      setQuantity(String(Math.round(quantityValue * SATS_PER_BTC)));
+    } else {
+      setBtcQuantityUnit('BTC');
+      setQuantity(transaction.quantity);
+    }
+    setCash(transaction.cashAmountBrl);
+    setFee(transaction.feeAmountBrl === '0' ? '' : transaction.feeAmountBrl);
+    setFeePercent(transaction.feePercent ?? '');
+    setDate(transaction.date.slice(0, 10));
+    setNote(transaction.note ?? '');
+    setCostBasisKnown(transaction.costBasisKnown);
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById('asset-transaction-form')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  }
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    const normalizedQuantity =
+      asset === 'BTC'
+        ? normalizeBtcQuantity(quantity, btcQuantityUnit)
+        : quantity.trim();
+
+    if (!normalizedQuantity) {
+      toast.error(
+        asset === 'BTC' && btcQuantityUnit === 'SATS'
+          ? 'Informe uma quantidade válida de sats'
+          : 'Informe uma quantidade válida',
+      );
+      return;
+    }
+    if (type !== 'MANUAL_ADJUSTMENT' && !cash) {
+      toast.error('Informe o valor da operação em BRL');
+      return;
+    }
+
+    const payload = {
+      type,
+      quantity: normalizedQuantity,
+      cashAmountBrl: cash || '0',
+      feeAmountBrl: fee || undefined,
+      feePercent: feePercent || undefined,
+      costBasisKnown,
+      date,
+      note: note.trim() || null,
+    };
+    const isEditing = Boolean(editingTransactionId);
+
     try {
-      await createTransaction.mutateAsync({
-        asset,
-        payload: {
-          type,
-          quantity,
-          cashAmountBrl: cash || '0',
-          feeAmountBrl: fee || undefined,
-          feePercent: feePercent || undefined,
-          costBasisKnown,
-          date,
-          note: note.trim() || null,
-        },
-      });
-      setQuantity('');
-      setCash('');
-      setFee('');
-      setFeePercent('');
-      setNote('');
-      toast.success('Movimentação registrada');
+      if (editingTransactionId) {
+        await updateTransaction.mutateAsync({
+          id: editingTransactionId,
+          payload,
+        });
+      } else {
+        await createTransaction.mutateAsync({ asset, payload });
+      }
+      resetTransactionForm();
+      toast.success(isEditing ? 'Movimentação atualizada' : 'Movimentação registrada');
     } catch (error) {
       toast.error(
         isAxiosError(error)
-          ? (error.response?.data?.error ?? 'Não foi possível registrar')
-          : 'Não foi possível registrar',
+          ? (error.response?.data?.error ??
+              (isEditing
+                ? 'Não foi possível atualizar'
+                : 'Não foi possível registrar'))
+          : isEditing
+            ? 'Não foi possível atualizar'
+            : 'Não foi possível registrar',
       );
     }
   }
@@ -217,6 +334,8 @@ export function CurrenciesPage() {
   );
   const transactions =
     asset === 'BTC' ? btcTransactions.data ?? [] : usdTransactions.data ?? [];
+  const transactionMutationPending =
+    createTransaction.isPending || updateTransaction.isPending;
 
   return (
     <div className='space-y-6'>
@@ -291,13 +410,29 @@ export function CurrenciesPage() {
             />
           </div>
           <div className='h-72'>
-            <CurrencyHistoryChart
-              asset={asset}
-              data={chartRows ?? []}
-              isLoading={
-                asset === 'BTC' ? btcHistory.isLoading : usdHistory.isLoading
-              }
-            />
+            <ResponsiveContainer width='100%' height='100%'>
+              <LineChart data={chartRows ?? []}>
+                <CartesianGrid strokeDasharray='3 3' opacity={0.15} />
+                <XAxis dataKey='date' minTickGap={28} />
+                <YAxis
+                  width={72}
+                  domain={['dataMin', 'dataMax']}
+                  tickFormatter={(value) =>
+                    `R$${Number(value).toLocaleString('pt-BR', {
+                      notation: 'compact',
+                    })}`
+                  }
+                />
+                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
+                <Line
+                  dataKey='valor'
+                  type='monotone'
+                  dot={false}
+                  activeDot={false}
+                  stroke='currentColor'
+                />
+              </LineChart>
+            </ResponsiveContainer>
           </div>
         </SectionPanel>
 
@@ -308,7 +443,7 @@ export function CurrenciesPage() {
                 <Button
                   key={item}
                   variant={asset === item ? 'default' : 'outline'}
-                  onClick={() => setAsset(item)}
+                  onClick={() => chooseAsset(item)}
                 >
                   {item}
                 </Button>
@@ -332,89 +467,140 @@ export function CurrenciesPage() {
         </SectionPanel>
       </div>
 
-      <SectionPanel title='Registrar movimentação' description='O valor em BRL é sempre o total efetivamente debitado ou recebido. Taxas são informativas e não são somadas duas vezes.'>
-        <form onSubmit={(event) => void submit(event)} className='grid gap-4 lg:grid-cols-2'>
-          <div className='space-y-2'>
-            <Label>Ativo</Label>
-            <div className='flex gap-2'>
-              {(['BTC', 'USD'] as const).map((item) => (
-                <Button key={item} type='button' variant={asset === item ? 'default' : 'outline'} onClick={() => setAsset(item)}>
-                  {item}
-                </Button>
-              ))}
+      <div id='asset-transaction-form'>
+        <SectionPanel
+          title={editingTransactionId ? 'Editar movimentação' : 'Registrar movimentação'}
+          description='O valor em BRL é sempre o total efetivamente debitado ou recebido. Taxas são informativas e não são somadas duas vezes.'
+        >
+          <form onSubmit={(event) => void submit(event)} className='grid gap-4 lg:grid-cols-2'>
+            <div className='space-y-2'>
+              <Label>Ativo</Label>
+              <div className='flex gap-2'>
+                {(['BTC', 'USD'] as const).map((item) => (
+                  <Button
+                    key={item}
+                    type='button'
+                    variant={asset === item ? 'default' : 'outline'}
+                    onClick={() => chooseAsset(item)}
+                  >
+                    {item}
+                  </Button>
+                ))}
+              </div>
             </div>
-          </div>
-          <div className='space-y-2'>
-            <Label htmlFor='asset-type'>Tipo</Label>
-            <Select
-              value={type}
-              onValueChange={(value) => {
-                if (!value) return;
-                setType(value as AssetTransactionType);
-                if (value !== 'MANUAL_ADJUSTMENT') setCostBasisKnown(false);
-              }}
-            >
-              <SelectTrigger id='asset-type' className='rounded-lg'>
-                <SelectValue placeholder='Tipo' />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value='BUY'>Compra</SelectItem>
-                <SelectItem value='SELL'>Venda</SelectItem>
-                <SelectItem value='MANUAL_ADJUSTMENT'>Ajuste manual</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className='space-y-2'>
-            <Label htmlFor='asset-quantity'>Quantidade {asset === 'BTC' ? '(BTC, até 8 casas)' : '(USD)'}</Label>
-            <Input id='asset-quantity' value={quantity} onChange={(event) => setQuantity(event.target.value.replace(',', '.'))} placeholder={asset === 'BTC' ? '0.00010000' : '100.00'} />
-          </div>
-          <div className='space-y-2'>
-            <Label htmlFor='asset-cash'>Total efetivo em BRL</Label>
-            <Input id='asset-cash' value={cash} onChange={(event) => setCash(event.target.value.replace(',', '.'))} placeholder='500,00' />
-          </div>
-          <div className='space-y-2'>
-            <Label htmlFor='asset-fee'>Taxa em BRL</Label>
-            <Input id='asset-fee' value={fee} onChange={(event) => setFee(event.target.value.replace(',', '.'))} placeholder='0,00' />
-          </div>
-          <div className='space-y-2'>
-            <Label htmlFor='asset-fee-percent'>Taxa em %</Label>
-            <Input id='asset-fee-percent' value={feePercent} onChange={(event) => setFeePercent(event.target.value.replace(',', '.'))} placeholder='0.20' />
-          </div>
-          <div className='space-y-2'>
-            <Label htmlFor='asset-date'>Data</Label>
-            <Input id='asset-date' type='date' value={date} max={dateInput(new Date())} onChange={(event) => setDate(event.target.value)} />
-          </div>
-          <div className='space-y-2'>
-            <Label htmlFor='asset-note'>Observação</Label>
-            <Input id='asset-note' value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} />
-          </div>
-          {type === 'MANUAL_ADJUSTMENT' ? (
-            <label
-              htmlFor='asset-cost-basis'
-              className='flex cursor-pointer items-start gap-2 text-sm lg:col-span-2'
-            >
-              <Checkbox
-                id='asset-cost-basis'
-                checked={costBasisKnown}
-                onCheckedChange={(checked) => setCostBasisKnown(checked === true)}
-                className='mt-0.5'
+            <div className='space-y-2'>
+              <Label htmlFor='asset-type'>Tipo</Label>
+              <select
+                id='asset-type'
+                value={type}
+                onChange={(event) => setType(event.target.value as AssetTransactionType)}
+                className='h-9 w-full rounded-lg border border-input bg-background px-3 text-sm'
+              >
+                <option value='BUY'>Compra</option>
+                <option value='SELL'>Venda</option>
+                <option value='MANUAL_ADJUSTMENT'>Ajuste manual</option>
+              </select>
+            </div>
+            <div className='space-y-2'>
+              <div className='flex flex-wrap items-center justify-between gap-2'>
+                <Label htmlFor='asset-quantity'>
+                  Quantidade{' '}
+                  {asset === 'BTC'
+                    ? btcQuantityUnit === 'SATS'
+                      ? '(sats, inteiro)'
+                      : '(BTC, até 8 casas)'
+                    : '(USD)'}
+                </Label>
+                {asset === 'BTC' ? (
+                  <div className='flex gap-1'>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant={btcQuantityUnit === 'BTC' ? 'default' : 'outline'}
+                      onClick={() => switchBtcUnit('BTC')}
+                    >
+                      BTC
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
+                      variant={btcQuantityUnit === 'SATS' ? 'default' : 'outline'}
+                      onClick={() => switchBtcUnit('SATS')}
+                    >
+                      sats
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+              <Input
+                id='asset-quantity'
+                inputMode={asset === 'BTC' && btcQuantityUnit === 'SATS' ? 'numeric' : 'decimal'}
+                value={quantity}
+                onChange={(event) =>
+                  setQuantity(
+                    asset === 'BTC'
+                      ? event.target.value
+                      : event.target.value.replace(',', '.'),
+                  )
+                }
+                placeholder={
+                  asset === 'BTC'
+                    ? btcQuantityUnit === 'SATS'
+                      ? '1.000.411'
+                      : '0,01000411'
+                    : '100.00'
+                }
               />
-              <span className='flex flex-col gap-1'>
-                <span>Informei também o custo real deste saldo manual</span>
-                <span className='text-xs text-muted-foreground'>
-                  Marque se o valor em BRL é o custo conhecido deste ajuste.
-                </span>
-              </span>
-            </label>
-          ) : null}
-          <div className='lg:col-span-2'>
-            <Button type='submit' disabled={createTransaction.isPending}>
-              {type === 'BUY' ? <ArrowDownToLine data-icon='inline-start' /> : type === 'SELL' ? <ArrowUpFromLine data-icon='inline-start' /> : <RefreshCw data-icon='inline-start' />}
-              {createTransaction.isPending ? 'Salvando…' : 'Registrar'}
-            </Button>
-          </div>
-        </form>
-      </SectionPanel>
+              {asset === 'BTC' && btcQuantityUnit === 'SATS' ? (
+                <p className='text-xs text-muted-foreground'>
+                  1 sat = 0,00000001 BTC. Ex.: 1.000.411 sats = 0,01000411 BTC.
+                </p>
+              ) : null}
+            </div>
+            <div className='space-y-2'>
+              <Label htmlFor='asset-cash'>Total efetivo em BRL</Label>
+              <Input id='asset-cash' value={cash} onChange={(event) => setCash(event.target.value.replace(',', '.'))} placeholder='500,00' />
+            </div>
+            <div className='space-y-2'>
+              <Label htmlFor='asset-fee'>Taxa em BRL</Label>
+              <Input id='asset-fee' value={fee} onChange={(event) => setFee(event.target.value.replace(',', '.'))} placeholder='0,00' />
+            </div>
+            <div className='space-y-2'>
+              <Label htmlFor='asset-fee-percent'>Taxa em %</Label>
+              <Input id='asset-fee-percent' value={feePercent} onChange={(event) => setFeePercent(event.target.value.replace(',', '.'))} placeholder='0.20' />
+            </div>
+            <div className='space-y-2'>
+              <Label htmlFor='asset-date'>Data</Label>
+              <Input id='asset-date' type='date' value={date} max={dateInput(new Date())} onChange={(event) => setDate(event.target.value)} />
+            </div>
+            <div className='space-y-2'>
+              <Label htmlFor='asset-note'>Observação</Label>
+              <Input id='asset-note' value={note} onChange={(event) => setNote(event.target.value)} maxLength={500} />
+            </div>
+            {type === 'MANUAL_ADJUSTMENT' ? (
+              <label className='flex items-center gap-2 text-sm lg:col-span-2'>
+                <input type='checkbox' checked={costBasisKnown} onChange={(event) => setCostBasisKnown(event.target.checked)} />
+                Informei também o custo real deste saldo manual
+              </label>
+            ) : null}
+            <div className='flex flex-wrap gap-2 lg:col-span-2'>
+              <Button type='submit' disabled={transactionMutationPending}>
+                {type === 'BUY' ? <ArrowDownToLine data-icon='inline-start' /> : type === 'SELL' ? <ArrowUpFromLine data-icon='inline-start' /> : <RefreshCw data-icon='inline-start' />}
+                {transactionMutationPending
+                  ? 'Salvando…'
+                  : editingTransactionId
+                    ? 'Salvar edição'
+                    : 'Registrar'}
+              </Button>
+              {editingTransactionId ? (
+                <Button type='button' variant='outline' onClick={resetTransactionForm}>
+                  Cancelar edição
+                </Button>
+              ) : null}
+            </div>
+          </form>
+        </SectionPanel>
+      </div>
 
       <SectionPanel title={`Movimentações ${asset}`} description='Compras e vendas ficam vinculadas ao financeiro; ajustes manuais não criam caixa.'>
         {transactions.length === 0 ? (
@@ -432,19 +618,34 @@ export function CurrenciesPage() {
                     {transaction.feeAmountBrl !== '0' ? ` · taxa ${formatCurrency(Number(transaction.feeAmountBrl))}` : ''}
                   </p>
                 </div>
-                <Button
-                  size='sm'
-                  variant='ghost'
-                  disabled={deleteTransaction.isPending}
-                  onClick={() => {
-                    void deleteTransaction.mutateAsync(transaction.id).then(
-                      () => toast.success('Movimentação removida'),
-                      (error) => toast.error(isAxiosError(error) ? (error.response?.data?.error ?? 'Não foi possível excluir') : 'Não foi possível excluir'),
-                    );
-                  }}
-                >
-                  Excluir
-                </Button>
+                <div className='flex flex-wrap gap-2'>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={transactionMutationPending || deleteTransaction.isPending}
+                    onClick={() => startEditing(transaction)}
+                  >
+                    Editar
+                  </Button>
+                  <Button
+                    size='sm'
+                    variant='ghost'
+                    disabled={deleteTransaction.isPending || transactionMutationPending}
+                    onClick={() => {
+                      void deleteTransaction.mutateAsync(transaction.id).then(
+                        () => {
+                          if (editingTransactionId === transaction.id) {
+                            resetTransactionForm();
+                          }
+                          toast.success('Movimentação removida');
+                        },
+                        (error) => toast.error(isAxiosError(error) ? (error.response?.data?.error ?? 'Não foi possível excluir') : 'Não foi possível excluir'),
+                      );
+                    }}
+                  >
+                    Excluir
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
