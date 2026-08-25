@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts';
 
 import {
@@ -54,7 +55,29 @@ function formatAxisValue(value: number) {
     .toLowerCase();
 }
 
+function paddedYDomain(values: number[]): [number, number] {
+  const finite = values.filter((value) => Number.isFinite(value));
+  if (finite.length === 0) {
+    return [0, 1];
+  }
+
+  const min = Math.min(...finite);
+  const max = Math.max(...finite);
+  const span = max - min;
+  const pad = span === 0 ? Math.max(Math.abs(max) * 0.04, 0.01) : span * 0.16;
+
+  return [min - pad * 0.45, max + pad];
+}
+
 export function PatrimonyHistoryChart({ data }: { data: ChartRow[] }) {
+  const yDomain = useMemo(
+    () =>
+      paddedYDomain(
+        data.flatMap((row) => [row.patrimonio, row.cdi, row.ipca]),
+      ),
+    [data],
+  );
+
   if (data.length === 0) {
     return (
       <div className='flex h-[360px] items-center justify-center px-6 text-center'>
@@ -73,7 +96,7 @@ export function PatrimonyHistoryChart({ data }: { data: ChartRow[] }) {
       <LineChart
         accessibilityLayer
         data={data}
-        margin={{ top: 8, right: 8, left: 4, bottom: 0 }}
+        margin={{ top: 16, right: 8, left: 4, bottom: 0 }}
       >
         <CartesianGrid vertical={false} />
         <XAxis
@@ -89,7 +112,8 @@ export function PatrimonyHistoryChart({ data }: { data: ChartRow[] }) {
           tickLine={false}
           axisLine={false}
           tickMargin={4}
-          domain={['dataMin', 'dataMax']}
+          domain={yDomain}
+          padding={{ top: 8, bottom: 4 }}
           tickFormatter={(value) => formatAxisValue(Number(value))}
         />
         <ChartTooltip
@@ -116,7 +140,7 @@ export function PatrimonyHistoryChart({ data }: { data: ChartRow[] }) {
         <Line
           dataKey='patrimonio'
           name='patrimonio'
-          type='natural'
+          type='monotone'
           stroke='var(--color-patrimonio)'
           strokeWidth={2}
           dot={false}
@@ -125,7 +149,7 @@ export function PatrimonyHistoryChart({ data }: { data: ChartRow[] }) {
         <Line
           dataKey='cdi'
           name='cdi'
-          type='natural'
+          type='monotone'
           stroke='var(--color-cdi)'
           strokeWidth={2}
           dot={false}
@@ -134,7 +158,7 @@ export function PatrimonyHistoryChart({ data }: { data: ChartRow[] }) {
         <Line
           dataKey='ipca'
           name='ipca'
-          type='natural'
+          type='monotone'
           stroke='var(--color-ipca)'
           strokeWidth={2}
           dot={false}
