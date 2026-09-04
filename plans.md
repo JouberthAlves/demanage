@@ -117,4 +117,6 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~**Despesa fixa: pagamento antecipado + desconto automático**~~ — “Pagar agora” quita apenas o ciclo mensal atual sem apagar a recorrência; saldo entra imediatamente no pagamento antecipado; status mostra pago antecipadamente/descontado automaticamente; store reavalia o calendário na virada do dia sem exigir refresh manual.
 
+- [x] ~~**Salário: crédito automático + confirmação de atraso**~~ — Salário mensal entra automaticamente no dia configurado; “Já recebi” permite confirmar antes do dia; “Aguardar confirmação”/“Ainda não recebi” segura apenas o ciclo do mês atual fora do saldo até confirmação manual, voltando ao automático no mês seguinte.
+
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)

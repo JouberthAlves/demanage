@@ -5,8 +5,10 @@ import {
   createEntry,
   deleteEntry,
   listEntries,
+  setSalaryReceiptState,
   updateEntry,
   type EntryPayload,
+  type SalaryReceiptState,
 } from '@/lib/entries-api';
 import { useFinanceStore } from '@/stores/finance-store';
 
@@ -51,6 +53,25 @@ export function useUpdateEntry() {
       id: string;
       payload: Partial<EntryPayload>;
     }) => updateEntry(id, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
+    },
+  });
+}
+
+export function useSalaryReceiptState() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      month,
+      state,
+    }: {
+      id: string;
+      month: string;
+      state: SalaryReceiptState;
+    }) => setSalaryReceiptState(id, month, state),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
     },
