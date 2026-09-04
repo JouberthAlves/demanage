@@ -111,6 +111,8 @@ export type Income = {
   startsAt?: string;
   endsAt?: string;
   date?: string;
+  receiptHoldForMonth?: string;
+  receivedForMonth?: string;
   customTagId?: string;
   customTag?: Pick<CustomTag, 'id' | 'name' | 'color'>;
 };
