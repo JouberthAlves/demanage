@@ -119,4 +119,6 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~**Salário: crédito automático + confirmação de atraso**~~ — Salário mensal entra automaticamente no dia configurado; “Já recebi” permite confirmar antes do dia; “Aguardar confirmação”/“Ainda não recebi” segura apenas o ciclo do mês atual fora do saldo até confirmação manual, voltando ao automático no mês seguinte.
 
+- [x] ~~**Patrimônio: saldo em reais sincronizado com o financeiro**~~ — Reconstrução patrimonial respeita pagamento antecipado de despesas e confirmação/atraso do salário, registra a data real dos eventos e invalida o cache patrimonial após alterações em entradas/despesas.
+
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
