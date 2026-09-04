@@ -90,6 +90,7 @@ export type RecurringExpense = {
   startsAt?: string;
   endsAt?: string;
   registeredAt?: string;
+  paidForMonth?: string;
   notes?: string;
   isInvoice?: boolean;
   customTagId?: string;
@@ -110,6 +111,8 @@ export type Income = {
   startsAt?: string;
   endsAt?: string;
   date?: string;
+  receiptHoldForMonth?: string;
+  receivedForMonth?: string;
   customTagId?: string;
   customTag?: Pick<CustomTag, 'id' | 'name' | 'color'>;
 };

@@ -48,23 +48,64 @@ import {
   tagBadgeStyle,
 } from '@/data/labels';
 import { useCustomTags } from '@/hooks/use-custom-tags';
-import { useDeleteExpense, useExpenses } from '@/hooks/use-expenses';
+import {
+  useDeleteExpense,
+  useExpenses,
+  useMarkExpensePaid,
+} from '@/hooks/use-expenses';
 import { getCardTone } from '@/lib/card-tone';
 import {
+  canPayExpenseEarly,
   expenseContributionThisMonth,
-  isExpenseDebitedThisMonth,
+  expenseMonthKey,
+  isExpenseAutoDebitedThisMonth,
+  isExpensePaidThisMonth,
 } from '@/lib/expense-schedule';
-import { formatExpensePaymentLabel } from '@/lib/expense-splits';
+import {
+  expenseCashAmount,
+  formatExpensePaymentLabel,
+} from '@/lib/expense-splits';
 import { formatCurrency } from '@/lib/format';
 import { selectMonthlyExpenses, useFinanceStore } from '@/stores/finance-store';
 import type { RecurringExpense } from '@/types/finance';
+
+function dateFromDayKey(dayKey: string) {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function expensePayState(
+  expense: RecurringExpense,
+  now: Date,
+  pending: boolean,
+) {
+  const isRecurring = expense.frequency !== 'unica' && !expense.isInvoice;
+  if (!isRecurring) return { label: 'Pago', disabled: pending };
+
+  const hasCash = expenseCashAmount(expense) > 0;
+  if (!hasCash) return { label: 'Via fatura', disabled: true };
+  if (isExpensePaidThisMonth(expense, now)) {
+    return { label: 'Pago', disabled: true };
+  }
+  if (isExpenseAutoDebitedThisMonth(expense, now)) {
+    return { label: 'Descontada', disabled: true };
+  }
+  if (canPayExpenseEarly(expense, now)) {
+    return { label: 'Pagar agora', disabled: pending };
+  }
+  return { label: 'Aguardando', disabled: true };
+}
 
 export function ExpensesPage() {
   const { data: expenses = [], isLoading, isError } = useExpenses();
   const { data: customTags = [] } = useCustomTags('expense');
   const cards = useFinanceStore((state) => state.profile.cards);
+  const calendarDayKey = useFinanceStore((state) => state.calendarDayKey);
   const removeExpense = useDeleteExpense();
+  const markExpensePaid = useMarkExpensePaid();
   const total = useFinanceStore(selectMonthlyExpenses);
+  const now = useMemo(() => dateFromDayKey(calendarDayKey), [calendarDayKey]);
+  const mutationPending = removeExpense.isPending || markExpensePaid.isPending;
 
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<string>('all');
@@ -91,10 +132,10 @@ export function ExpensesPage() {
   const filteredTotal = useMemo(
     () =>
       filtered.reduce(
-        (sum, expense) => sum + expenseContributionThisMonth(expense),
+        (sum, expense) => sum + expenseContributionThisMonth(expense, now),
         0,
       ),
-    [filtered],
+    [filtered, now],
   );
 
   function openCreate() {
@@ -107,10 +148,19 @@ export function ExpensesPage() {
     setDialogOpen(true);
   }
 
-  async function handlePay(id: string, name: string) {
+  async function handlePay(expense: RecurringExpense) {
     try {
-      await removeExpense.mutateAsync(id);
-      toast.success(`"${name}" marcada como paga`);
+      if (!expense.isInvoice && expense.frequency === 'mensal') {
+        await markExpensePaid.mutateAsync({
+          id: expense.id,
+          month: expenseMonthKey(now),
+        });
+        toast.success(`"${expense.name}" paga antecipadamente neste mês`);
+        return;
+      }
+
+      await removeExpense.mutateAsync(expense.id);
+      toast.success(`"${expense.name}" marcada como paga`);
     } catch (err) {
       const message = isAxiosError(err)
         ? (err.response?.data?.error ?? 'Não foi possível marcar como paga')
@@ -131,6 +181,11 @@ export function ExpensesPage() {
     }
   }
 
+  const confirmPayIsRecurring =
+    confirmPay != null &&
+    !confirmPay.isInvoice &&
+    confirmPay.frequency === 'mensal';
+
   return (
     <div className='space-y-6'>
       <title>Despesas | deManage</title>
@@ -148,7 +203,7 @@ export function ExpensesPage() {
       <PageHero
         eyebrow='Recorrências'
         title={`${expenses.length} despesa${expenses.length === 1 ? '' : 's'}`}
-        description='O saldo do mês só conta despesas a partir do dia de desconto.'
+        description='O saldo conta o pagamento antecipado na hora ou desconta automaticamente no dia configurado.'
       >
         <div className='grid gap-3 sm:grid-cols-2'>
           <div className='rounded-xl border border-border bg-black/25 p-4'>
@@ -227,15 +282,15 @@ export function ExpensesPage() {
           <>
             <div className='space-y-3 md:hidden'>
               {filtered.map((expense) => (
-                  <ExpenseListCard
-                    key={expense.id}
-                    expense={expense}
-                    cards={cards}
-                    pending={removeExpense.isPending}
-                    onPay={() => setConfirmPay(expense)}
-                    onEdit={() => openEdit(expense)}
-                    onDelete={() => setConfirmDelete(expense)}
-                  />
+                <ExpenseListCard
+                  key={expense.id}
+                  expense={expense}
+                  cards={cards}
+                  pending={mutationPending}
+                  onPay={() => setConfirmPay(expense)}
+                  onEdit={() => openEdit(expense)}
+                  onDelete={() => setConfirmDelete(expense)}
+                />
               ))}
             </div>
 
@@ -263,18 +318,36 @@ export function ExpensesPage() {
                       (item) => item.id === expense.cardId,
                     );
                     const tone = card ? getCardTone(card) : null;
-                    const debited = isExpenseDebitedThisMonth(expense);
+                    const hasCash = expenseCashAmount(expense) > 0;
+                    const paidEarly = isExpensePaidThisMonth(expense, now);
+                    const autoDebited =
+                      hasCash && isExpenseAutoDebitedThisMonth(expense, now);
+                    const isRecurring =
+                      expense.frequency !== 'unica' && !expense.isInvoice;
+                    const payState = expensePayState(
+                      expense,
+                      now,
+                      mutationPending,
+                    );
 
                     return (
                       <TableRow key={expense.id}>
                         <TableCell className='font-medium'>
                           {expense.name}
-                          {expense.frequency !== 'unica' &&
-                          !expense.isInvoice &&
-                          !debited ? (
-                            <span className='mt-0.5 block text-xs text-muted-foreground'>
-                              Aguardando dia {expense.dueDay ?? '—'}
-                            </span>
+                          {isRecurring && hasCash ? (
+                            paidEarly ? (
+                              <span className='mt-0.5 block text-xs text-neon-green'>
+                                Pago antecipadamente
+                              </span>
+                            ) : autoDebited ? (
+                              <span className='mt-0.5 block text-xs text-neon-green'>
+                                Descontada automaticamente
+                              </span>
+                            ) : (
+                              <span className='mt-0.5 block text-xs text-muted-foreground'>
+                                Aguardando dia {expense.dueDay ?? '—'}
+                              </span>
+                            )
                           ) : null}
                         </TableCell>
                         <TableCell>
@@ -346,10 +419,10 @@ export function ExpensesPage() {
                               variant='secondary'
                               size='sm'
                               className='rounded-lg'
-                              disabled={removeExpense.isPending}
+                              disabled={payState.disabled}
                               onClick={() => setConfirmPay(expense)}
                             >
-                              Pago
+                              {payState.label}
                             </Button>
                             {!expense.isInvoice ? (
                               <Button
@@ -363,7 +436,7 @@ export function ExpensesPage() {
                             <Button
                               variant='ghost'
                               size='icon-sm'
-                              disabled={removeExpense.isPending}
+                              disabled={mutationPending}
                               onClick={() => setConfirmDelete(expense)}
                             >
                               <Trash2 className='size-4' />
@@ -402,11 +475,22 @@ export function ExpensesPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Marcar como paga?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {confirmPayIsRecurring ? 'Pagar antecipadamente?' : 'Marcar como paga?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Isso remove a despesa &quot;{confirmPay?.name}&quot; da lista —
-              não apenas marca um ciclo. Para recorrências, use a data de
-              término se quiser encerrar sem apagar o histórico da agenda.
+              {confirmPayIsRecurring ? (
+                <>
+                  Isso marca o ciclo deste mês de &quot;{confirmPay?.name}&quot;
+                  como pago agora. A recorrência continua normalmente nos
+                  próximos meses e o valor entra no saldo imediatamente.
+                </>
+              ) : (
+                <>
+                  Isso marca &quot;{confirmPay?.name}&quot; como paga e remove esse
+                  item concluído da lista.
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -414,11 +498,11 @@ export function ExpensesPage() {
             <AlertDialogAction
               onClick={() => {
                 if (!confirmPay) return;
-                void handlePay(confirmPay.id, confirmPay.name);
+                void handlePay(confirmPay);
                 setConfirmPay(null);
               }}
             >
-              Remover despesa
+              {confirmPayIsRecurring ? 'Pagar agora' : 'Marcar como paga'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

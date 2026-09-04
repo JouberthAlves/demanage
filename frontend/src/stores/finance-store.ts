@@ -16,7 +16,11 @@ type FinanceActions = {
   clearAll: () => void;
 };
 
-export type FinanceStore = FinanceState & FinanceActions;
+type FinanceClock = {
+  calendarDayKey: string;
+};
+
+export type FinanceStore = FinanceState & FinanceActions & FinanceClock;
 
 const emptyFinanceState: FinanceState = {
   profile: {
@@ -33,6 +37,17 @@ const LEGACY_STORAGE_KEYS = [
   'demanage-finance-v3',
 ];
 
+function currentLocalDayKey(now = new Date()) {
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function dateFromDayKey(dayKey: string) {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 function clearLegacyStorage() {
   if (typeof window === 'undefined') return;
   for (const key of LEGACY_STORAGE_KEYS) {
@@ -44,6 +59,7 @@ clearLegacyStorage();
 
 export const useFinanceStore = create<FinanceStore>((set) => ({
   ...emptyFinanceState,
+  calendarDayKey: currentLocalDayKey(),
 
   setCards: (cards) =>
     set((state) => ({
@@ -54,30 +70,42 @@ export const useFinanceStore = create<FinanceStore>((set) => ({
 
   setIncomes: (incomes) => set({ incomes }),
 
-  clearAll: () => set({ ...emptyFinanceState }),
+  clearAll: () =>
+    set({ ...emptyFinanceState, calendarDayKey: currentLocalDayKey() }),
 }));
 
-export function selectMonthlyIncome(state: FinanceState) {
+if (typeof window !== 'undefined') {
+  window.setInterval(() => {
+    const nextKey = currentLocalDayKey();
+    if (useFinanceStore.getState().calendarDayKey !== nextKey) {
+      useFinanceStore.setState({ calendarDayKey: nextKey });
+    }
+  }, 60_000);
+}
+
+export function selectMonthlyIncome(state: FinanceStore) {
+  const now = dateFromDayKey(state.calendarDayKey);
   return state.incomes.reduce(
-    (sum, income) => sum + incomeContributionThisMonth(income),
+    (sum, income) => sum + incomeContributionThisMonth(income, now),
     0,
   );
 }
 
-export function selectMonthlyExpenses(state: FinanceState) {
+export function selectMonthlyExpenses(state: FinanceStore) {
+  const now = dateFromDayKey(state.calendarDayKey);
   return state.expenses.reduce(
-    (sum, expense) => sum + expenseContributionThisMonth(expense),
+    (sum, expense) => sum + expenseContributionThisMonth(expense, now),
     0,
   );
 }
 
-export function selectAverageMonthlyExpense(state: FinanceState) {
+export function selectAverageMonthlyExpense(state: FinanceStore) {
   if (state.history.length === 0) return selectMonthlyExpenses(state);
   const total = state.history.reduce((sum, item) => sum + item.expense, 0);
   return total / state.history.length;
 }
 
-export function selectRecurringShare(state: FinanceState) {
+export function selectRecurringShare(state: FinanceStore) {
   const income = selectMonthlyIncome(state);
   if (income <= 0) return 0;
   return selectMonthlyExpenses(state) / income;

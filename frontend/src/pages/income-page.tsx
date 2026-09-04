@@ -49,11 +49,19 @@ import {
   tagBadgeStyle,
 } from '@/data/labels';
 import { useCustomTags } from '@/hooks/use-custom-tags';
-import { useDeleteEntry, useEntries } from '@/hooks/use-entries';
+import {
+  useDeleteEntry,
+  useEntries,
+  useSalaryReceiptState,
+} from '@/hooks/use-entries';
 import { formatCurrency } from '@/lib/format';
 import {
   incomeContributionThisMonth,
+  incomeMonthKey,
+  isIncomeAutoReceivedThisMonth,
   isIncomeReceivedThisMonth,
+  isSalaryManuallyReceived,
+  isSalaryWaitingForConfirmation,
 } from '@/lib/income-schedule';
 import { selectMonthlyIncome, useFinanceStore } from '@/stores/finance-store';
 import type { Income } from '@/types/finance';
@@ -62,6 +70,7 @@ export function IncomePage() {
   const { data: incomes = [], isLoading, isError } = useEntries();
   const { data: customTags = [] } = useCustomTags('income');
   const removeEntry = useDeleteEntry();
+  const salaryReceipt = useSalaryReceiptState();
   const total = useFinanceStore(selectMonthlyIncome);
 
   const [search, setSearch] = useState('');
@@ -103,6 +112,29 @@ export function IncomePage() {
     setDialogOpen(true);
   }
 
+  async function handleSalaryReceipt(
+    income: Income,
+    state: 'received' | 'waiting',
+  ) {
+    try {
+      await salaryReceipt.mutateAsync({
+        id: income.id,
+        month: incomeMonthKey(),
+        state,
+      });
+      toast.success(
+        state === 'received'
+          ? 'Salário confirmado no saldo'
+          : 'Salário aguardará sua confirmação neste mês',
+      );
+    } catch (err) {
+      const message = isAxiosError(err)
+        ? (err.response?.data?.error ?? 'Não foi possível atualizar o salário')
+        : 'Não foi possível atualizar o salário';
+      toast.error(message);
+    }
+  }
+
   async function handleDelete(id: string, name: string) {
     try {
       await removeEntry.mutateAsync(id);
@@ -132,7 +164,7 @@ export function IncomePage() {
       <PageHero
         eyebrow='Receitas'
         title={`${incomes.length} entrada${incomes.length === 1 ? '' : 's'}`}
-        description='O saldo do mês só conta entradas a partir do dia de recebimento.'
+        description='O salário entra automaticamente no dia configurado, salvo quando você escolher aguardar confirmação.'
       >
         <div className='grid gap-3 sm:grid-cols-2'>
           <div className='rounded-xl border border-border bg-black/25 p-4'>
@@ -219,6 +251,13 @@ export function IncomePage() {
                   key={income.id}
                   income={income}
                   pending={removeEntry.isPending}
+                  salaryPending={salaryReceipt.isPending}
+                  onSalaryReceived={() =>
+                    void handleSalaryReceipt(income, 'received')
+                  }
+                  onSalaryWait={() =>
+                    void handleSalaryReceipt(income, 'waiting')
+                  }
                   onEdit={() => openEdit(income)}
                   onDelete={() => setConfirmDelete(income)}
                 />
@@ -235,18 +274,43 @@ export function IncomePage() {
                     <TableHead>Recebe</TableHead>
                     <TableHead>Término</TableHead>
                     <TableHead className='text-right'>Valor</TableHead>
-                    <TableHead className='w-24 text-right'>Ações</TableHead>
+                    <TableHead className='w-64 text-right'>Ações</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {filtered.map((income) => {
                     const received = isIncomeReceivedThisMonth(income);
+                    const salaryMonthly =
+                      income.type === 'salario' && income.frequency === 'mensal';
+                    const salaryWaiting =
+                      isSalaryWaitingForConfirmation(income);
+                    const salaryManual = isSalaryManuallyReceived(income);
+                    const salaryAutomatic =
+                      salaryMonthly && isIncomeAutoReceivedThisMonth(income);
 
                     return (
                       <TableRow key={income.id}>
                         <TableCell className='font-medium'>
                           {income.name}
-                          {income.frequency !== 'unica' && !received ? (
+                          {salaryMonthly ? (
+                            salaryWaiting ? (
+                              <span className='mt-0.5 block text-xs text-neon-amber'>
+                                Aguardando confirmação manual
+                              </span>
+                            ) : salaryManual ? (
+                              <span className='mt-0.5 block text-xs text-neon-green'>
+                                Recebimento confirmado
+                              </span>
+                            ) : salaryAutomatic ? (
+                              <span className='mt-0.5 block text-xs text-neon-green'>
+                                Recebido automaticamente
+                              </span>
+                            ) : (
+                              <span className='mt-0.5 block text-xs text-muted-foreground'>
+                                Aguardando dia {income.receiveDay ?? '—'}
+                              </span>
+                            )
+                          ) : income.frequency !== 'unica' && !received ? (
                             <span className='mt-0.5 block text-xs text-muted-foreground'>
                               Aguardando dia {income.receiveDay ?? '—'}
                             </span>
@@ -296,7 +360,38 @@ export function IncomePage() {
                           {formatCurrency(income.amount)}
                         </TableCell>
                         <TableCell className='text-right'>
-                          {income.type === 'salario' ? (
+                          {salaryMonthly ? (
+                            <div className='flex flex-wrap justify-end gap-1'>
+                              {!salaryManual ? (
+                                <Button
+                                  variant='secondary'
+                                  size='sm'
+                                  className='rounded-lg'
+                                  disabled={salaryReceipt.isPending}
+                                  onClick={() =>
+                                    void handleSalaryReceipt(income, 'received')
+                                  }
+                                >
+                                  Já recebi
+                                </Button>
+                              ) : null}
+                              {!salaryWaiting ? (
+                                <Button
+                                  variant='ghost'
+                                  size='sm'
+                                  className='rounded-lg'
+                                  disabled={salaryReceipt.isPending}
+                                  onClick={() =>
+                                    void handleSalaryReceipt(income, 'waiting')
+                                  }
+                                >
+                                  {salaryAutomatic || salaryManual
+                                    ? 'Ainda não recebi'
+                                    : 'Aguardar confirmação'}
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : income.type === 'salario' ? (
                             <span className='text-xs text-muted-foreground'>
                               Perfil
                             </span>

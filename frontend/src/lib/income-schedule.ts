@@ -31,8 +31,31 @@ function isSameMonth(date: Date, now: Date) {
   );
 }
 
-/** Entrada já entrou no saldo do mês corrente. */
-export function isIncomeReceivedThisMonth(income: Income, now = new Date()) {
+export function incomeMonthKey(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+}
+
+export function isSalaryWaitingForConfirmation(
+  income: Income,
+  now = new Date(),
+) {
+  return (
+    income.type === 'salario' &&
+    income.frequency === 'mensal' &&
+    income.receiptHoldForMonth === incomeMonthKey(now)
+  );
+}
+
+export function isSalaryManuallyReceived(income: Income, now = new Date()) {
+  return (
+    income.type === 'salario' &&
+    income.frequency === 'mensal' &&
+    income.receivedForMonth === incomeMonthKey(now)
+  );
+}
+
+/** Entrada entrou no saldo apenas pela agenda, sem override manual do salário. */
+export function isIncomeAutoReceivedThisMonth(income: Income, now = new Date()) {
   if (income.frequency === 'unica') {
     if (!income.date) return false;
     const date = parseLocalDate(income.date);
@@ -61,6 +84,13 @@ export function isIncomeReceivedThisMonth(income: Income, now = new Date()) {
   }
 
   return true;
+}
+
+/** Entrada já entrou no saldo do mês corrente, incluindo confirmação manual do salário. */
+export function isIncomeReceivedThisMonth(income: Income, now = new Date()) {
+  if (isSalaryManuallyReceived(income, now)) return true;
+  if (isSalaryWaitingForConfirmation(income, now)) return false;
+  return isIncomeAutoReceivedThisMonth(income, now);
 }
 
 export function incomeContributionThisMonth(income: Income, now = new Date()) {

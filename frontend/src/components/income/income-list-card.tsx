@@ -9,7 +9,12 @@ import {
   tagBadgeStyle,
 } from '@/data/labels';
 import { formatCurrency } from '@/lib/format';
-import { isIncomeReceivedThisMonth } from '@/lib/income-schedule';
+import {
+  isIncomeAutoReceivedThisMonth,
+  isIncomeReceivedThisMonth,
+  isSalaryManuallyReceived,
+  isSalaryWaitingForConfirmation,
+} from '@/lib/income-schedule';
 import type { Income, IncomeType } from '@/types/finance';
 
 const typeColors: Record<IncomeType, string> = {
@@ -21,6 +26,9 @@ const typeColors: Record<IncomeType, string> = {
 type IncomeListCardProps = {
   income: Income;
   pending?: boolean;
+  salaryPending?: boolean;
+  onSalaryReceived?: () => void;
+  onSalaryWait?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 };
@@ -28,10 +36,17 @@ type IncomeListCardProps = {
 export function IncomeListCard({
   income,
   pending,
+  salaryPending,
+  onSalaryReceived,
+  onSalaryWait,
   onEdit,
   onDelete,
 }: IncomeListCardProps) {
   const received = isIncomeReceivedThisMonth(income);
+  const salaryMonthly = income.type === 'salario' && income.frequency === 'mensal';
+  const salaryWaiting = isSalaryWaitingForConfirmation(income);
+  const salaryManual = isSalaryManuallyReceived(income);
+  const salaryAutomatic = salaryMonthly && isIncomeAutoReceivedThisMonth(income);
 
   const receiveLabel =
     income.frequency === 'unica'
@@ -46,16 +61,39 @@ export function IncomeListCard({
           }`
         : null;
 
+  const salaryStatus = (() => {
+    if (!salaryMonthly) return null;
+    if (salaryWaiting) {
+      return (
+        <p className='text-xs text-neon-amber'>
+          Aguardando confirmação manual
+        </p>
+      );
+    }
+    if (salaryManual) {
+      return <p className='text-xs text-neon-green'>Recebimento confirmado</p>;
+    }
+    if (salaryAutomatic) {
+      return <p className='text-xs text-neon-green'>Recebido automaticamente</p>;
+    }
+    return (
+      <p className='text-xs text-muted-foreground'>
+        Aguardando dia {income.receiveDay ?? '—'}
+      </p>
+    );
+  })();
+
   return (
     <article className='rounded-xl border border-border bg-black/20 p-4'>
       <div className='flex items-start justify-between gap-3'>
         <div className='min-w-0 space-y-1'>
           <p className='truncate font-medium'>{income.name}</p>
-          {income.frequency !== 'unica' && !received ? (
-            <p className='text-xs text-muted-foreground'>
-              Aguardando dia {income.receiveDay ?? '—'}
-            </p>
-          ) : null}
+          {salaryStatus ??
+            (income.frequency !== 'unica' && !received ? (
+              <p className='text-xs text-muted-foreground'>
+                Aguardando dia {income.receiveDay ?? '—'}
+              </p>
+            ) : null)}
         </div>
         <p className='shrink-0 text-base font-semibold text-neon-green'>
           {formatCurrency(income.amount)}
@@ -88,7 +126,34 @@ export function IncomeListCard({
       </div>
 
       <div className='mt-4 flex flex-wrap justify-end gap-1'>
-        {income.type === 'salario' ? (
+        {salaryMonthly ? (
+          <>
+            {!salaryManual ? (
+              <Button
+                variant='secondary'
+                size='sm'
+                className='rounded-lg'
+                disabled={salaryPending}
+                onClick={onSalaryReceived}
+              >
+                Já recebi
+              </Button>
+            ) : null}
+            {!salaryWaiting ? (
+              <Button
+                variant='ghost'
+                size='sm'
+                className='rounded-lg'
+                disabled={salaryPending}
+                onClick={onSalaryWait}
+              >
+                {salaryAutomatic || salaryManual
+                  ? 'Ainda não recebi'
+                  : 'Aguardar confirmação'}
+              </Button>
+            ) : null}
+          </>
+        ) : income.type === 'salario' ? (
           <span className='text-xs text-muted-foreground'>Perfil</span>
         ) : (
           <>
