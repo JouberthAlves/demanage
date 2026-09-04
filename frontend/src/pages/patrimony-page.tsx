@@ -1,19 +1,10 @@
 import { isAxiosError } from 'axios';
 import { Settings2 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/layout/page-header';
+import { PatrimonyHistoryChart } from '@/components/patrimony/patrimony-history-chart';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { Badge } from '@/components/ui/badge';
@@ -270,50 +261,7 @@ export function PatrimonyPage() {
               />
             </div>
             <div className='h-[360px]'>
-              <ResponsiveContainer width='100%' height='100%'>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray='3 3' opacity={0.15} />
-                  <XAxis dataKey='date' minTickGap={28} />
-                  <YAxis
-                    width={76}
-                    domain={['dataMin', 'dataMax']}
-                    tickFormatter={(value) =>
-                      `R$${Number(value).toLocaleString('pt-BR', {
-                        notation: 'compact',
-                      })}`
-                    }
-                  />
-                  <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                  <Legend />
-                  <Line
-                    name='Patrimônio'
-                    dataKey='patrimonio'
-                    type='monotone'
-                    dot={false}
-                    activeDot={false}
-                    stroke='#34D399'
-                    strokeWidth={2}
-                  />
-                  <Line
-                    name='100% CDI'
-                    dataKey='cdi'
-                    type='monotone'
-                    dot={false}
-                    activeDot={false}
-                    stroke='#60A5FA'
-                    strokeWidth={2}
-                  />
-                  <Line
-                    name='IPCA'
-                    dataKey='ipca'
-                    type='monotone'
-                    dot={false}
-                    activeDot={false}
-                    stroke='#FFB800'
-                    strokeWidth={2}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+              <PatrimonyHistoryChart data={chartData} />
             </div>
           </SectionPanel>
         </>

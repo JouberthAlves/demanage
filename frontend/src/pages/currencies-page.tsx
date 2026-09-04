@@ -1,17 +1,9 @@
 import { isAxiosError } from 'axios';
 import { ArrowDownToLine, ArrowUpFromLine, RefreshCw } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
 import { toast } from 'sonner';
 
+import { CurrencyHistoryChart } from '@/components/currencies/currency-history-chart';
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
@@ -410,29 +402,13 @@ export function CurrenciesPage() {
             />
           </div>
           <div className='h-72'>
-            <ResponsiveContainer width='100%' height='100%'>
-              <LineChart data={chartRows ?? []}>
-                <CartesianGrid strokeDasharray='3 3' opacity={0.15} />
-                <XAxis dataKey='date' minTickGap={28} />
-                <YAxis
-                  width={72}
-                  domain={['dataMin', 'dataMax']}
-                  tickFormatter={(value) =>
-                    `R$${Number(value).toLocaleString('pt-BR', {
-                      notation: 'compact',
-                    })}`
-                  }
-                />
-                <Tooltip formatter={(value) => formatCurrency(Number(value))} />
-                <Line
-                  dataKey='valor'
-                  type='monotone'
-                  dot={false}
-                  activeDot={false}
-                  stroke='currentColor'
-                />
-              </LineChart>
-            </ResponsiveContainer>
+            <CurrencyHistoryChart
+              asset={asset}
+              data={chartRows ?? []}
+              isLoading={
+                asset === 'BTC' ? btcHistory.isLoading : usdHistory.isLoading
+              }
+            />
           </div>
         </SectionPanel>
 
