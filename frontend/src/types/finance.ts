@@ -90,6 +90,7 @@ export type RecurringExpense = {
   startsAt?: string;
   endsAt?: string;
   registeredAt?: string;
+  paidForMonth?: string;
   notes?: string;
   isInvoice?: boolean;
   customTagId?: string;

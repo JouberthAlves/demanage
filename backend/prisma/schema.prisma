@@ -134,6 +134,7 @@ model Expense {
   startsAt         DateTime?
   endsAt           DateTime?
   occurredAt       DateTime?
+  paidForMonth     String?
   notes            String?
   isInvoice        Boolean          @default(false)
   createdAt        DateTime         @default(now())

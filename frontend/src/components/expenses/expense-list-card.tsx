@@ -9,8 +9,15 @@ import {
   tagBadgeStyle,
 } from '@/data/labels';
 import { getCardTone } from '@/lib/card-tone';
-import { isExpenseDebitedThisMonth } from '@/lib/expense-schedule';
-import { formatExpensePaymentLabel } from '@/lib/expense-splits';
+import {
+  canPayExpenseEarly,
+  isExpenseAutoDebitedThisMonth,
+  isExpensePaidThisMonth,
+} from '@/lib/expense-schedule';
+import {
+  expenseCashAmount,
+  formatExpensePaymentLabel,
+} from '@/lib/expense-splits';
 import { formatCurrency } from '@/lib/format';
 import type { Card, ExpenseCategory, RecurringExpense } from '@/types/finance';
 
@@ -42,8 +49,23 @@ export function ExpenseListCard({
 }: ExpenseListCardProps) {
   const primaryCard = cards.find((item) => item.id === expense.cardId);
   const tone = primaryCard ? getCardTone(primaryCard) : null;
-  const debited = isExpenseDebitedThisMonth(expense);
   const paymentLabel = formatExpensePaymentLabel(expense, cards);
+  const hasCash = expenseCashAmount(expense) > 0;
+  const paidEarly = isExpensePaidThisMonth(expense);
+  const autoDebited = hasCash && isExpenseAutoDebitedThisMonth(expense);
+  const canPayEarly = canPayExpenseEarly(expense);
+  const isRecurring = expense.frequency !== 'unica' && !expense.isInvoice;
+
+  const payState = (() => {
+    if (!isRecurring) return { label: 'Pago', disabled: Boolean(pending) };
+    if (!hasCash) return { label: 'Via fatura', disabled: true };
+    if (paidEarly) return { label: 'Pago', disabled: true };
+    if (autoDebited) return { label: 'Descontada', disabled: true };
+    if (canPayEarly) {
+      return { label: 'Pagar agora', disabled: Boolean(pending) };
+    }
+    return { label: 'Aguardando', disabled: true };
+  })();
 
   const discountLabel =
     expense.frequency === 'unica'
@@ -63,12 +85,18 @@ export function ExpenseListCard({
       <div className='flex items-start justify-between gap-3'>
         <div className='min-w-0 space-y-1'>
           <p className='truncate font-medium'>{expense.name}</p>
-          {expense.frequency !== 'unica' &&
-          !expense.isInvoice &&
-          !debited ? (
-            <p className='text-xs text-muted-foreground'>
-              Aguardando dia {expense.dueDay ?? '—'}
-            </p>
+          {isRecurring && hasCash ? (
+            paidEarly ? (
+              <p className='text-xs text-neon-green'>Pago antecipadamente</p>
+            ) : autoDebited ? (
+              <p className='text-xs text-neon-green'>
+                Descontada automaticamente
+              </p>
+            ) : (
+              <p className='text-xs text-muted-foreground'>
+                Aguardando dia {expense.dueDay ?? '—'}
+              </p>
+            )
           ) : null}
         </div>
         <p className='shrink-0 text-base font-semibold'>
@@ -122,10 +150,10 @@ export function ExpenseListCard({
           variant='secondary'
           size='sm'
           className='rounded-lg'
-          disabled={pending}
+          disabled={payState.disabled}
           onClick={onPay}
         >
-          Pago
+          {payState.label}
         </Button>
         {!expense.isInvoice ? (
           <Button variant='ghost' size='icon-sm' onClick={onEdit}>

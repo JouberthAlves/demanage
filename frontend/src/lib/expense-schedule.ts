@@ -29,6 +29,11 @@ function isSameMonth(date: Date, now: Date) {
   );
 }
 
+export function expenseMonthKey(now = new Date()) {
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  return `${now.getFullYear()}-${month}`;
+}
+
 /** Monta YYYY-MM-DD do primeiro desconto/recebimento a partir de dia + mês (1-12). */
 export function buildScheduleStartsAt(
   day: number,
@@ -58,6 +63,63 @@ export function formatStartsAtPreview(startsAt: string) {
   return `${day} de ${month} de ${year}`;
 }
 
+export function isExpenseScheduledThisMonth(
+  expense: RecurringExpense,
+  now = new Date(),
+) {
+  if (expense.isInvoice || expense.frequency === 'unica') return false;
+
+  const dueDay = expense.dueDay ?? 1;
+  const debitDate = resolveDebitDate(
+    now.getFullYear(),
+    now.getMonth(),
+    dueDay,
+  );
+
+  if (expense.startsAt) {
+    const startsAt = parseLocalDate(expense.startsAt);
+    if (debitDate < startOfLocalDay(startsAt)) return false;
+  }
+
+  if (expense.endsAt) {
+    const endsAt = parseLocalDate(expense.endsAt);
+    if (debitDate > endsAt) return false;
+  }
+
+  return true;
+}
+
+export function isExpensePaidThisMonth(
+  expense: RecurringExpense,
+  now = new Date(),
+) {
+  return expense.paidForMonth === expenseMonthKey(now);
+}
+
+export function isExpenseAutoDebitedThisMonth(
+  expense: RecurringExpense,
+  now = new Date(),
+) {
+  if (!isExpenseScheduledThisMonth(expense, now)) return false;
+  const debitDate = resolveDebitDate(
+    now.getFullYear(),
+    now.getMonth(),
+    expense.dueDay ?? 1,
+  );
+  return startOfLocalDay(now) >= debitDate;
+}
+
+export function canPayExpenseEarly(
+  expense: RecurringExpense,
+  now = new Date(),
+) {
+  if (expense.frequency !== 'mensal' || expense.isInvoice) return false;
+  if (!isExpenseScheduledThisMonth(expense, now)) return false;
+  if (isExpensePaidThisMonth(expense, now)) return false;
+  if (isExpenseAutoDebitedThisMonth(expense, now)) return false;
+  return expenseCashAmount(expense) > 0;
+}
+
 /** Despesa já entrou no saldo do mês corrente. */
 export function isExpenseDebitedThisMonth(
   expense: RecurringExpense,
@@ -74,26 +136,9 @@ export function isExpenseDebitedThisMonth(
     );
   }
 
-  const dueDay = expense.dueDay ?? 1;
-  const debitDate = resolveDebitDate(
-    now.getFullYear(),
-    now.getMonth(),
-    dueDay,
-  );
-
-  if (startOfLocalDay(now) < debitDate) return false;
-
-  if (expense.startsAt) {
-    const startsAt = parseLocalDate(expense.startsAt);
-    if (debitDate < startOfLocalDay(startsAt)) return false;
-  }
-
-  if (expense.endsAt) {
-    const endsAt = parseLocalDate(expense.endsAt);
-    if (debitDate > endsAt) return false;
-  }
-
-  return true;
+  if (!isExpenseScheduledThisMonth(expense, now)) return false;
+  if (isExpensePaidThisMonth(expense, now)) return true;
+  return isExpenseAutoDebitedThisMonth(expense, now);
 }
 
 export function expenseContributionThisMonth(

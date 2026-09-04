@@ -115,4 +115,6 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~**Patrimônio, Moedas e rendimento CDI**~~ — Separa orçamento de patrimônio; adiciona `/patrimonio` e `/moedas`, posições BTC/USD com preço médio e P&L, transferências internas ligadas ao financeiro, histórico patrimonial com benchmarks 100% CDI/IPCA, cache/fallback de mercado e Cofrinhos com rendimento diário em `% do CDI` auditável e idempotente. Inclui migration, testes contábeis e CI com PostgreSQL.
 
+- [x] ~~**Despesa fixa: pagamento antecipado + desconto automático**~~ — “Pagar agora” quita apenas o ciclo mensal atual sem apagar a recorrência; saldo entra imediatamente no pagamento antecipado; status mostra pago antecipadamente/descontado automaticamente; store reavalia o calendário na virada do dia sem exigir refresh manual.
+
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)

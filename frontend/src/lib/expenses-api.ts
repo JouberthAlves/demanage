@@ -26,6 +26,7 @@ export type ApiExpense = {
   startsAt?: string | null;
   endsAt?: string | null;
   occurredAt?: string | null;
+  paidForMonth?: string | null;
   notes: string | null;
   isInvoice?: boolean;
   createdAt?: string;
@@ -95,6 +96,7 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     startsAt: mapDateOnly(expense.startsAt),
     endsAt: mapDateOnly(expense.endsAt),
     registeredAt: registeredAt ? toLocalDateOnly(registeredAt) : undefined,
+    paidForMonth: expense.paidForMonth ?? undefined,
     notes: expense.notes ?? undefined,
     isInvoice: Boolean(expense.isInvoice),
     customTagId: expense.customTagId ?? undefined,
@@ -118,6 +120,11 @@ export async function updateExpense(
   payload: Partial<ExpensePayload>,
 ) {
   const { data } = await api.patch<ApiExpense>(`/expenses/${id}`, payload);
+  return mapExpenseToLocal(data);
+}
+
+export async function markExpensePaid(id: string, month: string) {
+  const { data } = await api.post<ApiExpense>(`/expenses/${id}/pay`, { month });
   return mapExpenseToLocal(data);
 }
 

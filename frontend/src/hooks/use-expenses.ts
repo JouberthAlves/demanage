@@ -5,6 +5,7 @@ import {
   createExpense,
   deleteExpense,
   listExpenses,
+  markExpensePaid,
   updateExpense,
   type ExpensePayload,
 } from '@/lib/expenses-api';
@@ -51,6 +52,18 @@ export function useUpdateExpense() {
       id: string;
       payload: Partial<ExpensePayload>;
     }) => updateExpense(id, payload),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
+    },
+  });
+}
+
+export function useMarkExpensePaid() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, month }: { id: string; month: string }) =>
+      markExpensePaid(id, month),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
     },
