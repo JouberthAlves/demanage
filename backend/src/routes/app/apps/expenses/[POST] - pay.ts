@@ -90,7 +90,7 @@ router.post('/:id/pay', requireAuth, async (req: Request, res: Response) => {
 
     const expense = await prisma.expense.update({
       where: { id },
-      data: { paidForMonth },
+      data: { paidForMonth, paidAt: new Date() },
       include: {
         customTag: { select: customTagSelect },
         ...expenseSplitInclude,
