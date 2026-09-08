@@ -74,10 +74,22 @@ router.post('/:id/receipt-state', requireAuth, async (req: Request, res: Respons
 
     const data =
       state === 'received'
-        ? { receivedForMonth: month, receiptHoldForMonth: null }
+        ? {
+            receivedForMonth: month,
+            receiptHoldForMonth: null,
+            receivedAt: new Date(),
+          }
         : state === 'waiting'
-          ? { receivedForMonth: null, receiptHoldForMonth: month }
-          : { receivedForMonth: null, receiptHoldForMonth: null };
+          ? {
+              receivedForMonth: null,
+              receiptHoldForMonth: month,
+              receivedAt: null,
+            }
+          : {
+              receivedForMonth: null,
+              receiptHoldForMonth: null,
+              receivedAt: null,
+            };
 
     const entry = await prisma.entry.update({
       where: { id },

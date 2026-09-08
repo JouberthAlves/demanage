@@ -12,6 +12,12 @@ import {
 import { useFinanceStore } from '@/stores/finance-store';
 
 export const EXPENSES_QUERY_KEY = ['expenses'] as const;
+const PATRIMONY_QUERY_KEY = ['patrimony'] as const;
+
+function invalidateExpenseRelated(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
+  void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
+}
 
 export function useExpenses() {
   const setExpenses = useFinanceStore((state) => state.setExpenses);
@@ -35,9 +41,7 @@ export function useCreateExpense() {
 
   return useMutation({
     mutationFn: (payload: ExpensePayload) => createExpense(payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateExpenseRelated(queryClient),
   });
 }
 
@@ -52,9 +56,7 @@ export function useUpdateExpense() {
       id: string;
       payload: Partial<ExpensePayload>;
     }) => updateExpense(id, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateExpenseRelated(queryClient),
   });
 }
 
@@ -64,9 +66,7 @@ export function useMarkExpensePaid() {
   return useMutation({
     mutationFn: ({ id, month }: { id: string; month: string }) =>
       markExpensePaid(id, month),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateExpenseRelated(queryClient),
   });
 }
 
@@ -75,8 +75,6 @@ export function useDeleteExpense() {
 
   return useMutation({
     mutationFn: (id: string) => deleteExpense(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateExpenseRelated(queryClient),
   });
 }

@@ -24,6 +24,20 @@ type CashFlow = {
   external: boolean;
 };
 
+type ExpensePaymentState = Pick<
+  ExpenseWithSplits,
+  'frequency' | 'paidForMonth' | 'paidAt' | 'updatedAt'
+>;
+type EntryReceiptState = Pick<
+  EntryRecord,
+  | 'type'
+  | 'frequency'
+  | 'receiptHoldForMonth'
+  | 'receivedForMonth'
+  | 'receivedAt'
+  | 'updatedAt'
+>;
+
 export class PatrimonyError extends Error {
   constructor(message: string) {
     super(message);
@@ -40,6 +54,68 @@ function addDays(date: Date, days: number) {
 function clampDay(year: number, month: number, day: number) {
   const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
   return Math.min(Math.max(day, 1), last);
+}
+
+function cycleMonthKey(year: number, month: number) {
+  return `${year}-${String(month + 1).padStart(2, '0')}`;
+}
+
+function eventDateForMonth(
+  explicitDate: Date | null,
+  fallbackUpdatedAt: Date,
+  monthKey: string,
+) {
+  const eventDate = explicitDate ?? fallbackUpdatedAt;
+  return dateKey(eventDate).slice(0, 7) === monthKey
+    ? dateOnlyUtc(eventDate)
+    : null;
+}
+
+export function resolveExpenseOccurrenceDate(
+  expense: ExpensePaymentState,
+  scheduledDate: Date,
+  monthKey: string,
+) {
+  if (
+    expense.frequency !== 'mensal' ||
+    expense.paidForMonth !== monthKey
+  ) {
+    return scheduledDate;
+  }
+
+  const paidAt = eventDateForMonth(
+    expense.paidAt,
+    expense.updatedAt,
+    monthKey,
+  );
+  if (!paidAt) return scheduledDate;
+
+  // Se pagou antes, o caixa sai no pagamento. Se marcou depois do vencimento,
+  // o débito automático já havia acontecido na data programada.
+  return paidAt < scheduledDate ? paidAt : scheduledDate;
+}
+
+export function resolveEntryOccurrenceDate(
+  entry: EntryReceiptState,
+  scheduledDate: Date,
+  monthKey: string,
+) {
+  if (entry.type !== 'salario' || entry.frequency !== 'mensal') {
+    return scheduledDate;
+  }
+
+  if (entry.receiptHoldForMonth === monthKey) {
+    return null;
+  }
+
+  if (entry.receivedForMonth !== monthKey) {
+    return scheduledDate;
+  }
+
+  return (
+    eventDateForMonth(entry.receivedAt, entry.updatedAt, monthKey) ??
+    scheduledDate
+  );
 }
 
 function amountForExpense(expense: ExpenseWithSplits) {
@@ -99,11 +175,26 @@ function buildCashFlows(args: {
 
     for (const { year, month } of months) {
       const day = clampDay(year, month, expense.dueDay ?? 1);
-      const when = new Date(Date.UTC(year, month, day, 12));
+      const scheduledDate = new Date(Date.UTC(year, month, day, 12));
+      if (
+        expense.startsAt &&
+        scheduledDate < dateOnlyUtc(expense.startsAt)
+      ) {
+        continue;
+      }
+      if (expense.endsAt && scheduledDate > dateOnlyUtc(expense.endsAt)) {
+        continue;
+      }
+
+      const monthKey = cycleMonthKey(year, month);
+      const when = resolveExpenseOccurrenceDate(
+        expense,
+        scheduledDate,
+        monthKey,
+      );
       const key = dateKey(when);
       if (key <= baseKey || key > toKey) continue;
-      if (expense.startsAt && when < dateOnlyUtc(expense.startsAt)) continue;
-      if (expense.endsAt && when > dateOnlyUtc(expense.endsAt)) continue;
+
       const multiplier =
         expense.frequency === 'semanal' ? decimal(4) : decimal(1);
       flows.push({
@@ -129,11 +220,20 @@ function buildCashFlows(args: {
 
     for (const { year, month } of months) {
       const day = clampDay(year, month, entry.receiveDay ?? 1);
-      const when = new Date(Date.UTC(year, month, day, 12));
+      const scheduledDate = new Date(Date.UTC(year, month, day, 12));
+      if (entry.startsAt && scheduledDate < dateOnlyUtc(entry.startsAt)) {
+        continue;
+      }
+      if (entry.endsAt && scheduledDate > dateOnlyUtc(entry.endsAt)) {
+        continue;
+      }
+
+      const monthKey = cycleMonthKey(year, month);
+      const when = resolveEntryOccurrenceDate(entry, scheduledDate, monthKey);
+      if (!when) continue;
       const key = dateKey(when);
       if (key <= baseKey || key > toKey) continue;
-      if (entry.startsAt && when < dateOnlyUtc(entry.startsAt)) continue;
-      if (entry.endsAt && when > dateOnlyUtc(entry.endsAt)) continue;
+
       const multiplier =
         entry.frequency === 'semanal' ? decimal(4) : decimal(1);
       flows.push({ date: key, amount: amount.mul(multiplier), external });

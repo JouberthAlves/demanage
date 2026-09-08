@@ -13,6 +13,12 @@ import {
 import { useFinanceStore } from '@/stores/finance-store';
 
 export const ENTRIES_QUERY_KEY = ['entries'] as const;
+const PATRIMONY_QUERY_KEY = ['patrimony'] as const;
+
+function invalidateEntryRelated(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
+  void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
+}
 
 export function useEntries() {
   const setIncomes = useFinanceStore((state) => state.setIncomes);
@@ -36,9 +42,7 @@ export function useCreateEntry() {
 
   return useMutation({
     mutationFn: (payload: EntryPayload) => createEntry(payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateEntryRelated(queryClient),
   });
 }
 
@@ -53,9 +57,7 @@ export function useUpdateEntry() {
       id: string;
       payload: Partial<EntryPayload>;
     }) => updateEntry(id, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateEntryRelated(queryClient),
   });
 }
 
@@ -72,9 +74,7 @@ export function useSalaryReceiptState() {
       month: string;
       state: SalaryReceiptState;
     }) => setSalaryReceiptState(id, month, state),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateEntryRelated(queryClient),
   });
 }
 
@@ -83,8 +83,6 @@ export function useDeleteEntry() {
 
   return useMutation({
     mutationFn: (id: string) => deleteEntry(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-    },
+    onSuccess: () => invalidateEntryRelated(queryClient),
   });
 }
