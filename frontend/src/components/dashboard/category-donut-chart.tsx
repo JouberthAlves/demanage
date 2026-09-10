@@ -54,8 +54,8 @@ export function CategoryDonutChart() {
   const totalLabel = formatCurrencyCompact(total);
 
   return (
-    <div className='flex h-72 flex-col items-center justify-center gap-4'>
-      <div className='relative h-48 w-full'>
+    <div className='flex flex-col gap-4'>
+      <div className='relative h-48 w-full shrink-0'>
         <div className='pointer-events-none absolute inset-0 z-0 flex flex-col items-center justify-center px-10'>
           <span className='text-[10px] text-muted-foreground'>Total</span>
           <span
@@ -102,7 +102,7 @@ export function CategoryDonutChart() {
         ) : null}
       </div>
 
-      <div className='w-full space-y-2'>
+      <div className='max-h-32 w-full space-y-2 overflow-y-auto pr-1'>
         {data.map((item) => (
           <div
             key={item.key}
