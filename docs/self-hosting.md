@@ -103,6 +103,18 @@ docker compose -f docker-compose.prod.yml logs -f --tail=100 frontend backend db
 
 Para o primeiro teste, prefira um hostname temporário, por exemplo `demanage-test.biel.dev.br`. Depois da migração do banco, troque para `demanage.biel.dev.br`.
 
+**Importante:** `APP_URL` precisa ser exatamente a origem aberta no navegador em production. Antes de testar pelo hostname temporário, altere no `.env`:
+
+```env
+APP_URL=https://demanage-test.biel.dev.br
+```
+
+Recrie o backend para aplicar:
+
+```powershell
+docker compose -f docker-compose.prod.yml up -d --force-recreate backend
+```
+
 No painel Cloudflare:
 
 1. Abra **Networking -> Tunnels**.
@@ -129,6 +141,18 @@ Quando o banco definitivo estiver migrado, altere o hostname para:
 
 ```text
 demanage.biel.dev.br
+```
+
+No mesmo corte, altere também o `.env` de volta para:
+
+```env
+APP_URL=https://demanage.biel.dev.br
+```
+
+E recrie o backend:
+
+```powershell
+docker compose -f docker-compose.prod.yml up -d --force-recreate backend
 ```
 
 Se já existir um registro DNS `demanage` apontando para a hospedagem antiga, faça a troca apenas no momento do corte. Uma rota criada pelo painel do Tunnel normalmente cria o CNAME do tunnel automaticamente.
