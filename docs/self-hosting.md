@@ -16,6 +16,8 @@ Internet
 
 O host publica somente `127.0.0.1:8080`. PostgreSQL e API não possuem `ports:` no Compose de produção.
 
+O self-host usa PostgreSQL 18 para ficar alinhado ao banco de origem. Na imagem oficial do PostgreSQL 18, o volume persistente deve ser montado em `/var/lib/postgresql`; o `PGDATA` interno é versionado (`/var/lib/postgresql/18/docker`).
+
 ## 1. Pré-requisitos no servidor
 
 - Git
@@ -99,6 +101,17 @@ Logs úteis:
 docker compose -f docker-compose.prod.yml logs -f --tail=100 frontend backend db
 ```
 
+### Se você chegou a inicializar o volume com PostgreSQL 16
+
+Não tente reutilizar diretamente um volume de dados inicializado por PostgreSQL 16 com a imagem 18. Se esse volume era apenas de teste e não contém dados importantes, remova os containers e o volume antes de subir a versão 18:
+
+```powershell
+docker compose -f docker-compose.prod.yml down
+docker volume rm demanage_pgdata
+```
+
+Só faça isso se o volume ainda não contiver dados reais. Depois rode novamente `up -d --build`.
+
 ## 5. Cloudflare Tunnel
 
 Para o primeiro teste, prefira um hostname temporário, por exemplo `demanage-test.biel.dev.br`. Depois da migração do banco, troque para `demanage.biel.dev.br`.
@@ -169,16 +182,18 @@ Pare de usar o app antigo durante o dump final. Se possível, desligue temporari
 
 Pegue a `DATABASE_URL` do PostgreSQL no provedor antigo. Não envie essa URL para terceiros.
 
-Com uma instalação local de PostgreSQL 16:
+Como o banco de origem é PostgreSQL 18, use `pg_dump` 18.
+
+Com uma instalação local de PostgreSQL 18:
 
 ```powershell
 pg_dump "SUA_DATABASE_URL_ANTIGA" --format=custom --no-owner --no-privileges --file=demanage-old.dump
 ```
 
-Ou usando Docker:
+Ou, preferencialmente, usando Docker:
 
 ```powershell
-docker run --rm -v "${PWD}:/backup" postgres:16-alpine `
+docker run --rm -v "${PWD}:/backup" postgres:18-alpine `
   pg_dump "SUA_DATABASE_URL_ANTIGA" `
   --format=custom `
   --no-owner `
