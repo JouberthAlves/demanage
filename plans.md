@@ -121,4 +121,6 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~**Patrimônio: saldo em reais sincronizado com o financeiro**~~ — Reconstrução patrimonial respeita pagamento antecipado de despesas e confirmação/atraso do salário, registra a data real dos eventos e invalida o cache patrimonial após alterações em entradas/despesas.
 
+- [x] ~~**Self-host de produção + Cloudflare Tunnel**~~ — Compose de produção sem expor PostgreSQL/API, frontend publicado apenas em loopback, resolver Nginx compatível com Railway/Docker, env de exemplo, runbook de migração/cutover e helper de backup PostgreSQL.
+
 - [ ] Seed / histórico mensal no DB (gráficos do dashboard)
