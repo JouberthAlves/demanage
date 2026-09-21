@@ -1,0 +1,78 @@
+services:
+  db:
+    image: postgres:18-alpine
+    container_name: demanage-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: demanage
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_DB: demanage
+    volumes:
+      - demanage_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U demanage -d demanage']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - demanage
+
+  backend:
+    build:
+      context: ./backend
+    container_name: demanage-backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: 8888
+      APP_URL: ${APP_URL:-https://demanage.biel.dev.br}
+      DATABASE_URL: postgresql://demanage:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/demanage?schema=public
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:8888/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - demanage
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: /api
+    container_name: demanage-frontend
+    restart: unless-stopped
+    environment:
+      PORT: 80
+      API_HOST: backend
+      API_PORT: 8888
+      NGINX_RESOLVER: 127.0.0.11
+      NGINX_RESOLVER_IPV6: 'off'
+    ports:
+      - '127.0.0.1:${DEMANAGE_PORT:-8080}:80'
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - demanage
+
+volumes:
+  demanage_pgdata:
+    name: demanage_pgdata
+
+networks:
+  demanage:
+    driver: bridge
