@@ -1,4 +1,4 @@
-import type { CustomTagScope } from '@prisma/client';
+import type { CustomTagScope } from '@/generated/prisma/client';
 
 import { prisma } from '@/lib/prisma';
 

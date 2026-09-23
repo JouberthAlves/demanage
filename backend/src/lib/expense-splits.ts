@@ -1,4 +1,4 @@
-import type { Card, Expense, ExpenseSplit, Prisma } from '@prisma/client';
+import type { Card, Expense, ExpenseSplit, Prisma } from '@/generated/prisma/client';
 
 import { prisma } from '@/lib/prisma';
 
