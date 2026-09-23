@@ -1,4 +1,4 @@
-import type { Asset, AssetTransactionType } from '@prisma/client';
+import type { Asset, AssetTransactionType } from '@/generated/prisma/client';
 
 import { decimal, type DecimalLike, ZERO } from '@/lib/decimal';
 

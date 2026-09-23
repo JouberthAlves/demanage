@@ -9,6 +9,15 @@ updates:
       timezone: "America/Porto_Velho"
     open-pull-requests-limit: 5
     groups:
+      prisma-stack:
+        applies-to: "version-updates"
+        patterns:
+          - "prisma"
+          - "@prisma/*"
+        update-types:
+          - "major"
+          - "minor"
+          - "patch"
       minor-and-patch:
         applies-to: "version-updates"
         patterns:
