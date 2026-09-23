@@ -35,7 +35,7 @@ jobs:
       APP_URL: http://localhost:5180
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.17.1
       - uses: actions/setup-node@v4
@@ -57,7 +57,7 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
         with:
           version: 10.17.1
       - uses: actions/setup-node@v4
