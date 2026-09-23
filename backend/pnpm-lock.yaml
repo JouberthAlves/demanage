@@ -88,8 +88,8 @@ importers:
         specifier: ^2.32.0
         version: 2.32.0(@typescript-eslint/parser@8.70.0(eslint@9.38.0(jiti@2.7.0))(typescript@5.9.3))(eslint@9.38.0(jiti@2.7.0))
       eslint-plugin-simple-import-sort:
-        specifier: ^12.1.1
-        version: 12.1.1(eslint@9.38.0(jiti@2.7.0))
+        specifier: ^14.0.0
+        version: 14.0.0(eslint@9.38.0(jiti@2.7.0))
       globals:
         specifier: ^16.4.0
         version: 16.4.0
@@ -1093,8 +1093,8 @@ packages:
       '@typescript-eslint/parser':
         optional: true
 
-  eslint-plugin-simple-import-sort@12.1.1:
-    resolution: {integrity: sha512-6nuzu4xwQtE3332Uz0to+TxDQYRLTKRESSc2hefVT48Zc8JthmN23Gx9lnYhu0FtkRSL1oxny3kJ2aveVhmOVA==}
+  eslint-plugin-simple-import-sort@14.0.0:
+    resolution: {integrity: sha512-NUJO0+XFCkk+o5EsAJruTgnfMEpeWrPWeJS15UVF60GgXmqz1BJ9/3hzlvG7lkL8Bubzos5cCLptThbFfPnSMQ==}
     peerDependencies:
       eslint: '>=5.0.0'
 
@@ -3243,7 +3243,7 @@ snapshots:
       - eslint-import-resolver-webpack
       - supports-color
 
-  eslint-plugin-simple-import-sort@12.1.1(eslint@9.38.0(jiti@2.7.0)):
+  eslint-plugin-simple-import-sort@14.0.0(eslint@9.38.0(jiti@2.7.0)):
     dependencies:
       eslint: 9.38.0(jiti@2.7.0)
 
