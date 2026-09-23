@@ -34,7 +34,7 @@ jobs:
       JWT_SECRET: ci-secret-not-for-production
       APP_URL: http://localhost:5180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: 10.17.1
@@ -56,7 +56,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6
         with:
           version: 10.17.1
