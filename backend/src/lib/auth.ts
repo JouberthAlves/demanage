@@ -1,4 +1,4 @@
-import type { User } from '@prisma/client';
+import type { User } from '@/generated/prisma/client';
 import bcrypt from 'bcryptjs';
 import type { CookieOptions, Request, Response } from 'express';
 import jwt, { type SignOptions } from 'jsonwebtoken';

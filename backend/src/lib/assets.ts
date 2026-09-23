@@ -2,7 +2,7 @@ import type {
   Asset,
   AssetTransaction,
   AssetTransactionType,
-} from '@prisma/client';
+} from '@/generated/prisma/client';
 
 import {
   calculateAssetAccounting,

@@ -1,4 +1,4 @@
-import type { PiggyBank, PiggyTransaction } from '@prisma/client';
+import type { PiggyBank, PiggyTransaction } from '@/generated/prisma/client';
 
 import { todayInSaoPaulo } from '@/lib/card-billing';
 import { decimal, money, ZERO } from '@/lib/decimal';
