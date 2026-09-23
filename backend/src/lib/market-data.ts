@@ -1,4 +1,4 @@
-import type { Asset } from '@prisma/client';
+import type { Asset } from '@/generated/prisma/client';
 
 import { dateKey, dateOnlyUtc, decimal } from '@/lib/decimal';
 import { prisma } from '@/lib/prisma';

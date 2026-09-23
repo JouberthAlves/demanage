@@ -2,7 +2,7 @@
 # deManage frontend — Vite build + nginx (same-origin /api proxy)
 ###############################
 
-FROM node:22 AS builder
+FROM node:25 AS builder
 
 WORKDIR /app
 

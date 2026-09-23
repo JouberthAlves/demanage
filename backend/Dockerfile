@@ -2,7 +2,7 @@
 # deManage API — multi-stage
 ###############################
 
-FROM node:22 AS builder
+FROM node:25 AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY . .
 RUN pnpm prisma generate
 RUN pnpm build
 
-FROM node:22
+FROM node:25
 
 WORKDIR /app
 
@@ -23,6 +23,7 @@ RUN npm install -g pnpm
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
 COPY --from=builder /app/pnpm-lock.yaml ./
 COPY --from=builder /app/package.json ./
 COPY entrypoint.sh .
