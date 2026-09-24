@@ -1,3 +1,4 @@
+# Dependabot configuration for bielxdh3/demanage
 version: 2
 updates:
   - package-ecosystem: "npm"
