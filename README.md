@@ -4,6 +4,11 @@
 
 <p align="center"><em>Suas finanças, no controle.</em></p>
 
+<p align="center">
+  <a href="https://github.com/bielxdh3/demanage/actions/workflows/ci.yml"><img src="https://github.com/bielxdh3/demanage/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
+  <a href="https://github.com/bielxdh3/demanage/actions/workflows/codeql.yml"><img src="https://github.com/bielxdh3/demanage/actions/workflows/codeql.yml/badge.svg" alt="CodeQL" /></a>
+</p>
+
 # deManage
 
 App pessoal de gestão financeira mensal em **pt-BR** e **BRL**. Dashboard com saldo do mês, despesas e entradas com agenda, cartões com fatura, cofrinho de metas e auth real — tudo no tema dark neon.
@@ -105,7 +110,15 @@ cd backend && pnpm format && pnpm build
 - [`AGENTS.md`](./AGENTS.md) — contexto rápido para agents
 - [`plans.md`](./plans.md) — roadmap P0 → P2+
 - [`CODING_STYLE.md`](./CODING_STYLE.md) — estilo de código
+- [`CONTRIBUTING.md`](./CONTRIBUTING.md) — como contribuir
+- [`SECURITY.md`](./SECURITY.md) — reporte responsável de vulnerabilidades
+- [`SUPPORT.md`](./SUPPORT.md) — suporte e triagem
+- [`GOVERNANCE.md`](./GOVERNANCE.md) — governança deste fork
 
-## Licença
+## Licenciamento e origem
 
-Uso pessoal. Sem garantia de que o comportamento financeiro (faturas, saldo do mês, auto-débito do cofrinho) cubra todos os casos da sua vida real — revise os números antes de confiar neles.
+Este repositório é um fork de [JouberthAlves/demanage](https://github.com/JouberthAlves/demanage). O upstream atualmente não publica uma licença de repositório, portanto este fork **não declara Apache-2.0 nem outra licença ampla sobre o código herdado**.
+
+Consulte [NOTICE](NOTICE) para atribuição e proveniência. Se o upstream adotar uma licença compatível no futuro, o licenciamento deste fork poderá ser alinhado explicitamente.
+
+Sem garantia de que o comportamento financeiro (faturas, saldo do mês, auto-débito do cofrinho) cubra todos os casos da sua vida real — revise os números antes de confiar neles.
