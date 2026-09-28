@@ -1,0 +1,46 @@
+name: Feature request
+description: Propose an improvement to deManage
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you would like.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Dashboard
+        - Expenses
+        - Income
+        - Cards
+        - Piggy bank
+        - Assets / currencies
+        - Authentication
+        - Backend / API
+        - Database / Prisma
+        - Self-host / deployment
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Sensitive impact
+      options:
+        - label: This may affect authentication, financial calculations, stored data, or deployment security.
