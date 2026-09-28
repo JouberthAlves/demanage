@@ -2,7 +2,7 @@
 # deManage API — multi-stage
 ###############################
 
-FROM node:25 AS builder
+FROM node:26 AS builder
 
 WORKDIR /app
 
@@ -14,7 +14,7 @@ COPY . .
 RUN pnpm prisma generate
 RUN pnpm build
 
-FROM node:25
+FROM node:26
 
 WORKDIR /app
 
