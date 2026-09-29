@@ -110,6 +110,11 @@ app.use(
   }),
 );
 
+app.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 app.use(cookieParser());
 app.use(express.json({ limit: '256kb' }));
 app.use(requestLogger);
