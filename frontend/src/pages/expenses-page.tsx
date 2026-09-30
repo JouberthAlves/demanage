@@ -55,6 +55,7 @@ import {
 } from '@/hooks/use-expenses';
 import { getCardTone } from '@/lib/card-tone';
 import {
+  canConfirmExpensePayment,
   canPayExpenseEarly,
   expenseContributionThisMonth,
   expenseMonthKey,
@@ -79,8 +80,9 @@ function expensePayState(
   now: Date,
   pending: boolean,
 ) {
+  if (expense.isInvoice) return { label: 'Fatura pendente', disabled: true };
   const isRecurring = expense.frequency !== 'unica' && !expense.isInvoice;
-  if (!isRecurring) return { label: 'Pago', disabled: pending };
+  if (!isRecurring) return { label: 'Pago', disabled: true };
 
   const hasCash = expenseCashAmount(expense) > 0;
   if (!hasCash) return { label: 'Via fatura', disabled: true };
@@ -88,7 +90,10 @@ function expensePayState(
     return { label: 'Pago', disabled: true };
   }
   if (isExpenseAutoDebitedThisMonth(expense, now)) {
-    return { label: 'Descontada', disabled: true };
+    return {
+      label: 'Confirmar pagamento',
+      disabled: pending || !canConfirmExpensePayment(expense, now),
+    };
   }
   if (canPayExpenseEarly(expense, now)) {
     return { label: 'Pagar agora', disabled: pending };
@@ -112,8 +117,9 @@ export function ExpensesPage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<RecurringExpense | null>(null);
   const [confirmPay, setConfirmPay] = useState<RecurringExpense | null>(null);
-  const [confirmDelete, setConfirmDelete] =
-    useState<RecurringExpense | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<RecurringExpense | null>(
+    null,
+  );
 
   const filtered = useMemo(() => {
     return expenses.filter((expense) => {
@@ -155,12 +161,10 @@ export function ExpensesPage() {
           id: expense.id,
           month: expenseMonthKey(now),
         });
-        toast.success(`"${expense.name}" paga antecipadamente neste mês`);
+        toast.success(`Pagamento de "${expense.name}" registrado neste mês`);
         return;
       }
-
-      await removeExpense.mutateAsync(expense.id);
-      toast.success(`"${expense.name}" marcada como paga`);
+      return;
     } catch (err) {
       const message = isAxiosError(err)
         ? (err.response?.data?.error ?? 'Não foi possível marcar como paga')
@@ -185,6 +189,8 @@ export function ExpensesPage() {
     confirmPay != null &&
     !confirmPay.isInvoice &&
     confirmPay.frequency === 'mensal';
+  const confirmPayIsAlreadyInBalance =
+    confirmPay != null && isExpenseAutoDebitedThisMonth(confirmPay, now);
 
   return (
     <div className='space-y-6'>
@@ -337,11 +343,11 @@ export function ExpensesPage() {
                           {isRecurring && hasCash ? (
                             paidEarly ? (
                               <span className='mt-0.5 block text-xs text-neon-green'>
-                                Pago antecipadamente
+                                Pagamento confirmado
                               </span>
                             ) : autoDebited ? (
-                              <span className='mt-0.5 block text-xs text-neon-green'>
-                                Descontada automaticamente
+                              <span className='mt-0.5 block text-xs text-neon-amber'>
+                                Já no saldo; confirme quando pagar
                               </span>
                             ) : (
                               <span className='mt-0.5 block text-xs text-muted-foreground'>
@@ -428,6 +434,7 @@ export function ExpensesPage() {
                               <Button
                                 variant='ghost'
                                 size='icon-sm'
+                                aria-label={`Editar ${expense.name}`}
                                 onClick={() => openEdit(expense)}
                               >
                                 <Pencil className='size-4' />
@@ -436,6 +443,7 @@ export function ExpensesPage() {
                             <Button
                               variant='ghost'
                               size='icon-sm'
+                              aria-label={`Excluir ${expense.name}`}
                               disabled={mutationPending}
                               onClick={() => setConfirmDelete(expense)}
                             >
@@ -476,19 +484,32 @@ export function ExpensesPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {confirmPayIsRecurring ? 'Pagar antecipadamente?' : 'Marcar como paga?'}
+              {confirmPayIsRecurring
+                ? confirmPayIsAlreadyInBalance
+                  ? 'Confirmar pagamento?'
+                  : 'Pagar antecipadamente?'
+                : 'Pagamento já registrado'}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {confirmPayIsRecurring ? (
-                <>
-                  Isso marca o ciclo deste mês de &quot;{confirmPay?.name}&quot;
-                  como pago agora. A recorrência continua normalmente nos
-                  próximos meses e o valor entra no saldo imediatamente.
-                </>
+                confirmPayIsAlreadyInBalance ? (
+                  <>
+                    Isso registra que o ciclo deste mês de &quot;
+                    {confirmPay?.name}&quot; foi pago. O saldo já considerava o
+                    desconto na data prevista; essa confirmação atualiza o
+                    histórico de pagamentos.
+                  </>
+                ) : (
+                  <>
+                    Isso marca o ciclo deste mês de &quot;{confirmPay?.name}
+                    &quot; como pago agora. A recorrência continua normalmente
+                    nos próximos meses e o valor entra no saldo imediatamente.
+                  </>
+                )
               ) : (
                 <>
-                  Isso marca &quot;{confirmPay?.name}&quot; como paga e remove esse
-                  item concluído da lista.
+                  Despesas avulsas já representam valores pagos no histórico.
+                  Use o botão de excluir somente para remover um lançamento.
                 </>
               )}
             </AlertDialogDescription>
@@ -502,7 +523,11 @@ export function ExpensesPage() {
                 setConfirmPay(null);
               }}
             >
-              {confirmPayIsRecurring ? 'Pagar agora' : 'Marcar como paga'}
+              {confirmPayIsRecurring
+                ? confirmPayIsAlreadyInBalance
+                  ? 'Confirmar pagamento'
+                  : 'Pagar agora'
+                : 'Entendi'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

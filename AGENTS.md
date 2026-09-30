@@ -16,7 +16,7 @@ Guia rápido para agents (e humanos) se situarem neste repositório.
 
 **deManage** é um app pessoal de gestão de despesas mensais (pt-BR, moeda BRL).
 
-Fase atual: **UI completa + dados locais**. Sem login/auth e sem API de domínio ainda. Próximos passos estão em [`plans.md`](./plans.md).
+Fase atual: **app full-stack com autenticação e API de domínio**. O frontend React consome a API Express; Prisma persiste os dados em PostgreSQL. O roadmap vigente está em [`plans.md`](./plans.md).
 
 ## Estrutura
 
@@ -37,9 +37,9 @@ Espelha o padrão `frontend/` + `backend/` usado em outros apps do autor (ex.: r
 | Camada | Escolha |
 |--------|---------|
 | UI | React 19 + TypeScript |
-| Bundler | Vite 7 |
+| Bundler | Vite 8 |
 | Estilo | Tailwind 4 + shadcn/Radix |
-| Rotas | React Router 7 |
+| Rotas | React Router 8 |
 | Estado local | Zustand + `persist` (localStorage) |
 | Gráficos | Recharts (tema dark neon) |
 | Toasts | sonner |
@@ -47,7 +47,7 @@ Espelha o padrão `frontend/` + `backend/` usado em outros apps do autor (ex.: r
 
 ## Stack (backend)
 
-Express 5 + TypeScript. Por enquanto só `GET /health`. Pronto para receber auth/API conforme `plans.md`.
+Express 5 + TypeScript, Prisma 7 e PostgreSQL. A API fornece autenticação, dados financeiros, cofrinhos, patrimônio e healthcheck.
 
 ## Rotas da UI
 

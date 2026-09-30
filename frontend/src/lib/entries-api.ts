@@ -13,12 +13,19 @@ export type ApiEntry = {
   date: string | null;
   receiptHoldForMonth?: string | null;
   receivedForMonth?: string | null;
+  receivedAt?: string | null;
+  createdAt?: string;
   customTagId?: string | null;
   customTag?: {
     id: string;
     name: string;
     color: string;
   } | null;
+  receipts?: Array<{
+    month: string;
+    amount: string | number;
+    receivedAt: string;
+  }>;
 };
 
 export type EntryPayload = {
@@ -33,7 +40,7 @@ export type EntryPayload = {
   customTagId?: string | null;
 };
 
-export type SalaryReceiptState = 'automatic' | 'received' | 'waiting';
+export type EntryReceiptState = 'automatic' | 'received' | 'waiting';
 
 function mapDateOnly(value?: string | null) {
   if (!value) return undefined;
@@ -53,8 +60,15 @@ export function mapEntryToIncome(entry: ApiEntry): Income {
     date: mapDateOnly(entry.date),
     receiptHoldForMonth: entry.receiptHoldForMonth ?? undefined,
     receivedForMonth: entry.receivedForMonth ?? undefined,
+    receivedAt: entry.receivedAt ?? undefined,
+    createdAt: entry.createdAt,
     customTagId: entry.customTagId ?? undefined,
     customTag: entry.customTag ?? undefined,
+    receipts: entry.receipts?.map((receipt) => ({
+      month: receipt.month,
+      amount: Number(receipt.amount),
+      receivedAt: receipt.receivedAt,
+    })),
   };
 }
 
@@ -73,10 +87,10 @@ export async function updateEntry(id: string, payload: Partial<EntryPayload>) {
   return mapEntryToIncome(data);
 }
 
-export async function setSalaryReceiptState(
+export async function setEntryReceiptState(
   id: string,
   month: string,
-  state: SalaryReceiptState,
+  state: EntryReceiptState,
 ) {
   const { data } = await api.post<ApiEntry>(`/entries/${id}/receipt-state`, {
     month,

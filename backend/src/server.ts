@@ -8,56 +8,13 @@ import helmet from 'helmet';
 import { createServer } from 'http';
 
 import api from './api';
+import { csrfProtection } from './middlewares/csrf-protection';
 import { requestLogger } from './middlewares/request-logger';
-import { API_PORT, APP_URL, NODE_ENV } from './utils/var';
+import { isAllowedBrowserOrigin } from './lib/request-origin';
+import { API_PORT, NODE_ENV } from './utils/var';
 
 const app = express();
 const httpServer = createServer(app);
-const normalizedAppOrigin = APP_URL?.replace(/\/$/, '');
-
-function isLoopbackHostname(hostname: string) {
-  return (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname === '::1' ||
-    hostname === '[::1]'
-  );
-}
-
-function isPrivateIpv4Hostname(hostname: string) {
-  const parts = hostname.split('.').map(Number);
-  if (
-    parts.length !== 4 ||
-    parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)
-  ) {
-    return false;
-  }
-
-  const [first, second] = parts;
-  return (
-    first === 10 ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
-}
-
-function isDevelopmentBrowserOrigin(origin: string) {
-  try {
-    const url = new URL(origin);
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return false;
-    }
-
-    return (
-      isLoopbackHostname(url.hostname) ||
-      isPrivateIpv4Hostname(url.hostname) ||
-      url.hostname.endsWith('.local')
-    );
-  } catch {
-    return false;
-  }
-}
-
 if (NODE_ENV === 'production') {
   app.use(
     helmet({
@@ -96,13 +53,7 @@ app.use(
         return;
       }
 
-      const normalizedOrigin = origin.replace(/\/$/, '');
-      const allowed =
-        normalizedOrigin === normalizedAppOrigin ||
-        (NODE_ENV !== 'production' &&
-          isDevelopmentBrowserOrigin(normalizedOrigin));
-
-      callback(null, allowed);
+      callback(null, isAllowedBrowserOrigin(origin));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -110,7 +61,13 @@ app.use(
   }),
 );
 
+app.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 app.use(cookieParser());
+app.use(csrfProtection);
 app.use(express.json({ limit: '256kb' }));
 app.use(requestLogger);
 

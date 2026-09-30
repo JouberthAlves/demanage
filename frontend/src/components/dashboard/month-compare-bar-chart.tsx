@@ -1,4 +1,5 @@
 import { CalendarClock } from 'lucide-react';
+import { useMemo } from 'react';
 import {
   Bar,
   BarChart,
@@ -11,30 +12,41 @@ import {
 } from 'recharts';
 
 import { formatCurrencyCompact } from '@/lib/format';
-import {
-  selectMonthlyExpenses,
-  selectMonthlyIncome,
-  useFinanceStore,
-} from '@/stores/finance-store';
+import { buildMonthlyHistory } from '@/lib/monthly-history';
+import { useFinanceStore } from '@/stores/finance-store';
 
 export function MonthCompareBarChart() {
-  const history = useFinanceStore((state) => state.history);
-  const currentIncome = useFinanceStore(selectMonthlyIncome);
-  const currentExpense = useFinanceStore(selectMonthlyExpenses);
+  const expenses = useFinanceStore((state) => state.expenses);
+  const incomes = useFinanceStore((state) => state.incomes);
+  const calendarDayKey = useFinanceStore((state) => state.calendarDayKey);
+  const history = useMemo(() => {
+    const [year, month, day] = calendarDayKey.split('-').map(Number);
+    return buildMonthlyHistory(
+      expenses,
+      incomes,
+      new Date(year, month - 1, day),
+    );
+  }, [calendarDayKey, expenses, incomes]);
+  const currentMonth = history[history.length - 1];
+  const currentIncome = currentMonth?.income ?? 0;
+  const currentExpense = currentMonth?.expense ?? 0;
 
   const previous = history[history.length - 2];
 
-  if (!previous) {
+  if (!previous?.hasActivity) {
     return (
       <div className='flex h-72 flex-col items-center justify-center gap-3 px-6 text-center'>
         <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-green/10'>
           <CalendarClock className='size-6 text-neon-green' />
         </div>
         <div className='space-y-1'>
-          <p className='font-medium'>Histórico mensal em breve</p>
+          <p className='font-medium'>
+            Ainda não há pagamentos ou recebimentos anteriores
+          </p>
           <p className='text-sm text-muted-foreground'>
-            Ainda não há mês anterior para comparar. Este mês:{' '}
-            {formatCurrencyCompact(currentIncome)} / {formatCurrencyCompact(currentExpense)}.
+            A comparação aparece quando houver movimentações registradas em um
+            mês anterior. Este mês: {formatCurrencyCompact(currentIncome)}{' '}
+            recebidos · {formatCurrencyCompact(currentExpense)} pagos.
           </p>
         </div>
       </div>

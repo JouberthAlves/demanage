@@ -5,17 +5,19 @@ import {
   createEntry,
   deleteEntry,
   listEntries,
-  setSalaryReceiptState,
+  setEntryReceiptState,
   updateEntry,
   type EntryPayload,
-  type SalaryReceiptState,
+  type EntryReceiptState,
 } from '@/lib/entries-api';
 import { useFinanceStore } from '@/stores/finance-store';
 
 export const ENTRIES_QUERY_KEY = ['entries'] as const;
 const PATRIMONY_QUERY_KEY = ['patrimony'] as const;
 
-function invalidateEntryRelated(queryClient: ReturnType<typeof useQueryClient>) {
+function invalidateEntryRelated(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
   void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
   void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
 }
@@ -61,7 +63,7 @@ export function useUpdateEntry() {
   });
 }
 
-export function useSalaryReceiptState() {
+export function useEntryReceiptState() {
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -72,8 +74,8 @@ export function useSalaryReceiptState() {
     }: {
       id: string;
       month: string;
-      state: SalaryReceiptState;
-    }) => setSalaryReceiptState(id, month, state),
+      state: EntryReceiptState;
+    }) => setEntryReceiptState(id, month, state),
     onSuccess: () => invalidateEntryRelated(queryClient),
   });
 }

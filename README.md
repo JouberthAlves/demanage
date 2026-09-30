@@ -32,8 +32,8 @@ Faturas de cartão fecham no dia configurado (fuso America/Sao_Paulo). Recupera�
 
 Monorepo `frontend/` + `backend/`, no mesmo espírito de outros apps do autor — **sem** pacotes corporativos (`@crediari`, SSO, etc.).
 
-- **Frontend** — React 19, Vite 7, TypeScript, Tailwind 4, shadcn/Radix, React Router 7, Zustand (cache sem `persist`), TanStack Query, Recharts, sonner. Visual dark `#0b0b0b` com neon âmbar (`#FFB800`) e verde (`#34D399`).
-- **Backend** — Express 5, Prisma 6, PostgreSQL, JWT em cookie httpOnly, rate limit em auth, Helmet/CORS.
+- **Frontend** — React 19, Vite 8, TypeScript 6, Tailwind 4, shadcn/Radix, React Router 8, Zustand (cache sem `persist`), TanStack Query, Recharts, sonner. Visual dark `#0b0b0b` com neon âmbar (`#FFB800`) e verde (`#34D399`).
+- **Backend** — Express 5, Prisma 7, PostgreSQL, JWT em cookie httpOnly, rate limit em auth, Helmet/CORS.
 - **Domínio** — `User`, `Card`, `Expense`, `Entry`, `PiggyBank` / `PiggyTransaction`, tags customizadas. Entradas e despesas respeitam dia/mês de início e data de término no saldo do mês.
 - **Deploy** — Dockerfiles + `entrypoint` que roda `prisma migrate deploy` antes de subir a API. Frontend com `VITE_API_URL`.
 
@@ -67,7 +67,7 @@ Detalhe de features e checklist de deploy ficam em [`plans.md`](./plans.md). Est
 
 ## Como rodar
 
-Node **20+**, **pnpm**, PostgreSQL (Compose incluso).
+Node **20.19+** ou **22.12+**, **pnpm**, PostgreSQL (Compose incluso). Esses mínimos atendem ao Vite 8; a imagem Docker de produção usa Node 26.
 
 ```bash
 # Banco

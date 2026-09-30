@@ -38,6 +38,8 @@ const PROVIDERS = {
 const QUOTE_TTL_MS = 5 * 60 * 1000;
 const PROVIDER_COOLDOWN_MS = 2 * 60 * 1000;
 const HISTORY_MAX_GAP_MS = 3 * 86_400_000;
+// Includes ten days of provider look-back used by the patrimony chart.
+export const MAX_HISTORY_RANGE_DAYS = 3663;
 
 const inflight = new Map<string, Promise<unknown>>();
 const cooldownUntil = new Map<string, number>();
@@ -86,9 +88,29 @@ function isFreshHistory(points: MarketPoint[], from: Date, to: Date) {
 function parseDateInput(value: string) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) throw new MarketDataError('Data inválida');
-  return new Date(
+  const parsed = new Date(
     Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 12),
   );
+  if (dateKey(parsed) !== value) throw new MarketDataError('Data inválida');
+  return parsed;
+}
+
+export function validateHistoryRange(
+  fromInput: string,
+  toInput: string,
+  now = new Date(),
+) {
+  const from = parseDateInput(fromInput);
+  const to = parseDateInput(toInput);
+  if (from > to) throw new MarketDataError('Período inválido');
+
+  const today = parseDateInput(dateKey(now));
+  if (to > today) throw new MarketDataError('Data futura não permitida');
+  if (daysBetween(from, to) > MAX_HISTORY_RANGE_DAYS) {
+    throw new MarketDataError('O período máximo é de 10 anos');
+  }
+
+  return { from, to };
 }
 
 function addDays(date: Date, days: number) {
@@ -201,8 +223,7 @@ async function fetchBcbRows(url: string): Promise<BcbRow[]> {
       throw new MarketDataError('Provider bloqueado pela rede');
     }
     const body = (await response.json()) as
-      | BcbRow[]
-      | { erro?: { statusCode?: number } };
+      BcbRow[] | { erro?: { statusCode?: number } };
     if (!Array.isArray(body)) {
       if (body.erro?.statusCode === 404) return [];
       throw new MarketDataError('Resposta CDI inválida');
@@ -385,9 +406,7 @@ export async function getAssetHistory(
   fromInput: string,
   toInput: string,
 ): Promise<MarketSeries> {
-  const from = parseDateInput(fromInput);
-  const to = parseDateInput(toInput);
-  if (from > to) throw new MarketDataError('Período inválido');
+  const { from, to } = validateHistoryRange(fromInput, toInput);
   return asset === 'BTC' ? getBtcHistory(from, to) : getUsdHistory(from, to);
 }
 
@@ -505,9 +524,10 @@ async function fetchUsdHistoryFromAwesomeApi(from: Date, to: Date) {
     );
     const count = Math.min(360, daysBetween(cursor, chunkEnd));
     const url = `https://economia.awesomeapi.com.br/json/daily/USD-BRL/${count}?start_date=${yyyymmdd(cursor)}&end_date=${yyyymmdd(chunkEnd)}`;
-    const rows = await fetchJson<
-      Array<{ bid?: string; timestamp?: string; create_date?: string }>
-    >(url);
+    const rows =
+      await fetchJson<
+        Array<{ bid?: string; timestamp?: string; create_date?: string }>
+      >(url);
     for (const row of rows) {
       const bid = Number(row.bid);
       if (!Number.isFinite(bid) || bid <= 0) continue;
@@ -579,11 +599,9 @@ export async function getCdiHistory(
   fromInput: string,
   toInput: string,
 ): Promise<MarketSeries> {
-  const from = parseDateInput(fromInput);
-  const to = parseDateInput(toInput);
+  const { from, to } = validateHistoryRange(fromInput, toInput);
   const provider = PROVIDERS.CDI;
   const key = 'CDI_DAILY_PERCENT';
-  if (from > to) throw new MarketDataError('Período inválido');
 
   try {
     const points: MarketPoint[] = [];
@@ -631,9 +649,12 @@ export async function getIpcaHistory(
 ): Promise<MarketSeries> {
   const from = parseDateInput(fromInput);
   const to = parseDateInput(toInput);
+  if (from > to) throw new MarketDataError('Período inválido');
+  if (to > parseDateInput(dateKey(new Date()))) {
+    throw new MarketDataError('Data futura não permitida');
+  }
   const provider = PROVIDERS.IPCA;
   const key = 'IPCA_INDEX_EFFECTIVE';
-  if (from > to) throw new MarketDataError('Período inválido');
 
   try {
     const rows = await fetchJson<Array<Record<string, string>>>(
@@ -652,8 +673,12 @@ export async function getIpcaHistory(
       // Conservador contra lookahead: o índice só passa a valer no dia 15
       // do mês seguinte ao mês de referência. Isso nunca antecipa publicação.
       const effectiveAt = new Date(Date.UTC(year, month, 15, 12));
-      if (effectiveAt > today || effectiveAt < from || effectiveAt > to) continue;
-      points.push({ date: dateKey(effectiveAt), value: decimal(value).toString() });
+      if (effectiveAt > today || effectiveAt < from || effectiveAt > to)
+        continue;
+      points.push({
+        date: dateKey(effectiveAt),
+        value: decimal(value).toString(),
+      });
     }
     const deduped = dedupePoints(points);
     if (deduped.length === 0) {

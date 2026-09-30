@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
 import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
 import { PIGGY_BANKS_QUERY_KEY } from '@/hooks/use-piggy-banks';
+import { PATRIMONY_QUERY_KEY } from '@/hooks/query-keys';
 import {
   createAssetTransaction,
   deleteAssetTransaction,
@@ -18,7 +19,6 @@ import {
 import type { Asset, PatrimonySettings } from '@/types/patrimony';
 
 export const ASSETS_QUERY_KEY = ['assets'] as const;
-export const PATRIMONY_QUERY_KEY = ['patrimony'] as const;
 
 export function useAssetsSummary() {
   return useQuery({ queryKey: ASSETS_QUERY_KEY, queryFn: getAssetsSummary });
@@ -39,7 +39,9 @@ export function useAssetHistory(asset: Asset, from: string, to: string) {
   });
 }
 
-function invalidateAssetRelated(queryClient: ReturnType<typeof useQueryClient>) {
+function invalidateAssetRelated(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
   void queryClient.invalidateQueries({ queryKey: ASSETS_QUERY_KEY });
   void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
   void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });

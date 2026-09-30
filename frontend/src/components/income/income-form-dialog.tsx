@@ -152,9 +152,7 @@ export function IncomeFormDialog({
 
     const isCustom = form.typeKey.startsWith('tag:');
     const customTagId = isCustom ? form.typeKey.slice(4) : null;
-    const type: IncomeType = isCustom
-      ? 'outro'
-      : (form.typeKey as IncomeType);
+    const type: IncomeType = isCustom ? 'outro' : (form.typeKey as IncomeType);
 
     let receiveDay: number | null = null;
     let startsAt: string | null = null;
@@ -456,7 +454,7 @@ export function IncomeFormDialog({
 
             {form.frequency === 'unica' ? (
               <div className='flex flex-col gap-2'>
-                <Label htmlFor='income-date'>Data</Label>
+                <Label htmlFor='income-date'>Data prevista</Label>
                 <DatePicker
                   id='income-date'
                   value={form.date}
@@ -466,6 +464,10 @@ export function IncomeFormDialog({
                   placeholder='Selecione a data'
                   allowClear
                 />
+                <p className='text-xs text-muted-foreground'>
+                  Depois que o valor entrar, confirme &quot;Já recebi&quot; para
+                  incluí-lo no histórico.
+                </p>
               </div>
             ) : null}
 
@@ -479,7 +481,11 @@ export function IncomeFormDialog({
               >
                 Cancelar
               </Button>
-              <Button type='submit' className='rounded-lg' disabled={submitting}>
+              <Button
+                type='submit'
+                className='rounded-lg'
+                disabled={submitting}
+              >
                 {submitting ? <Spinner data-icon='inline-start' /> : null}
                 Salvar
               </Button>
