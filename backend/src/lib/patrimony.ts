@@ -1,6 +1,7 @@
 import { Prisma } from '@/generated/prisma/client';
 
-import { dateKey, dateOnlyUtc, decimal, money, ZERO } from '@/lib/decimal';
+import { dateOnlyUtc, decimal, money, ZERO } from '@/lib/decimal';
+import { dateKeyInSaoPaulo, todayInSaoPaulo } from '@/lib/card-billing';
 import {
   MAX_HISTORY_RANGE_DAYS,
   getAssetHistory,
@@ -12,9 +13,9 @@ import {
 import { prisma } from '@/lib/prisma';
 
 type ExpenseWithSplits = Prisma.ExpenseGetPayload<{
-  include: { splits: true };
+  include: { splits: true; payments: true };
 }>;
-type EntryRecord = Prisma.EntryGetPayload<{}>;
+type EntryRecord = Prisma.EntryGetPayload<{ include: { receipts: true } }>;
 type AssetTx = Prisma.AssetTransactionGetPayload<{}>;
 type PiggyTx = Prisma.PiggyTransactionGetPayload<{}>;
 
@@ -23,20 +24,6 @@ type CashFlow = {
   amount: Prisma.Decimal;
   external: boolean;
 };
-
-type ExpensePaymentState = Pick<
-  ExpenseWithSplits,
-  'frequency' | 'paidForMonth' | 'paidAt' | 'updatedAt'
->;
-type EntryReceiptState = Pick<
-  EntryRecord,
-  | 'type'
-  | 'frequency'
-  | 'receiptHoldForMonth'
-  | 'receivedForMonth'
-  | 'receivedAt'
-  | 'updatedAt'
->;
 
 export class PatrimonyError extends Error {
   constructor(message: string) {
@@ -51,21 +38,12 @@ function addDays(date: Date, days: number) {
   return next;
 }
 
-function clampDay(year: number, month: number, day: number) {
-  const last = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
-  return Math.min(Math.max(day, 1), last);
-}
-
-function cycleMonthKey(year: number, month: number) {
-  return `${year}-${String(month + 1).padStart(2, '0')}`;
-}
-
 function parseHistoryDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new PatrimonyError('Data inválida');
   }
   const date = dateOnlyUtc(value);
-  if (Number.isNaN(date.getTime()) || dateKey(date) !== value) {
+  if (Number.isNaN(date.getTime()) || dateKeyInSaoPaulo(date) !== value) {
     throw new PatrimonyError('Data inválida');
   }
   return date;
@@ -76,55 +54,8 @@ export function calculationStart(base: Date, today: Date) {
   return base < earliest ? earliest : base;
 }
 
-function eventDateForMonth(
-  explicitDate: Date | null,
-  fallbackUpdatedAt: Date,
-  monthKey: string,
-) {
-  const eventDate = explicitDate ?? fallbackUpdatedAt;
-  return dateKey(eventDate).slice(0, 7) === monthKey
-    ? dateOnlyUtc(eventDate)
-    : null;
-}
-
-export function resolveExpenseOccurrenceDate(
-  expense: ExpensePaymentState,
-  scheduledDate: Date,
-  monthKey: string,
-) {
-  if (expense.frequency !== 'mensal' || expense.paidForMonth !== monthKey) {
-    return scheduledDate;
-  }
-
-  const paidAt = eventDateForMonth(expense.paidAt, expense.updatedAt, monthKey);
-  if (!paidAt) return scheduledDate;
-
-  // Se pagou antes, o caixa sai no pagamento. Se marcou depois do vencimento,
-  // o débito automático já havia acontecido na data programada.
-  return paidAt < scheduledDate ? paidAt : scheduledDate;
-}
-
-export function resolveEntryOccurrenceDate(
-  entry: EntryReceiptState,
-  scheduledDate: Date,
-  monthKey: string,
-) {
-  if (entry.type !== 'salario' || entry.frequency !== 'mensal') {
-    return scheduledDate;
-  }
-
-  if (entry.receiptHoldForMonth === monthKey) {
-    return null;
-  }
-
-  if (entry.receivedForMonth !== monthKey) {
-    return scheduledDate;
-  }
-
-  return (
-    eventDateForMonth(entry.receivedAt, entry.updatedAt, monthKey) ??
-    scheduledDate
-  );
+export function patrimonyToday(now = new Date()) {
+  return dateOnlyUtc(todayInSaoPaulo(now));
 }
 
 function amountForExpense(expense: ExpenseWithSplits) {
@@ -138,25 +69,7 @@ function amountForExpense(expense: ExpenseWithSplits) {
   return decimal(expense.amount);
 }
 
-function occurrenceMonths(from: Date, to: Date) {
-  const result: Array<{ year: number; month: number }> = [];
-  let year = from.getUTCFullYear();
-  let month = from.getUTCMonth();
-  while (
-    year < to.getUTCFullYear() ||
-    (year === to.getUTCFullYear() && month <= to.getUTCMonth())
-  ) {
-    result.push({ year, month });
-    month += 1;
-    if (month > 11) {
-      month = 0;
-      year += 1;
-    }
-  }
-  return result;
-}
-
-function buildCashFlows(args: {
+export function buildCashFlows(args: {
   baseDate: Date;
   to: Date;
   expenses: ExpenseWithSplits[];
@@ -165,84 +78,46 @@ function buildCashFlows(args: {
   internalEntryIds: Set<string>;
 }) {
   const flows: CashFlow[] = [];
-  const months = occurrenceMonths(args.baseDate, args.to);
-  const baseKey = dateKey(args.baseDate);
-  const toKey = dateKey(args.to);
+  const baseKey = dateKeyInSaoPaulo(args.baseDate);
+  const toKey = dateKeyInSaoPaulo(args.to);
 
   for (const expense of args.expenses) {
-    const cash = amountForExpense(expense);
-    if (cash.lte(0)) continue;
     const external = !args.internalExpenseIds.has(expense.id);
-
-    if (expense.frequency === 'unica') {
-      const when = dateKey(expense.occurredAt ?? expense.createdAt);
-      if (when > baseKey && when <= toKey) {
-        flows.push({ date: when, amount: cash.negated(), external });
+    if (expense.systemOrigin !== 'manual') {
+      if (expense.archivedAt) continue;
+      const amount = amountForExpense(expense);
+      const when = dateKeyInSaoPaulo(expense.occurredAt ?? expense.createdAt);
+      if (amount.gt(0) && when > baseKey && when <= toKey) {
+        flows.push({ date: when, amount: amount.negated(), external: false });
       }
-      continue;
-    }
-
-    for (const { year, month } of months) {
-      const day = clampDay(year, month, expense.dueDay ?? 1);
-      const scheduledDate = new Date(Date.UTC(year, month, day, 12));
-      if (expense.startsAt && scheduledDate < dateOnlyUtc(expense.startsAt)) {
-        continue;
+    } else if (expense.payments.length > 0) {
+      for (const payment of expense.payments) {
+        const when = dateKeyInSaoPaulo(payment.paidAt);
+        const amount = decimal(payment.amount);
+        if (amount.gt(0) && when > baseKey && when <= toKey) {
+          flows.push({ date: when, amount: amount.negated(), external });
+        }
       }
-      if (expense.endsAt && scheduledDate > dateOnlyUtc(expense.endsAt)) {
-        continue;
-      }
-
-      const monthKey = cycleMonthKey(year, month);
-      const when = resolveExpenseOccurrenceDate(
-        expense,
-        scheduledDate,
-        monthKey,
-      );
-      const key = dateKey(when);
-      if (key <= baseKey || key > toKey) continue;
-
-      const multiplier =
-        expense.frequency === 'semanal' ? decimal(4) : decimal(1);
-      flows.push({
-        date: key,
-        amount: cash.mul(multiplier).negated(),
-        external,
-      });
     }
   }
 
   for (const entry of args.entries) {
-    const amount = decimal(entry.amount);
-    if (amount.lte(0)) continue;
     const external = !args.internalEntryIds.has(entry.id);
-
-    if (entry.frequency === 'unica') {
-      const when = dateKey(entry.date ?? entry.createdAt);
-      if (when > baseKey && when <= toKey) {
-        flows.push({ date: when, amount, external });
+    if (entry.systemOrigin !== 'manual') {
+      if (entry.archivedAt) continue;
+      const amount = decimal(entry.amount);
+      const when = dateKeyInSaoPaulo(entry.date ?? entry.createdAt);
+      if (amount.gt(0) && when > baseKey && when <= toKey) {
+        flows.push({ date: when, amount, external: false });
       }
-      continue;
-    }
-
-    for (const { year, month } of months) {
-      const day = clampDay(year, month, entry.receiveDay ?? 1);
-      const scheduledDate = new Date(Date.UTC(year, month, day, 12));
-      if (entry.startsAt && scheduledDate < dateOnlyUtc(entry.startsAt)) {
-        continue;
+    } else if (entry.receipts.length > 0) {
+      for (const receipt of entry.receipts) {
+        const when = dateKeyInSaoPaulo(receipt.receivedAt);
+        const amount = decimal(receipt.amount);
+        if (amount.gt(0) && when > baseKey && when <= toKey) {
+          flows.push({ date: when, amount, external });
+        }
       }
-      if (entry.endsAt && scheduledDate > dateOnlyUtc(entry.endsAt)) {
-        continue;
-      }
-
-      const monthKey = cycleMonthKey(year, month);
-      const when = resolveEntryOccurrenceDate(entry, scheduledDate, monthKey);
-      if (!when) continue;
-      const key = dateKey(when);
-      if (key <= baseKey || key > toKey) continue;
-
-      const multiplier =
-        entry.frequency === 'semanal' ? decimal(4) : decimal(1);
-      flows.push({ date: key, amount: amount.mul(multiplier), external });
     }
   }
 
@@ -260,7 +135,7 @@ function latestPointAtOrBefore(points: MarketPoint[], day: string) {
 
 function sumPiggyAt(transactions: PiggyTx[], day: string) {
   return transactions.reduce((sum, transaction) => {
-    if (dateKey(transaction.date) > day) return sum;
+    if (dateKeyInSaoPaulo(transaction.date) > day) return sum;
     return transaction.type === 'withdraw'
       ? sum.minus(transaction.amount)
       : sum.plus(transaction.amount);
@@ -273,7 +148,10 @@ function assetQuantityAt(
   day: string,
 ) {
   return transactions.reduce((sum, transaction) => {
-    if (transaction.asset !== asset || dateKey(transaction.date) > day) {
+    if (
+      transaction.asset !== asset ||
+      dateKeyInSaoPaulo(transaction.date) > day
+    ) {
       return sum;
     }
     if (transaction.type === 'SELL') return sum.minus(transaction.quantity);
@@ -290,6 +168,7 @@ export async function getPatrimonyHistory(
   userId: string,
   fromInput?: string,
   toInput?: string,
+  now = new Date(),
 ) {
   const settings = await prisma.patrimonySettings.findUnique({
     where: { userId },
@@ -298,7 +177,7 @@ export async function getPatrimonyHistory(
     throw new PatrimonyError('Patrimônio ainda não configurado');
   }
 
-  const today = dateOnlyUtc(new Date());
+  const today = patrimonyToday(now);
   const base = dateOnlyUtc(settings.baseDate);
   const requestedFrom = fromInput ? parseHistoryDate(fromInput) : base;
   const requestedTo = toInput ? parseHistoryDate(toInput) : today;
@@ -315,9 +194,9 @@ export async function getPatrimonyHistory(
     await Promise.all([
       prisma.expense.findMany({
         where: { userId },
-        include: { splits: true },
+        include: { splits: true, payments: true },
       }),
-      prisma.entry.findMany({ where: { userId } }),
+      prisma.entry.findMany({ where: { userId }, include: { receipts: true } }),
       prisma.assetTransaction.findMany({
         where: { userId },
         orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
@@ -354,22 +233,22 @@ export async function getPatrimonyHistory(
     flowsByDay.set(flow.date, list);
   }
 
-  const calculationBaseKey = dateKey(calculationBase);
-  const storedBaseKey = dateKey(base);
+  const calculationBaseKey = dateKeyInSaoPaulo(calculationBase);
+  const storedBaseKey = dateKeyInSaoPaulo(base);
   const marketFrom = addDays(calculationBase, -10);
   const ipcaFrom = addDays(calculationBase, -800);
   const [btcSeries, usdSeries, cdiSeries, ipcaSeries, btcQuote, usdQuote] =
     await Promise.all([
-      getAssetHistory('BTC', dateKey(marketFrom), dateKey(to)),
-      getAssetHistory('USD', dateKey(marketFrom), dateKey(to)),
-      getCdiHistory(calculationBaseKey, dateKey(to)),
-      getIpcaHistory(dateKey(ipcaFrom), dateKey(to)),
+      getAssetHistory('BTC', dateKeyInSaoPaulo(marketFrom), dateKeyInSaoPaulo(to)),
+      getAssetHistory('USD', dateKeyInSaoPaulo(marketFrom), dateKeyInSaoPaulo(to)),
+      getCdiHistory(calculationBaseKey, dateKeyInSaoPaulo(to)),
+      getIpcaHistory(dateKeyInSaoPaulo(ipcaFrom), dateKeyInSaoPaulo(to)),
       getAssetQuote('BTC'),
       getAssetQuote('USD'),
     ]);
 
-  const todayKey = dateKey(today);
-  if (dateKey(to) === todayKey) {
+  const todayKey = dateKeyInSaoPaulo(today);
+  if (dateKeyInSaoPaulo(to) === todayKey) {
     btcSeries.points.push({ date: todayKey, value: btcQuote.value });
     usdSeries.points.push({ date: todayKey, value: usdQuote.value });
     btcSeries.points = dedupeMarket(btcSeries.points);
@@ -423,7 +302,7 @@ export async function getPatrimonyHistory(
 
   let cursor = calculationBase;
   while (cursor <= to) {
-    const key = dateKey(cursor);
+    const key = dateKeyInSaoPaulo(cursor);
     if (key !== calculationBaseKey) {
       const dayFlows = flowsByDay.get(key) ?? [];
       for (const flow of dayFlows) cash = cash.plus(flow.amount);
@@ -521,9 +400,10 @@ export async function savePatrimonySettings(
   userId: string,
   baseDateInput: unknown,
   openingCashInput: unknown,
+  now = new Date(),
 ) {
   const baseDate = parseHistoryDate(String(baseDateInput ?? ''));
-  const today = dateOnlyUtc(new Date());
+  const today = patrimonyToday(now);
   if (baseDate > today) {
     throw new PatrimonyError('Data-base futura não é permitida');
   }
