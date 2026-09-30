@@ -253,6 +253,9 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           ...(parsedAmount !== undefined ? { amount: parsedAmount } : {}),
           ...(category !== undefined ? { category } : {}),
           ...(frequency !== undefined ? { frequency } : {}),
+          ...(nextFrequency === 'unica' && existing.frequency !== 'unica'
+            ? { occurredAt: new Date() }
+            : {}),
           cardId: denormalizedCardId(resolvedSplits),
           ...(resolvedDueDay !== undefined ? { dueDay: resolvedDueDay } : {}),
           ...(resolvedStartsAt !== undefined

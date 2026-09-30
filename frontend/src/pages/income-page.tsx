@@ -52,7 +52,7 @@ import { useCustomTags } from '@/hooks/use-custom-tags';
 import {
   useDeleteEntry,
   useEntries,
-  useSalaryReceiptState,
+  useEntryReceiptState,
 } from '@/hooks/use-entries';
 import { formatCurrency } from '@/lib/format';
 import {
@@ -70,7 +70,7 @@ export function IncomePage() {
   const { data: incomes = [], isLoading, isError } = useEntries();
   const { data: customTags = [] } = useCustomTags('income');
   const removeEntry = useDeleteEntry();
-  const salaryReceipt = useSalaryReceiptState();
+  const entryReceipt = useEntryReceiptState();
   const total = useFinanceStore(selectMonthlyIncome);
 
   const [search, setSearch] = useState('');
@@ -112,25 +112,31 @@ export function IncomePage() {
     setDialogOpen(true);
   }
 
-  async function handleSalaryReceipt(
+  async function handleReceiptState(
     income: Income,
     state: 'received' | 'waiting',
+    month = incomeMonthKey(),
   ) {
     try {
-      await salaryReceipt.mutateAsync({
+      await entryReceipt.mutateAsync({
         id: income.id,
-        month: incomeMonthKey(),
+        month,
         state,
       });
+      const isOneOff = income.frequency === 'unica';
       toast.success(
         state === 'received'
-          ? 'Salário confirmado no saldo'
-          : 'Salário aguardará sua confirmação neste mês',
+          ? isOneOff
+            ? 'Recebimento da entrada registrado'
+            : 'Salário confirmado no saldo'
+          : isOneOff
+            ? 'Recebimento removido'
+            : 'Salário aguardará sua confirmação neste mês',
       );
     } catch (err) {
       const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível atualizar o salário')
-        : 'Não foi possível atualizar o salário';
+        ? (err.response?.data?.error ?? 'Não foi possível atualizar o recebimento')
+        : 'Não foi possível atualizar o recebimento';
       toast.error(message);
     }
   }
@@ -164,13 +170,11 @@ export function IncomePage() {
       <PageHero
         eyebrow='Receitas'
         title={`${incomes.length} entrada${incomes.length === 1 ? '' : 's'}`}
-        description='O salário entra automaticamente no dia configurado, salvo quando você escolher aguardar confirmação.'
+        description='O salário segue a agenda configurada; entradas avulsas só entram no histórico após confirmar o recebimento.'
       >
         <div className='grid gap-3 sm:grid-cols-2'>
           <div className='rounded-xl border border-border bg-black/25 p-4'>
-            <p className='text-xs text-muted-foreground'>
-              Já no saldo / mês
-            </p>
+            <p className='text-xs text-muted-foreground'>Já no saldo / mês</p>
             <p className='mt-2 text-2xl font-semibold text-neon-green'>
               {formatCurrency(total)}
             </p>
@@ -251,12 +255,19 @@ export function IncomePage() {
                   key={income.id}
                   income={income}
                   pending={removeEntry.isPending}
-                  salaryPending={salaryReceipt.isPending}
+                  salaryPending={entryReceipt.isPending}
+                  oneOffPending={entryReceipt.isPending}
                   onSalaryReceived={() =>
-                    void handleSalaryReceipt(income, 'received')
+                    void handleReceiptState(income, 'received')
                   }
                   onSalaryWait={() =>
-                    void handleSalaryReceipt(income, 'waiting')
+                    void handleReceiptState(income, 'waiting')
+                  }
+                  onOneOffReceived={() =>
+                    void handleReceiptState(income, 'received')
+                  }
+                  onOneOffUndo={(month) =>
+                    void handleReceiptState(income, 'waiting', month)
                   }
                   onEdit={() => openEdit(income)}
                   onDelete={() => setConfirmDelete(income)}
@@ -271,7 +282,7 @@ export function IncomePage() {
                     <TableHead>Nome</TableHead>
                     <TableHead>Tipo</TableHead>
                     <TableHead>Frequência</TableHead>
-                    <TableHead>Recebe</TableHead>
+                    <TableHead>Recebe / previsto</TableHead>
                     <TableHead>Término</TableHead>
                     <TableHead className='text-right'>Valor</TableHead>
                     <TableHead className='w-64 text-right'>Ações</TableHead>
@@ -281,12 +292,17 @@ export function IncomePage() {
                   {filtered.map((income) => {
                     const received = isIncomeReceivedThisMonth(income);
                     const salaryMonthly =
-                      income.type === 'salario' && income.frequency === 'mensal';
+                      income.type === 'salario' &&
+                      income.frequency === 'mensal';
                     const salaryWaiting =
                       isSalaryWaitingForConfirmation(income);
                     const salaryManual = isSalaryManuallyReceived(income);
                     const salaryAutomatic =
                       salaryMonthly && isIncomeAutoReceivedThisMonth(income);
+                    const oneOffReceipt =
+                      income.frequency === 'unica'
+                        ? income.receipts?.[0]
+                        : undefined;
 
                     return (
                       <TableRow key={income.id}>
@@ -310,7 +326,19 @@ export function IncomePage() {
                                 Aguardando dia {income.receiveDay ?? '—'}
                               </span>
                             )
-                          ) : income.frequency !== 'unica' && !received ? (
+                          ) : income.frequency === 'unica' ? (
+                            <span
+                              className={`mt-0.5 block text-xs ${
+                                oneOffReceipt
+                                  ? 'text-neon-green'
+                                  : 'text-neon-amber'
+                              }`}
+                            >
+                              {oneOffReceipt
+                                ? 'Recebimento confirmado'
+                                : 'Aguardando confirmação'}
+                            </span>
+                          ) : !received ? (
                             <span className='mt-0.5 block text-xs text-muted-foreground'>
                               Aguardando dia {income.receiveDay ?? '—'}
                             </span>
@@ -367,9 +395,9 @@ export function IncomePage() {
                                   variant='secondary'
                                   size='sm'
                                   className='rounded-lg'
-                                  disabled={salaryReceipt.isPending}
+                                  disabled={entryReceipt.isPending}
                                   onClick={() =>
-                                    void handleSalaryReceipt(income, 'received')
+                                    void handleReceiptState(income, 'received')
                                   }
                                 >
                                   Já recebi
@@ -380,15 +408,56 @@ export function IncomePage() {
                                   variant='ghost'
                                   size='sm'
                                   className='rounded-lg'
-                                  disabled={salaryReceipt.isPending}
+                                  disabled={entryReceipt.isPending}
                                   onClick={() =>
-                                    void handleSalaryReceipt(income, 'waiting')
+                                    void handleReceiptState(income, 'waiting')
                                   }
                                 >
                                   {salaryAutomatic || salaryManual
                                     ? 'Ainda não recebi'
                                     : 'Aguardar confirmação'}
                                 </Button>
+                              ) : null}
+                            </div>
+                          ) : income.frequency === 'unica' ? (
+                            <div className='flex flex-wrap justify-end gap-1'>
+                              <Button
+                                variant={oneOffReceipt ? 'ghost' : 'secondary'}
+                                size='sm'
+                                className='rounded-lg'
+                                disabled={entryReceipt.isPending}
+                                onClick={() =>
+                                  void handleReceiptState(
+                                    income,
+                                    oneOffReceipt ? 'waiting' : 'received',
+                                    oneOffReceipt?.month,
+                                  )
+                                }
+                              >
+                                {oneOffReceipt
+                                  ? 'Desfazer recebimento'
+                                  : 'Já recebi'}
+                              </Button>
+                              {income.type !== 'salario' ? (
+                                <>
+                                  <Button
+                                    variant='ghost'
+                                    size='icon-sm'
+                                    aria-label={`Editar ${income.name}`}
+                                    onClick={() => openEdit(income)}
+                                  >
+                                    <Pencil className='size-4' />
+                                  </Button>
+                                  <Button
+                                    variant='ghost'
+                                    size='icon-sm'
+                                    aria-label={`Excluir ${income.name}`}
+                                    disabled={removeEntry.isPending}
+                                    onClick={() => setConfirmDelete(income)}
+                                  >
+                                    <Trash2 className='size-4' />
+                                  </Button>
+                                </>
                               ) : null}
                             </div>
                           ) : income.type === 'salario' ? (
@@ -400,6 +469,7 @@ export function IncomePage() {
                               <Button
                                 variant='ghost'
                                 size='icon-sm'
+                                aria-label={`Editar ${income.name}`}
                                 onClick={() => openEdit(income)}
                               >
                                 <Pencil className='size-4' />
@@ -407,6 +477,7 @@ export function IncomePage() {
                               <Button
                                 variant='ghost'
                                 size='icon-sm'
+                                aria-label={`Excluir ${income.name}`}
                                 disabled={removeEntry.isPending}
                                 onClick={() => setConfirmDelete(income)}
                               >

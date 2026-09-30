@@ -38,6 +38,9 @@ export function RecoverPasswordPage() {
   const [nextRecoveryCode, setNextRecoveryCode] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmPasswordError, setConfirmPasswordError] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     void fetchMe();
@@ -58,11 +61,13 @@ export function RecoverPasswordPage() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    setConfirmPasswordError(null);
 
     if (password !== confirmPassword) {
       const message = 'As senhas não coincidem';
-      setError(message);
+      setConfirmPasswordError(message);
       toast.error(message);
+      document.getElementById('recovery-confirm-password')?.focus();
       return;
     }
 
@@ -99,7 +104,9 @@ export function RecoverPasswordPage() {
           className='size-16 drop-shadow-[0_0_24px_rgba(52,211,153,0.35)]'
         />
         <div>
-          <p className='text-2xl font-semibold tracking-tight'>Recuperar senha</p>
+          <p className='text-2xl font-semibold tracking-tight'>
+            Recuperar senha
+          </p>
           <p className='mt-1 text-sm text-muted-foreground'>
             Use o código que você guardou offline
           </p>
@@ -127,7 +134,12 @@ export function RecoverPasswordPage() {
           ) : (
             <form onSubmit={handleSubmit}>
               <FieldGroup>
-                <Field data-invalid={error ? true : undefined}>
+                {error ? (
+                  <p role='alert' className='text-sm text-destructive'>
+                    {error}
+                  </p>
+                ) : null}
+                <Field>
                   <FieldLabel htmlFor='recovery-email'>E-mail</FieldLabel>
                   <Input
                     id='recovery-email'
@@ -135,13 +147,14 @@ export function RecoverPasswordPage() {
                     autoComplete='email'
                     value={email}
                     onChange={(event) => setEmail(event.target.value)}
-                    aria-invalid={Boolean(error)}
                     required
                   />
                 </Field>
 
-                <Field data-invalid={error ? true : undefined}>
-                  <FieldLabel htmlFor='recovery-code'>Código offline</FieldLabel>
+                <Field>
+                  <FieldLabel htmlFor='recovery-code'>
+                    Código offline
+                  </FieldLabel>
                   <Input
                     id='recovery-code'
                     type='text'
@@ -151,7 +164,6 @@ export function RecoverPasswordPage() {
                     value={recoveryCode}
                     onChange={(event) => setRecoveryCode(event.target.value)}
                     placeholder='XXXXX-XXXXX-XXXXX-XXXXX'
-                    aria-invalid={Boolean(error)}
                     required
                   />
                   <FieldDescription>
@@ -160,19 +172,24 @@ export function RecoverPasswordPage() {
                 </Field>
 
                 <Field>
-                  <FieldLabel htmlFor='recovery-password'>Nova senha</FieldLabel>
+                  <FieldLabel htmlFor='recovery-password'>
+                    Nova senha
+                  </FieldLabel>
                   <Input
                     id='recovery-password'
                     type='password'
                     autoComplete='new-password'
                     value={password}
-                    onChange={(event) => setPassword(event.target.value)}
+                    onChange={(event) => {
+                      setPassword(event.target.value);
+                      setConfirmPasswordError(null);
+                    }}
                     minLength={6}
                     required
                   />
                 </Field>
 
-                <Field data-invalid={error ? true : undefined}>
+                <Field data-invalid={confirmPasswordError ? true : undefined}>
                   <FieldLabel htmlFor='recovery-confirm-password'>
                     Confirmar nova senha
                   </FieldLabel>
@@ -181,12 +198,24 @@ export function RecoverPasswordPage() {
                     type='password'
                     autoComplete='new-password'
                     value={confirmPassword}
-                    onChange={(event) => setConfirmPassword(event.target.value)}
-                    aria-invalid={Boolean(error)}
+                    onChange={(event) => {
+                      setConfirmPassword(event.target.value);
+                      setConfirmPasswordError(null);
+                    }}
+                    aria-invalid={Boolean(confirmPasswordError)}
+                    aria-describedby={
+                      confirmPasswordError
+                        ? 'recovery-confirm-password-error'
+                        : undefined
+                    }
                     minLength={6}
                     required
                   />
-                  {error ? <FieldError>{error}</FieldError> : null}
+                  {confirmPasswordError ? (
+                    <FieldError id='recovery-confirm-password-error'>
+                      {confirmPasswordError}
+                    </FieldError>
+                  ) : null}
                 </Field>
 
                 <Button type='submit' className='w-full' disabled={submitting}>

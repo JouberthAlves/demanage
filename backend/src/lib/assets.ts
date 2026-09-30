@@ -18,6 +18,7 @@ import {
 } from '@/lib/decimal';
 import { getAssetQuote } from '@/lib/market-data';
 import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
 export function parseAsset(value: unknown): Asset | null {
   return value === 'BTC' || value === 'USD' ? value : null;
@@ -120,9 +121,7 @@ function parseQuantity(value: unknown, asset: Asset, allowNegative: boolean) {
       throw new Error();
     }
     if (asset === 'BTC' && countDecimalPlaces(raw) > 8) {
-      throw new AssetValidationError(
-        'BTC aceita no máximo 8 casas decimais',
-      );
+      throw new AssetValidationError('BTC aceita no máximo 8 casas decimais');
     }
     return parsed;
   } catch (error) {
@@ -207,25 +206,25 @@ export async function createAssetTransaction(
   const parsed = parseTransactionValues(input.asset, input);
   const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
 
-  const existing = await prisma.assetTransaction.findMany({
-    where: { userId: input.userId, asset: input.asset },
-    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-  });
-  const current = calculateAssetAccounting(input.asset, existing);
-  if (input.type === 'SELL' && quantity.gt(decimal(current.quantity))) {
-    throw new AssetValidationError('Venda maior que a posição disponível');
-  }
-  if (
-    input.type === 'MANUAL_ADJUSTMENT' &&
-    quantity.lt(0) &&
-    quantity.abs().gt(decimal(current.quantity))
-  ) {
-    throw new AssetValidationError(
-      'Ajuste removeria mais unidades do que a posição atual',
-    );
-  }
+  return withUserWriteLockTransaction(input.userId, async (tx) => {
+    const existing = await tx.assetTransaction.findMany({
+      where: { userId: input.userId, asset: input.asset },
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+    });
+    const current = calculateAssetAccounting(input.asset, existing);
+    if (input.type === 'SELL' && quantity.gt(decimal(current.quantity))) {
+      throw new AssetValidationError('Venda maior que a posição disponível');
+    }
+    if (
+      input.type === 'MANUAL_ADJUSTMENT' &&
+      quantity.lt(0) &&
+      quantity.abs().gt(decimal(current.quantity))
+    ) {
+      throw new AssetValidationError(
+        'Ajuste removeria mais unidades do que a posição atual',
+      );
+    }
 
-  return prisma.$transaction(async (tx) => {
     let expenseId: string | null = null;
     let entryId: string | null = null;
 
@@ -282,31 +281,31 @@ export async function updateAssetTransaction(
   transactionId: string,
   input: UpdateAssetTransactionInput,
 ) {
-  const target = await prisma.assetTransaction.findFirst({
-    where: { id: transactionId, userId },
-  });
-  if (!target) {
-    throw new AssetValidationError('Movimentação não encontrada');
-  }
+  return withUserWriteLockTransaction(userId, async (tx) => {
+    const target = await tx.assetTransaction.findFirst({
+      where: { id: transactionId, userId },
+    });
+    if (!target) {
+      throw new AssetValidationError('Movimentação não encontrada');
+    }
 
-  const parsed = parseTransactionValues(target.asset, input);
-  const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
-  const remaining = await prisma.assetTransaction.findMany({
-    where: { userId, asset: target.asset, id: { not: target.id } },
-    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-  });
+    const parsed = parseTransactionValues(target.asset, input);
+    const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
+    const remaining = await tx.assetTransaction.findMany({
+      where: { userId, asset: target.asset, id: { not: target.id } },
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+    });
 
-  assertTransactionTimelineValid([
-    ...remaining,
-    {
-      id: target.id,
-      type: input.type,
-      quantity,
-      date,
-    },
-  ]);
+    assertTransactionTimelineValid([
+      ...remaining,
+      {
+        id: target.id,
+        type: input.type,
+        quantity,
+        date,
+      },
+    ]);
 
-  return prisma.$transaction(async (tx) => {
     let expenseId = target.expenseId;
     let entryId = target.entryId;
 
@@ -403,33 +402,34 @@ export async function deleteAssetTransaction(
   userId: string,
   transactionId: string,
 ) {
-  const target = await prisma.assetTransaction.findFirst({
-    where: { id: transactionId, userId },
-  });
-  if (!target) {
-    throw new AssetValidationError('Movimentação não encontrada');
-  }
-
-  const remaining = await prisma.assetTransaction.findMany({
-    where: { userId, asset: target.asset, id: { not: target.id } },
-    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-  });
-  let balance = ZERO;
-  for (const transaction of remaining) {
-    if (transaction.type === 'BUY') balance = balance.plus(transaction.quantity);
-    else if (transaction.type === 'SELL') {
-      balance = balance.minus(transaction.quantity);
-    } else {
-      balance = balance.plus(transaction.quantity);
+  await withUserWriteLockTransaction(userId, async (tx) => {
+    const target = await tx.assetTransaction.findFirst({
+      where: { id: transactionId, userId },
+    });
+    if (!target) {
+      throw new AssetValidationError('Movimentação não encontrada');
     }
-    if (balance.lt(0)) {
-      throw new AssetValidationError(
-        'Não é possível excluir: uma venda posterior ficaria sem saldo',
-      );
-    }
-  }
 
-  await prisma.$transaction(async (tx) => {
+    const remaining = await tx.assetTransaction.findMany({
+      where: { userId, asset: target.asset, id: { not: target.id } },
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+    });
+    let balance = ZERO;
+    for (const transaction of remaining) {
+      if (transaction.type === 'BUY')
+        balance = balance.plus(transaction.quantity);
+      else if (transaction.type === 'SELL') {
+        balance = balance.minus(transaction.quantity);
+      } else {
+        balance = balance.plus(transaction.quantity);
+      }
+      if (balance.lt(0)) {
+        throw new AssetValidationError(
+          'Não é possível excluir: uma venda posterior ficaria sem saldo',
+        );
+      }
+    }
+
     await tx.assetTransaction.delete({ where: { id: target.id } });
     if (target.expenseId) {
       await tx.expense.deleteMany({

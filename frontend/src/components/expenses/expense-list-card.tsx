@@ -10,6 +10,7 @@ import {
 } from '@/data/labels';
 import { getCardTone } from '@/lib/card-tone';
 import {
+  canConfirmExpensePayment,
   canPayExpenseEarly,
   isExpenseAutoDebitedThisMonth,
   isExpensePaidThisMonth,
@@ -57,10 +58,18 @@ export function ExpenseListCard({
   const isRecurring = expense.frequency !== 'unica' && !expense.isInvoice;
 
   const payState = (() => {
-    if (!isRecurring) return { label: 'Pago', disabled: Boolean(pending) };
+    if (expense.isInvoice) {
+      return { label: 'Fatura pendente', disabled: true };
+    }
+    if (!isRecurring) return { label: 'Pago', disabled: true };
     if (!hasCash) return { label: 'Via fatura', disabled: true };
     if (paidEarly) return { label: 'Pago', disabled: true };
-    if (autoDebited) return { label: 'Descontada', disabled: true };
+    if (autoDebited) {
+      return {
+        label: 'Confirmar pagamento',
+        disabled: Boolean(pending) || !canConfirmExpensePayment(expense),
+      };
+    }
     if (canPayEarly) {
       return { label: 'Pagar agora', disabled: Boolean(pending) };
     }
@@ -87,10 +96,10 @@ export function ExpenseListCard({
           <p className='truncate font-medium'>{expense.name}</p>
           {isRecurring && hasCash ? (
             paidEarly ? (
-              <p className='text-xs text-neon-green'>Pago antecipadamente</p>
+              <p className='text-xs text-neon-green'>Pagamento confirmado</p>
             ) : autoDebited ? (
-              <p className='text-xs text-neon-green'>
-                Descontada automaticamente
+              <p className='text-xs text-neon-amber'>
+                Já no saldo; confirme quando pagar
               </p>
             ) : (
               <p className='text-xs text-muted-foreground'>
@@ -113,10 +122,7 @@ export function ExpenseListCard({
             {expense.customTag.name}
           </Badge>
         ) : (
-          <Badge
-            variant='outline'
-            className={categoryColors[expense.category]}
-          >
+          <Badge variant='outline' className={categoryColors[expense.category]}>
             {expenseTypeLabel(expense)}
           </Badge>
         )}
@@ -156,13 +162,19 @@ export function ExpenseListCard({
           {payState.label}
         </Button>
         {!expense.isInvoice ? (
-          <Button variant='ghost' size='icon-sm' onClick={onEdit}>
+          <Button
+            variant='ghost'
+            size='icon-sm'
+            aria-label={`Editar ${expense.name}`}
+            onClick={onEdit}
+          >
             <Pencil className='size-4' />
           </Button>
         ) : null}
         <Button
           variant='ghost'
           size='icon-sm'
+          aria-label={`Excluir ${expense.name}`}
           disabled={pending}
           onClick={onDelete}
         >

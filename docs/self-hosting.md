@@ -148,6 +148,11 @@ Hostname: demanage-test.biel.dev.br
 Service URL: http://localhost:8080
 ```
 
+O Compose de produção liga a confiança no cabeçalho `CF-Connecting-IP` somente
+porque a porta do frontend fica em `127.0.0.1` e o Tunnel é a única entrada
+externa. Em uma implantação com ingress público direto, mantenha
+`TRUST_CF_CONNECTING_IP=0` para usar o endereço do peer recebido pelo Nginx.
+
 Depois teste o endereço HTTPS pelo navegador fora da rede local.
 
 Quando o banco definitivo estiver migrado, altere o hostname para:
