@@ -71,6 +71,7 @@ type FormState = {
   cardPercent: string;
   dueDay: string;
   dueMonth: string;
+  occurredAt: string;
   endsAt: string;
   notes: string;
 };
@@ -79,6 +80,13 @@ const NEW_TYPE_VALUE = '__new_type__';
 
 function currentMonthValue() {
   return String(new Date().getMonth() + 1);
+}
+
+function currentDateValue() {
+  const today = new Date();
+  const month = String(today.getMonth() + 1).padStart(2, '0');
+  const day = String(today.getDate()).padStart(2, '0');
+  return `${today.getFullYear()}-${month}-${day}`;
 }
 
 const emptyForm: FormState = {
@@ -92,6 +100,7 @@ const emptyForm: FormState = {
   cardPercent: '70',
   dueDay: '05',
   dueMonth: currentMonthValue(),
+  occurredAt: currentDateValue(),
   endsAt: '',
   notes: '',
 };
@@ -139,6 +148,7 @@ export function ExpenseFormDialog({
   const validCards = cards.filter((card) => !card.expired);
   const committedByCard = buildCommittedByCard(
     expenses.filter((item) => item.id !== expense?.id),
+    cards,
   );
   const amountValue = parseCurrencyInput(form.amount);
   const percent1 = Math.min(99, Math.max(1, Number(form.cardPercent) || 0));
@@ -215,6 +225,7 @@ export function ExpenseFormDialog({
         cardPercent: firstPercent,
         dueDay: expense.dueDay ? String(expense.dueDay).padStart(2, '0') : '05',
         dueMonth: startsMonth,
+        occurredAt: expense.occurredAt?.slice(0, 10) ?? currentDateValue(),
         endsAt: expense.endsAt ?? '',
         notes: expense.notes ?? '',
       });
@@ -278,6 +289,11 @@ export function ExpenseFormDialog({
         );
         return;
       }
+    }
+
+    if (isUnique && !/^\d{4}-\d{2}-\d{2}$/.test(form.occurredAt)) {
+      rejectValidation('Informe a data da despesa', 'expense-occurred-at');
+      return;
     }
 
     let cardId: string | null = null;
@@ -369,6 +385,7 @@ export function ExpenseFormDialog({
       amount,
       category,
       frequency: form.frequency,
+      date: isUnique ? form.occurredAt : undefined,
       cardId,
       dueDay,
       startsAt,
@@ -697,6 +714,33 @@ export function ExpenseFormDialog({
                   </p>
                 </div>
               </>
+            ) : null}
+
+            {isUnique ? (
+              <div className='flex flex-col gap-2'>
+                <Label htmlFor='expense-occurred-at'>Data da despesa</Label>
+                <DatePicker
+                  id='expense-occurred-at'
+                  value={form.occurredAt}
+                  onValueChange={(occurredAt) => {
+                    setValidationError(null);
+                    setForm((current) => ({ ...current, occurredAt }));
+                  }}
+                  max={currentDateValue()}
+                  ariaInvalid={
+                    validationError?.fieldId === 'expense-occurred-at'
+                  }
+                  ariaDescribedBy={
+                    validationError?.fieldId === 'expense-occurred-at'
+                      ? 'expense-form-error'
+                      : undefined
+                  }
+                />
+                {validationMessageFor('expense-occurred-at')}
+                <p className='text-xs text-muted-foreground'>
+                  Use o dia em que o gasto aconteceu.
+                </p>
+              </div>
             ) : null}
 
             {isUnique ? (

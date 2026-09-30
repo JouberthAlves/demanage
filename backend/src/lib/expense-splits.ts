@@ -6,6 +6,11 @@ import type {
   Prisma,
 } from '@/generated/prisma/client';
 
+import {
+  chargesTotalForClosing,
+  lateOneOffsTotalForClosing,
+  todayInSaoPaulo,
+} from '@/lib/card-billing';
 import { prisma } from '@/lib/prisma';
 
 export type SplitInput =
@@ -158,6 +163,7 @@ export function validateSplitShape(inputs: SplitInput[]) {
 export async function assertCardsForSplits(args: {
   userId: string;
   inputs: SplitInput[];
+  tx?: Prisma.TransactionClient;
 }) {
   const cardIds = [
     ...new Set(
@@ -172,8 +178,13 @@ export async function assertCardsForSplits(args: {
 
   if (cardIds.length === 0) return new Map<string, Card>();
 
-  const cards = await prisma.card.findMany({
-    where: { userId: args.userId, id: { in: cardIds } },
+  const db = args.tx ?? prisma;
+  const cards = await db.card.findMany({
+    where: {
+      userId: args.userId,
+      archivedAt: null,
+      id: { in: cardIds },
+    },
   });
 
   if (cards.length !== cardIds.length) {
@@ -195,26 +206,47 @@ export async function assertCardsForSplits(args: {
 export async function getCommittedByCard(args: {
   userId: string;
   excludeExpenseId?: string;
+  tx?: Prisma.TransactionClient;
 }) {
-  const splits = await prisma.expenseSplit.findMany({
-    where: {
-      kind: 'card',
-      cardId: { not: null },
-      expense: {
+  const db = args.tx ?? prisma;
+  const [cards, expenses] = await Promise.all([
+    db.card.findMany({ where: { userId: args.userId, archivedAt: null } }),
+    db.expense.findMany({
+      where: {
         userId: args.userId,
         isInvoice: false,
+        systemOrigin: 'manual',
         ...(args.excludeExpenseId
           ? { id: { not: args.excludeExpenseId } }
           : {}),
       },
-    },
-    select: { cardId: true, amount: true },
-  });
-
+      include: { splits: true },
+    }),
+  ]);
+  const closingOn = todayInSaoPaulo();
   const map = new Map<string, number>();
-  for (const split of splits) {
-    if (!split.cardId) continue;
-    map.set(split.cardId, (map.get(split.cardId) ?? 0) + Number(split.amount));
+  for (const card of cards) {
+    const periodStart = card.lastInvoicedOn ?? todayInSaoPaulo(card.createdAt);
+    const cycleAmount = chargesTotalForClosing(
+      expenses,
+      card.id,
+      closingOn,
+      periodStart,
+      card.lastInvoicedOn == null,
+    );
+    const lateAdjustmentAmount =
+      card.lastInvoicedOn && card.lastBillingProcessedAt
+        ? lateOneOffsTotalForClosing(
+            expenses,
+            card.id,
+            periodStart,
+            card.lastBillingProcessedAt,
+          )
+        : 0;
+    map.set(
+      card.id,
+      cycleAmount + lateAdjustmentAmount,
+    );
   }
   return map;
 }
@@ -318,6 +350,8 @@ export async function resolveAndValidateSplits(args: {
   splits: unknown;
   cardId: unknown;
   excludeExpenseId?: string;
+  tx?: Prisma.TransactionClient;
+  validateLimits?: boolean;
 }): Promise<ResolvedSplit[]> {
   const inputs = normalizeSplitInputs({
     splits: args.splits,
@@ -333,6 +367,7 @@ export async function resolveAndValidateSplits(args: {
   const cards = await assertCardsForSplits({
     userId: args.userId,
     inputs,
+    tx: args.tx,
   });
 
   const resolved = allocateSplitAmounts(
@@ -344,11 +379,14 @@ export async function resolveAndValidateSplits(args: {
     ),
   );
 
-  const committedByCard = await getCommittedByCard({
-    userId: args.userId,
-    excludeExpenseId: args.excludeExpenseId,
-  });
+  if (args.validateLimits !== false) {
+    const committedByCard = await getCommittedByCard({
+      userId: args.userId,
+      excludeExpenseId: args.excludeExpenseId,
+      tx: args.tx,
+    });
 
-  assertCardLimits({ cards, resolved, committedByCard });
+    assertCardLimits({ cards, resolved, committedByCard });
+  }
   return resolved;
 }

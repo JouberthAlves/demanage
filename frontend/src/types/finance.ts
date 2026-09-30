@@ -3,8 +3,11 @@ export type Card = {
   name: string;
   limit?: number;
   closingDay?: number;
+  pendingClosingDay?: number | null;
   expiresAt?: string;
   lastInvoicedOn?: string;
+  lastBillingProcessedAt?: string | null;
+  createdAt?: string;
   expired?: boolean;
 };
 
@@ -91,6 +94,8 @@ export type RecurringExpense = {
   startsAt?: string;
   endsAt?: string;
   occurredAt?: string;
+  billingPeriodStart?: string;
+  billingPeriodEnd?: string;
   registeredAt?: string;
   paidForMonth?: string;
   paidAt?: string;

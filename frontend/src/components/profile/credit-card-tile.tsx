@@ -164,6 +164,11 @@ export function CreditCardTile({
                 ? `Dia ${String(card.closingDay).padStart(2, '0')}`
                 : '—'}
             </p>
+            {card.pendingClosingDay != null ? (
+              <p className='mt-1 text-xs text-muted-foreground'>
+                Próximo ciclo: dia {String(card.pendingClosingDay).padStart(2, '0')}
+              </p>
+            ) : null}
           </div>
           <div className='rounded-xl border border-border/70 bg-black/20 px-3 py-2'>
             <p className='text-xs text-muted-foreground'>Validade</p>
@@ -196,8 +201,8 @@ export function CreditCardTile({
           <AlertDialogHeader>
             <AlertDialogTitle>Remover cartão?</AlertDialogTitle>
             <AlertDialogDescription>
-              Ao remover &quot;{card.name}&quot;, todas as faturas e cobranças
-              vinculadas a este cartão serão excluídas.
+              &quot;{card.name}&quot; deixará de receber novas cobranças. As
+              compras, faturas e o histórico existentes serão preservados.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
