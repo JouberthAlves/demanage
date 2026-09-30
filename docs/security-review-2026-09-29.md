@@ -119,5 +119,13 @@ O backend usa overrides compatíveis com os majors atuais para `ajv@6` 6.14.0 (a
 - `Dependency Review` nesse head identificou `brace-expansion@1.1.18`. Duas advisories altas recentes exigem `1.1.20`; a auditoria local encontrou também a advisory moderada GHSA-q2hr-2g5m-vwhr, que exige `1.1.21`. As três foram confirmadas na GitHub Advisory Database.
 - A correção local altera somente o override `brace-expansion@1` para `1.1.21` e sua resolução no lockfile. `minimatch@3.1.4` aceita essa versão pela faixa `^1.1.7`; `brace-expansion@5.0.12` permanece separado.
 - Validação local dessa mudança: instalação congelada e audit backend passaram; os quatro inputs de reprodução publicados para recursão, lista de argumentos, nesting e reescrita quadrática terminaram sem exceção ou demora relevante; lint e build do backend passaram. `pnpm test` teve 8 testes aprovados e 7 arquivos não inicializados porque o ambiente local não definiu `DATABASE_URL`; a CI do backend com PostgreSQL ainda deve validar o novo SHA.
-- Os checks remotos do PR #33 precisam ser atualizados no head com `1.1.21`. O CodeQL alert gate também requer reconciliação dos 12 achados já validados no próprio fork, com justificativas individuais. Até esses resultados serem confirmados, o merge e o deploy continuam pendentes.
+- No momento deste registro inicial, os checks do PR #33 ainda aguardavam a atualização para o head com `1.1.21`, e os 12 achados CodeQL ainda precisavam de reconciliação no fork.
 - O upstream #41 não bloqueia a entrega do fork. Não houve merge, migration de produção nem escrita no servidor nesta atualização.
+
+## Resultado dos gates no PR #33 — 30/09/2026
+
+- Head verificado: `793d597c8217bcd0823efb4581c0a8c91810ebf8`; base `master`: `721023eb90942b07a1cb777443a0dc4e4daf3a13`. O PR está aberto e mergeável.
+- `backend`, `frontend`, `Analyze JavaScript / TypeScript`, `CodeQL` e `dependency-review` passaram neste head. O gate CodeQL passou depois da reconciliação dos achados.
+- O scan do PR trouxe exatamente os 12 achados já validados: #2 (log injection), #4–#13 (campos e sanitização nas rotas auth) e #14 (cookie parser antes do middleware CSRF). Foram dispensados no repositório correto como falsos positivos, cada um com comentário técnico específico. A consulta de alertas abertos em `refs/pull/33/merge` retornou zero. CodeQL continua habilitado.
+- A API do Dependabot ainda mostra 17 alertas abertos no `master` e nenhum PR aberto do Dependabot. A revisão de dependências do candidato passou; os alertas do `master` serão revalidados após o merge.
+- Nenhum merge ou deploy foi feito nesta atualização. O upstream #41 permanece fora do gate de entrega e o servidor de produção não foi alterado.
