@@ -14,11 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
         env:
           POSTGRES_USER: demanage
           POSTGRES_PASSWORD: demanage
           POSTGRES_DB: demanage
+          TZ: UTC
         ports:
           - 5432:5432
         options: >-
@@ -30,6 +31,7 @@ jobs:
       run:
         working-directory: backend
     env:
+      TZ: UTC
       DATABASE_URL: postgresql://demanage:demanage@localhost:5432/demanage?schema=public
       JWT_SECRET: ci-secret-not-for-production
       APP_URL: http://localhost:5180
@@ -40,10 +42,11 @@ jobs:
           version: 10.17.1
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 26.8.2
           cache: pnpm
           cache-dependency-path: backend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level moderate
       - run: pnpm exec prisma generate
       - run: pnpm exec prisma migrate deploy
       - run: pnpm lint
@@ -52,6 +55,8 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
+    env:
+      TZ: UTC
     defaults:
       run:
         working-directory: frontend
@@ -62,10 +67,11 @@ jobs:
           version: 10.17.1
       - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 26.8.2
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level moderate
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm build
