@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 
 import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
 import {
@@ -17,16 +18,11 @@ export const CARDS_QUERY_KEY = ['cards'] as const;
 export function useCards() {
   const setCards = useFinanceStore((state) => state.setCards);
   const queryClient = useQueryClient();
+  const maintenanceStarted = useRef(false);
 
   const query = useQuery({
     queryKey: CARDS_QUERY_KEY,
-    queryFn: async () => {
-      const billing = await processCardBilling();
-      if (billing.createdCount > 0) {
-        void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-      }
-      return listCards();
-    },
+    queryFn: listCards,
   });
 
   useEffect(() => {
@@ -34,6 +30,22 @@ export function useCards() {
       setCards(query.data);
     }
   }, [query.data, setCards]);
+
+  useEffect(() => {
+    if (!query.isSuccess || maintenanceStarted.current) return;
+    maintenanceStarted.current = true;
+
+    void processCardBilling()
+      .then((billing) => {
+        if (billing.createdCount > 0) {
+          void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
+        }
+        void queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY });
+      })
+      .catch(() => {
+        toast.error('Não foi possível atualizar as faturas agora.');
+      });
+  }, [query.isSuccess, queryClient]);
 
   return query;
 }

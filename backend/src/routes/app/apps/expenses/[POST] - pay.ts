@@ -38,7 +38,7 @@ router.post('/:id/pay', requireAuth, async (req: Request, res: Response) => {
 
     const result = await withUserWriteLockTransaction(userId, async (tx) => {
       const existing = await tx.expense.findFirst({
-        where: { id, userId },
+        where: { id, userId, archivedAt: null, systemOrigin: 'manual' },
         include: {
           customTag: { select: customTagSelect },
           ...expenseSplitInclude,
@@ -47,7 +47,16 @@ router.post('/:id/pay', requireAuth, async (req: Request, res: Response) => {
 
       if (!existing) return { status: 404, error: 'Despesa não encontrada' };
 
-      if (existing.isInvoice || existing.frequency !== 'mensal') {
+      if (existing.isInvoice) {
+        const periodEnd = existing.billingPeriodEnd ?? existing.occurredAt;
+        const invoiceMonth = periodEnd?.toISOString().slice(0, 7);
+        if (!invoiceMonth || paidForMonth !== invoiceMonth) {
+          return {
+            status: 400,
+            error: 'O mês de pagamento deve corresponder ao ciclo da fatura',
+          };
+        }
+      } else if (existing.frequency !== 'mensal') {
         return {
           status: 400,
           error:
@@ -55,8 +64,9 @@ router.post('/:id/pay', requireAuth, async (req: Request, res: Response) => {
         };
       }
 
-      const cashAmount =
-        existing.splits.length > 0
+      const cashAmount = existing.isInvoice
+        ? Number(existing.amount)
+        : existing.splits.length > 0
           ? existing.splits
               .filter((split) => split.kind === 'pix')
               .reduce((sum, split) => sum + Number(split.amount), 0)
@@ -64,25 +74,29 @@ router.post('/:id/pay', requireAuth, async (req: Request, res: Response) => {
             ? 0
             : Number(existing.amount);
 
-      if (cashAmount <= 0) {
+      if (!Number.isFinite(cashAmount) || cashAmount <= 0) {
         return {
           status: 400,
-          error: 'Despesas somente no cartão entram no saldo pela fatura',
+          error: existing.isInvoice
+            ? 'Valor da fatura inválido'
+            : 'Despesas somente no cartão entram no saldo pela fatura',
         };
       }
 
-      const bounds = monthBounds(paidForMonth);
-      if (existing.startsAt && existing.startsAt > bounds.end) {
-        return {
-          status: 400,
-          error: 'Essa despesa ainda não começou no mês selecionado',
-        };
-      }
-      if (existing.endsAt && existing.endsAt < bounds.start) {
-        return {
-          status: 400,
-          error: 'Essa despesa já terminou antes do mês selecionado',
-        };
+      if (!existing.isInvoice) {
+        const bounds = monthBounds(paidForMonth);
+        if (existing.startsAt && existing.startsAt > bounds.end) {
+          return {
+            status: 400,
+            error: 'Essa despesa ainda não começou no mês selecionado',
+          };
+        }
+        if (existing.endsAt && existing.endsAt < bounds.start) {
+          return {
+            status: 400,
+            error: 'Essa despesa já terminou antes do mês selecionado',
+          };
+        }
       }
 
       const now = new Date();

@@ -2,7 +2,9 @@ import { Router, Request, Response } from 'express';
 
 import { parseAbnt2Text } from '@/lib/abnt2';
 import { serializeCard } from '@/lib/card-billing';
-import { prisma } from '@/lib/prisma';
+import { todayInSaoPaulo } from '@/lib/card-billing';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
+import { parseOptionalCardLimit } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
@@ -34,14 +36,6 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     if (!userId) {
       return res.status(401).json({ error: 'Não autenticado' });
-    }
-
-    const existing = await prisma.card.findFirst({
-      where: { id, userId },
-    });
-
-    if (!existing) {
-      return res.status(404).json({ error: 'Cartão não encontrado' });
     }
 
     const { name, limit, closingDay, expiresAt } = req.body;
@@ -78,17 +72,45 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const card = await prisma.card.update({
-      where: { id },
-      data: {
-        ...(nextName !== undefined ? { name: nextName } : {}),
-        ...(limit !== undefined ? { limit: limit || null } : {}),
-        ...(parsedClosingDay !== undefined
-          ? { closingDay: parsedClosingDay }
-          : {}),
-        ...(parsedExpiresAt !== undefined ? { expiresAt: parsedExpiresAt } : {}),
-      },
+    const parsedLimit = parseOptionalCardLimit(limit);
+    if (parsedLimit.error) {
+      return res.status(400).json({ error: parsedLimit.error });
+    }
+
+    const card = await withUserWriteLockTransaction(userId, async (tx) => {
+      const existing = await tx.card.findFirst({
+        where: { id, userId, archivedAt: null },
+      });
+      if (!existing) return null;
+
+      let pendingClosingDay = existing.pendingClosingDay;
+      let pendingClosingDaySetAt = existing.pendingClosingDaySetAt;
+      if (parsedClosingDay !== undefined) {
+        if (parsedClosingDay === existing.closingDay) {
+          pendingClosingDay = null;
+          pendingClosingDaySetAt = null;
+        } else if (parsedClosingDay !== existing.pendingClosingDay) {
+          pendingClosingDay = parsedClosingDay;
+          pendingClosingDaySetAt = todayInSaoPaulo();
+        }
+      }
+
+      return tx.card.update({
+        where: { id },
+        data: {
+          ...(nextName !== undefined ? { name: nextName } : {}),
+          ...(parsedLimit.value !== undefined
+            ? { limit: parsedLimit.value }
+            : {}),
+          ...(parsedClosingDay !== undefined
+            ? { pendingClosingDay, pendingClosingDaySetAt }
+            : {}),
+          ...(parsedExpiresAt !== undefined ? { expiresAt: parsedExpiresAt } : {}),
+        },
+      });
     });
+
+    if (!card) return res.status(404).json({ error: 'Cartão não encontrado' });
 
     return res.json(serializeCard(card));
   } catch (err) {

@@ -60,6 +60,7 @@ import {
   expenseContributionThisMonth,
   expenseMonthKey,
   isExpenseAutoDebitedThisMonth,
+  isExpenseInvoicePaidThisMonth,
   isExpensePaidThisMonth,
 } from '@/lib/expense-schedule';
 import {
@@ -80,7 +81,11 @@ function expensePayState(
   now: Date,
   pending: boolean,
 ) {
-  if (expense.isInvoice) return { label: 'Fatura pendente', disabled: true };
+  if (expense.isInvoice) {
+    return isExpenseInvoicePaidThisMonth(expense, now)
+      ? { label: 'Pago', disabled: true }
+      : { label: 'Confirmar pagamento', disabled: pending };
+  }
   const isRecurring = expense.frequency !== 'unica' && !expense.isInvoice;
   if (!isRecurring) return { label: 'Pago', disabled: true };
 
@@ -156,6 +161,15 @@ export function ExpensesPage() {
 
   async function handlePay(expense: RecurringExpense) {
     try {
+      if (expense.isInvoice) {
+        await markExpensePaid.mutateAsync({
+          id: expense.id,
+          month:
+            expense.billingPeriodEnd?.slice(0, 7) ?? expenseMonthKey(now),
+        });
+        toast.success(`Pagamento da fatura de "${expense.name}" registrado`);
+        return;
+      }
       if (!expense.isInvoice && expense.frequency === 'mensal') {
         await markExpensePaid.mutateAsync({
           id: expense.id,
@@ -189,6 +203,9 @@ export function ExpensesPage() {
     confirmPay != null &&
     !confirmPay.isInvoice &&
     confirmPay.frequency === 'mensal';
+  const confirmPayIsInvoice =
+    confirmPay?.isInvoice === true &&
+    !isExpenseInvoicePaidThisMonth(confirmPay, now);
   const confirmPayIsAlreadyInBalance =
     confirmPay != null && isExpenseAutoDebitedThisMonth(confirmPay, now);
 
@@ -488,10 +505,19 @@ export function ExpensesPage() {
                 ? confirmPayIsAlreadyInBalance
                   ? 'Confirmar pagamento?'
                   : 'Pagar antecipadamente?'
-                : 'Pagamento já registrado'}
+                : confirmPayIsInvoice
+                  ? 'Confirmar pagamento da fatura?'
+                  : 'Pagamento já registrado'}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {confirmPayIsRecurring ? (
+              {confirmPayIsInvoice ? (
+                <>
+                  Isso registra o pagamento da fatura fechada em{' '}
+                  {confirmPay?.billingPeriodEnd?.split('-').reverse().join('/') ??
+                    'data indisponível'}
+                  . O valor sairá do caixa na data da confirmação.
+                </>
+              ) : confirmPayIsRecurring ? (
                 confirmPayIsAlreadyInBalance ? (
                   <>
                     Isso registra que o ciclo deste mês de &quot;
@@ -527,7 +553,9 @@ export function ExpensesPage() {
                 ? confirmPayIsAlreadyInBalance
                   ? 'Confirmar pagamento'
                   : 'Pagar agora'
-                : 'Entendi'}
+                : confirmPayIsInvoice
+                  ? 'Confirmar pagamento'
+                  : 'Entendi'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

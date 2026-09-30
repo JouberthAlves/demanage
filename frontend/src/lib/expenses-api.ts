@@ -26,7 +26,10 @@ export type ApiExpense = {
   dueDay: number | null;
   startsAt?: string | null;
   endsAt?: string | null;
+  date?: string;
   occurredAt?: string | null;
+  billingPeriodStart?: string | null;
+  billingPeriodEnd?: string | null;
   paidForMonth?: string | null;
   paidAt?: string | null;
   notes: string | null;
@@ -59,6 +62,7 @@ export type ExpensePayload = {
   dueDay?: number | null;
   startsAt?: string | null;
   endsAt?: string | null;
+  date?: string;
   notes?: string | null;
   customTagId?: string | null;
   splits?: ExpenseSplitPayload[] | null;
@@ -103,6 +107,8 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     startsAt: mapDateOnly(expense.startsAt),
     endsAt: mapDateOnly(expense.endsAt),
     occurredAt: expense.occurredAt ?? undefined,
+    billingPeriodStart: mapDateOnly(expense.billingPeriodStart),
+    billingPeriodEnd: mapDateOnly(expense.billingPeriodEnd),
     registeredAt: registeredAt ? toLocalDateOnly(registeredAt) : undefined,
     paidForMonth: expense.paidForMonth ?? undefined,
     paidAt: expense.paidAt ?? undefined,

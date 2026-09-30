@@ -15,7 +15,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     const cards = await prisma.card.findMany({
-      where: { userId },
+      where: { userId, archivedAt: null },
       orderBy: { createdAt: 'desc' },
     });
 
