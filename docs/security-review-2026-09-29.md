@@ -21,7 +21,7 @@ As versões abaixo são as versões corrigidas mínimas revalidadas no snapshot 
 | #1, #9, #11, #14, #19 | `js-yaml` — backend | 4.1.0 | 4.3.2 | Lock atualizado; aguardando scanner |
 | #5 | `minimatch` — backend | 3.1.2 | 3.1.4 | Atualizado para cobrir também o advisory #4 (auto-dismissed); instância 10.x preservada |
 | #7 | `flatted` — backend | 3.3.3 | 3.4.2 | Lock atualizado; aguardando scanner |
-| #10 | `brace-expansion` — backend | 1.1.12 | 1.1.18 | Atualizado para cobrir advisories #12 e #13 (auto-dismissed); instância 5.x preservada |
+| #10 | `brace-expansion` — backend | 1.1.12 | 1.1.21 | Override limitado ao major 1; a instância 5.x foi preservada |
 | #15 | `deepmerge-ts` via `@prisma/config` — backend | 7.1.5 | 8.0.2 | Override limitado ao pai; validar Prisma antes de considerar concluído |
 | #16, #18 | `mysql2` — backend | 3.15.3 | 3.23.1 | Lock atualizado; aguardando scanner |
 | #17 | `@humanfs/node` — backend | 0.16.7 | 0.16.8 | Lock atualizado; aguardando scanner |
@@ -29,7 +29,7 @@ As versões abaixo são as versões corrigidas mínimas revalidadas no snapshot 
 | #22, #23 | `picomatch` 2.x — frontend | 2.3.1 | 2.3.2 | Lock atualizado; as instâncias 4.x foram preservadas |
 | #53, #54 | `browserslist` — frontend | 4.26.3 | 4.28.7 | Lock atualizado; aguardando scanner |
 
-O backend usa overrides compatíveis com os majors atuais para `ajv@6` 6.14.0 (alerta #2, auto-dismissed), `minimatch@3` 3.1.4, `brace-expansion@1` 1.1.18 e os demais pacotes da tabela. `pnpm audit --audit-level=moderate` agora retorna “No known vulnerabilities found” nos dois workspaces. `pnpm install --frozen-lockfile` passou no backend e frontend. Os 17 alertas atuais ainda aguardam atualização do scanner.
+O backend usa overrides compatíveis com os majors atuais para `ajv@6` 6.14.0 (alerta #2, auto-dismissed), `minimatch@3` 3.1.4, `brace-expansion@1` 1.1.21 e os demais pacotes da tabela. `pnpm audit --audit-level=moderate` retorna “No known vulnerabilities found” nos dois workspaces após as atualizações locais. `pnpm install --frozen-lockfile` passou no backend e frontend. Os 17 alertas do snapshot ainda aguardam atualização do scanner.
 
 ## Code Scanning — 13 alertas no SHA inicial
 
@@ -110,3 +110,14 @@ O backend usa overrides compatíveis com os majors atuais para `ajv@6` 6.14.0 (a
 - O CodeQL do PR apresenta os mesmos padrões de alertas de entrada já existentes na base; as novas localizações nas linhas alteradas são cobertas pelas verificações de formato e pelas comparações de credencial descritas acima. As linhas exatas, caminhos de dados e resultados da reprodução estão registrados no artefato de validação associado a esta revisão.
 - `Dependency Review` falhou antes de analisar dependências: `JouberthAlves/demanage` tem Dependency Graph desativado. O endpoint de alertas Dependabot do repositório-alvo confirma que alertas estão desativados. O fork `bielxdh3/demanage` ainda mostra 17 alertas abertos no SHA de `master` `721023eb90942b07a1cb777443a0dc4e4daf3a13`; as correções locais de lockfile aguardam novo scan após atualização/merge.
 - Issues continuam desativadas. A implantação segue bloqueada enquanto os checks `CodeQL` e `Dependency Review` do PR estiverem vermelhos. Nenhuma dispensa manual, merge, migration de produção ou alteração SSH foi feita.
+
+**Correção de escopo:** o parágrafo acima registra somente o estado histórico do PR #41 no repositório upstream `JouberthAlves/demanage`. O PR #41 não é gate de entrega. O alvo desta missão é o fork `bielxdh3/demanage`, pelo PR #33.
+
+## Atualização do PR correto e advisories recentes — 30/09/2026
+
+- PR de entrega: [bielxdh3/demanage#33](https://github.com/bielxdh3/demanage/pull/33), base `master` no SHA `721023eb90942b07a1cb777443a0dc4e4daf3a13`. Antes da correção de dependência, o head era `084e1e8bb3c93446d84efa1728bab93e4c3383ed`.
+- `Dependency Review` nesse head identificou `brace-expansion@1.1.18`. Duas advisories altas recentes exigem `1.1.20`; a auditoria local encontrou também a advisory moderada GHSA-q2hr-2g5m-vwhr, que exige `1.1.21`. As três foram confirmadas na GitHub Advisory Database.
+- A correção local altera somente o override `brace-expansion@1` para `1.1.21` e sua resolução no lockfile. `minimatch@3.1.4` aceita essa versão pela faixa `^1.1.7`; `brace-expansion@5.0.12` permanece separado.
+- Validação local dessa mudança: instalação congelada e audit backend passaram; os quatro inputs de reprodução publicados para recursão, lista de argumentos, nesting e reescrita quadrática terminaram sem exceção ou demora relevante; lint e build do backend passaram. `pnpm test` teve 8 testes aprovados e 7 arquivos não inicializados porque o ambiente local não definiu `DATABASE_URL`; a CI do backend com PostgreSQL ainda deve validar o novo SHA.
+- Os checks remotos do PR #33 precisam ser atualizados no head com `1.1.21`. O CodeQL alert gate também requer reconciliação dos 12 achados já validados no próprio fork, com justificativas individuais. Até esses resultados serem confirmados, o merge e o deploy continuam pendentes.
+- O upstream #41 não bloqueia a entrega do fork. Não houve merge, migration de produção nem escrita no servidor nesta atualização.
