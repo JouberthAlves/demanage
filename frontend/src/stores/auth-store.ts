@@ -29,7 +29,7 @@ type AuthState = {
     password: string,
   ) => Promise<RegisterResult>;
   updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
-  generateRecoveryCode: () => Promise<string>;
+  generateRecoveryCode: (currentPassword: string) => Promise<string>;
   logout: () => Promise<void>;
 };
 
@@ -106,10 +106,10 @@ export const useAuthStore = create<AuthState>((set) => ({
     return data.user;
   },
 
-  generateRecoveryCode: async () => {
+  generateRecoveryCode: async (currentPassword) => {
     const { data } = await api.post<{ recoveryCode: string }>(
       '/auth/recovery-code',
-      {},
+      { currentPassword },
     );
     set((state) => ({
       user: state.user ? { ...state.user, hasRecoveryCode: true } : null,

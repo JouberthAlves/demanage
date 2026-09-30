@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
+import { passwordPolicyError } from '@/lib/password-policy';
 import { useAuthStore } from '@/stores/auth-store';
 
 export function RegisterPage() {
@@ -71,6 +72,14 @@ export function RegisterPage() {
       setConfirmPasswordError(message);
       toast.error(message);
       document.getElementById('register-confirm-password')?.focus();
+      return;
+    }
+
+    const policyError = passwordPolicyError(password);
+    if (policyError) {
+      setError(policyError);
+      toast.error(policyError);
+      document.getElementById('register-password')?.focus();
       return;
     }
 
@@ -216,10 +225,12 @@ export function RegisterPage() {
                   autoComplete='new-password'
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  minLength={6}
+                  minLength={12}
                   required
                 />
-                <FieldDescription>Mínimo de 6 caracteres.</FieldDescription>
+                <FieldDescription>
+                  Mínimo de 12 caracteres e máximo de 72 bytes em UTF-8.
+                </FieldDescription>
               </Field>
               <Field data-invalid={confirmPasswordError ? true : undefined}>
                 <FieldLabel htmlFor='register-confirm-password'>
@@ -240,7 +251,7 @@ export function RegisterPage() {
                       ? 'register-confirm-password-error'
                       : undefined
                   }
-                  minLength={6}
+                  minLength={12}
                   required
                 />
                 {confirmPasswordError ? (
