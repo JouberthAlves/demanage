@@ -4,6 +4,7 @@ import { decimal, type DecimalLike, ZERO } from '@/lib/decimal';
 
 export type AccountingTransaction = {
   id?: string;
+  createdAt?: Date;
   asset: Asset;
   type: AssetTransactionType;
   quantity: DecimalLike;
@@ -12,6 +13,38 @@ export type AccountingTransaction = {
   costBasisKnown: boolean;
   date: Date;
 };
+
+function compareTransactions(
+  left: AccountingTransaction,
+  right: AccountingTransaction,
+) {
+  const dateDiff = left.date.getTime() - right.date.getTime();
+  if (dateDiff !== 0) return dateDiff;
+  const createdAtDiff =
+    (left.createdAt?.getTime() ?? 0) - (right.createdAt?.getTime() ?? 0);
+  if (createdAtDiff !== 0) return createdAtDiff;
+  return (left.id ?? '').localeCompare(right.id ?? '');
+}
+
+export function isAssetTimelineValid(input: AccountingTransaction[]) {
+  let balance = ZERO;
+  const transactions = [...input].sort(compareTransactions);
+
+  for (const transaction of transactions) {
+    const quantity = decimal(transaction.quantity);
+    if (transaction.type === 'BUY') {
+      balance = balance.plus(quantity);
+    } else if (transaction.type === 'SELL') {
+      if (quantity.gt(balance)) return false;
+      balance = balance.minus(quantity);
+    } else {
+      balance = balance.plus(quantity);
+      if (balance.lt(0)) return false;
+    }
+  }
+
+  return true;
+}
 
 export type AssetAccounting = {
   asset: Asset;
@@ -52,11 +85,7 @@ export function calculateAssetAccounting(
 
   const transactions = [...input]
     .filter((item) => item.asset === asset)
-    .sort((left, right) => {
-      const dateDiff = left.date.getTime() - right.date.getTime();
-      if (dateDiff !== 0) return dateDiff;
-      return (left.id ?? '').localeCompare(right.id ?? '');
-    });
+    .sort(compareTransactions);
 
   for (const transaction of transactions) {
     const quantity = decimal(transaction.quantity);

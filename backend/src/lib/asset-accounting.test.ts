@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   calculateAssetAccounting,
   enrichAccountingWithQuote,
+  isAssetTimelineValid,
 } from '@/lib/asset-accounting';
 import { decimal } from '@/lib/decimal';
 
@@ -104,4 +105,58 @@ test('USD usa a mesma contabilidade de preço médio', () => {
     },
   ]);
   assert.equal(decimal(accounting.averageCostBrl ?? 0).toFixed(2), '5.50');
+});
+
+test('uma venda retroativa inválida é rejeitada pela timeline completa', () => {
+  assert.equal(
+    isAssetTimelineValid([
+      {
+        id: 'buy',
+        asset: 'BTC',
+        type: 'BUY',
+        quantity: '1',
+        cashAmountBrl: '100',
+        costBasisKnown: true,
+        date: new Date('2026-02-01T12:00:00Z'),
+      },
+      {
+        id: 'backdated-sell',
+        asset: 'BTC',
+        type: 'SELL',
+        quantity: '1.01',
+        cashAmountBrl: '100',
+        costBasisKnown: true,
+        date: new Date('2026-01-31T12:00:00Z'),
+      },
+    ]),
+    false,
+  );
+});
+
+test('ordem no mesmo dia usa a sequência criada, não o UUID', () => {
+  assert.equal(
+    isAssetTimelineValid([
+      {
+        id: 'a-sale',
+        createdAt: new Date('2026-02-01T12:01:00Z'),
+        asset: 'BTC',
+        type: 'SELL',
+        quantity: '1',
+        cashAmountBrl: '100',
+        costBasisKnown: true,
+        date: new Date('2026-02-01T12:00:00Z'),
+      },
+      {
+        id: 'z-buy',
+        createdAt: new Date('2026-02-01T12:00:00Z'),
+        asset: 'BTC',
+        type: 'BUY',
+        quantity: '1',
+        cashAmountBrl: '100',
+        costBasisKnown: true,
+        date: new Date('2026-02-01T12:00:00Z'),
+      },
+    ]),
+    true,
+  );
 });
