@@ -1,7 +1,8 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect } from '@/lib/custom-tag';
-import { prisma } from '@/lib/prisma';
+import { entryReceiptInclude } from '@/lib/entry-receipts';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
@@ -30,78 +31,140 @@ function monthBounds(monthKey: string) {
   };
 }
 
-router.post('/:id/receipt-state', requireAuth, async (req: Request, res: Response) => {
-  try {
-    const userId = req.user?.id;
-    const id = String(req.params.id);
+router.post(
+  '/:id/receipt-state',
+  requireAuth,
+  async (req: Request, res: Response) => {
+    try {
+      const userId = req.user?.id;
+      const id = String(req.params.id);
 
-    if (!userId) {
-      return res.status(401).json({ error: 'Não autenticado' });
-    }
+      if (!userId) {
+        return res.status(401).json({ error: 'Não autenticado' });
+      }
 
-    const month = parseMonthKey(req.body?.month);
-    const state = parseReceiptState(req.body?.state);
-    if (!month || !state) {
-      return res.status(400).json({ error: 'Estado de recebimento inválido' });
-    }
+      const month = parseMonthKey(req.body?.month);
+      const state = parseReceiptState(req.body?.state);
+      if (!month || !state) {
+        return res
+          .status(400)
+          .json({ error: 'Estado de recebimento inválido' });
+      }
 
-    const existing = await prisma.entry.findFirst({
-      where: { id, userId },
-      include: { customTag: { select: customTagSelect } },
-    });
+      const result = await withUserWriteLockTransaction(userId, async (tx) => {
+        const existing = await tx.entry.findFirst({
+          where: { id, userId },
+          include: { customTag: { select: customTagSelect } },
+        });
 
-    if (!existing) {
-      return res.status(404).json({ error: 'Entrada não encontrada' });
-    }
+        if (!existing) return { status: 404, error: 'Entrada não encontrada' };
 
-    if (existing.type !== 'salario' || existing.frequency !== 'mensal') {
-      return res.status(400).json({
-        error: 'Confirmação manual é permitida apenas para salário mensal',
-      });
-    }
+        const isMonthlySalary =
+          existing.type === 'salario' && existing.frequency === 'mensal';
+        const isOneTimeIncome = existing.frequency === 'unica';
+        if (!isMonthlySalary && !isOneTimeIncome) {
+          return {
+            status: 400,
+            error:
+              'Confirmação manual é permitida apenas para salário mensal ou entrada avulsa',
+          };
+        }
 
-    const bounds = monthBounds(month);
-    if (existing.startsAt && existing.startsAt > bounds.end) {
-      return res.status(400).json({
-        error: 'Esse salário ainda não começou no mês selecionado',
-      });
-    }
-    if (existing.endsAt && existing.endsAt < bounds.start) {
-      return res.status(400).json({
-        error: 'Esse salário já terminou antes do mês selecionado',
-      });
-    }
+        if (isOneTimeIncome && state === 'automatic') {
+          return {
+            status: 400,
+            error: 'Entrada avulsa exige confirmação explícita de recebimento',
+          };
+        }
 
-    const data =
-      state === 'received'
-        ? {
-            receivedForMonth: month,
-            receiptHoldForMonth: null,
-            receivedAt: new Date(),
-          }
-        : state === 'waiting'
-          ? {
-              receivedForMonth: null,
-              receiptHoldForMonth: month,
-              receivedAt: null,
-            }
-          : {
-              receivedForMonth: null,
-              receiptHoldForMonth: null,
-              receivedAt: null,
+        if (isMonthlySalary) {
+          const bounds = monthBounds(month);
+          if (existing.startsAt && existing.startsAt > bounds.end) {
+            return {
+              status: 400,
+              error: 'Esse salário ainda não começou no mês selecionado',
             };
+          }
+          if (existing.endsAt && existing.endsAt < bounds.start) {
+            return {
+              status: 400,
+              error: 'Esse salário já terminou antes do mês selecionado',
+            };
+          }
+        }
 
-    const entry = await prisma.entry.update({
-      where: { id },
-      data,
-      include: { customTag: { select: customTagSelect } },
-    });
+        let receivedAt: Date | null = null;
+        if (state === 'received') {
+          if (isOneTimeIncome) {
+            const existingReceipt = await tx.entryReceipt.findFirst({
+              where: { entryId: id },
+            });
+            if (existingReceipt && existingReceipt.month !== month) {
+              return {
+                status: 409,
+                error: 'Essa entrada avulsa já tem um recebimento registrado',
+              };
+            }
+          }
+          const receipt = await tx.entryReceipt.upsert({
+            where: { entryId_month: { entryId: id, month } },
+            update: {},
+            create: {
+              entryId: id,
+              month,
+              amount: existing.amount,
+              receivedAt: new Date(),
+            },
+          });
+          receivedAt = receipt.receivedAt;
+        } else {
+          await tx.entryReceipt.deleteMany({ where: { entryId: id, month } });
+        }
 
-    return res.json(entry);
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Internal server error' });
-  }
-});
+        if (isMonthlySalary) {
+          await tx.entry.update({
+            where: { id },
+            data:
+              state === 'received'
+                ? {
+                    receivedForMonth: month,
+                    receiptHoldForMonth: null,
+                    receivedAt,
+                  }
+                : state === 'waiting'
+                  ? {
+                      receivedForMonth: null,
+                      receiptHoldForMonth: month,
+                      receivedAt: null,
+                    }
+                  : {
+                      receivedForMonth: null,
+                      receiptHoldForMonth: null,
+                      receivedAt: null,
+                    },
+          });
+        }
+
+        const entry = await tx.entry.findFirst({
+          where: { id, userId },
+          include: {
+            customTag: { select: customTagSelect },
+            ...entryReceiptInclude,
+          },
+        });
+        if (!entry) return { status: 404, error: 'Entrada não encontrada' };
+        return { entry };
+      });
+
+      if ('error' in result) {
+        return res.status(result.status ?? 500).json({ error: result.error });
+      }
+      return res.json(result.entry);
+    } catch (err) {
+      console.error(err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+  },
+);
 
 export default router;

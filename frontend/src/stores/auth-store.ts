@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { create } from 'zustand';
 
 import { api } from '@/lib/api';
@@ -117,16 +118,26 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 
   logout: async () => {
+    let clearLocalSession = false;
     try {
       await api.post('/auth/logout');
+      clearLocalSession = true;
+    } catch (error) {
+      clearLocalSession =
+        isAxiosError(error) &&
+        (error.response?.data as { code?: unknown } | undefined)?.code ===
+          'LOGOUT_REVOCATION_FAILED';
+      throw error;
     } finally {
-      const { useFinanceStore } = await import('@/stores/finance-store');
-      useFinanceStore.getState().clearAll();
-      set({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-      });
+      if (clearLocalSession) {
+        const { useFinanceStore } = await import('@/stores/finance-store');
+        useFinanceStore.getState().clearAll();
+        set({
+          user: null,
+          isAuthenticated: false,
+          isLoading: false,
+        });
+      }
     }
   },
 }));

@@ -1,3 +1,4 @@
+import { isAxiosError } from 'axios';
 import { LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
@@ -23,9 +24,25 @@ export function AppTopbar() {
   const displayName = user?.name || 'deManage';
 
   async function handleLogout() {
-    await logout();
-    toast.success('Sessão encerrada');
-    navigate('/login', { replace: true });
+    try {
+      await logout();
+      toast.success('Sessão encerrada em todos os dispositivos');
+      navigate('/login', { replace: true });
+    } catch (error) {
+      if (
+        isAxiosError(error) &&
+        (error.response?.data as { code?: unknown } | undefined)?.code ===
+          'LOGOUT_REVOCATION_FAILED'
+      ) {
+        toast.error(
+          'Você saiu deste navegador, mas não foi possível encerrar as outras sessões.',
+        );
+        navigate('/login', { replace: true });
+        return;
+      }
+
+      toast.error('Não foi possível confirmar a saída. Tente novamente.');
+    }
   }
 
   return (

@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 
 import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
 import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
+import { PATRIMONY_QUERY_KEY } from '@/hooks/query-keys';
 import {
   archivePiggyBank,
   createPiggyBank,
@@ -37,7 +38,12 @@ export function usePiggyBanks(includeArchived = false) {
           void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
         }
         if (result.createdCount > 0 || result.interestCreatedCount > 0) {
-          void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
+          void queryClient.invalidateQueries({
+            queryKey: PIGGY_BANKS_QUERY_KEY,
+          });
+        }
+        if (result.interestCreatedCount > 0) {
+          void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
         }
       })
       .catch(() => undefined);
@@ -54,7 +60,9 @@ export function usePiggyTransactions(piggyBankId: string | null) {
   });
 }
 
-function invalidatePiggyRelated(queryClient: ReturnType<typeof useQueryClient>) {
+function invalidatePiggyRelated(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
   void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
   void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
   void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });

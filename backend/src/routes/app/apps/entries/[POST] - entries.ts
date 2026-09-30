@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
 import { parseAbnt2Text } from '@/lib/abnt2';
+import { entryReceiptInclude } from '@/lib/entry-receipts';
 import {
   parseEndsAt,
   parseReceiveDay,
@@ -39,7 +40,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       endsAt,
     } = req.body;
 
-    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
+    const trimmedName = parseAbnt2Text(name, {
+      maxLength: 100,
+      required: true,
+    });
     if (!trimmedName || amount == null || !type || !frequency) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, amount, type, frequency',
@@ -153,7 +157,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         endsAt: resolvedEndsAt,
         customTagId: resolvedCustomTagId,
       },
-      include: { customTag: { select: customTagSelect } },
+      include: {
+        customTag: { select: customTagSelect },
+        ...entryReceiptInclude,
+      },
     });
 
     return res.status(201).json(entry);

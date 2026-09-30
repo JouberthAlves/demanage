@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect } from '@/lib/custom-tag';
+import { entryReceiptInclude } from '@/lib/entry-receipts';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -16,7 +17,10 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
 
     const entries = await prisma.entry.findMany({
       where: { userId },
-      include: { customTag: { select: customTagSelect } },
+      include: {
+        customTag: { select: customTagSelect },
+        ...entryReceiptInclude,
+      },
       orderBy: { createdAt: 'desc' },
     });
 

@@ -16,7 +16,6 @@ import {
 import {
   Field,
   FieldDescription,
-  FieldError,
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field';
@@ -108,7 +107,12 @@ export function LoginPage() {
         <CardContent>
           <form onSubmit={handleSubmit}>
             <FieldGroup>
-              <Field data-invalid={error ? true : undefined}>
+              {error ? (
+                <p role='alert' className='text-sm text-destructive'>
+                  {error}
+                </p>
+              ) : null}
+              <Field>
                 <FieldLabel htmlFor='login-email'>E-mail</FieldLabel>
                 <Input
                   id='login-email'
@@ -116,11 +120,10 @@ export function LoginPage() {
                   autoComplete='email'
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  aria-invalid={Boolean(error)}
                   required
                 />
               </Field>
-              <Field data-invalid={error ? true : undefined}>
+              <Field>
                 <FieldLabel htmlFor='login-password'>Senha</FieldLabel>
                 <Input
                   id='login-password'
@@ -128,10 +131,8 @@ export function LoginPage() {
                   autoComplete='current-password'
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  aria-invalid={Boolean(error)}
                   required
                 />
-                {error ? <FieldError>{error}</FieldError> : null}
                 <FieldDescription>
                   <Link
                     to='/recuperar-senha'
