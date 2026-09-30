@@ -58,7 +58,7 @@
       "@humanfs/node": "0.16.8",
       "@prisma/config>deepmerge-ts": "8.0.2",
       "ajv@6": "6.14.0",
-      "brace-expansion@1": "1.1.18",
+      "brace-expansion@1": "1.1.21",
       "flatted": "3.4.2",
       "js-yaml": "4.3.2",
       "minimatch@3": "3.1.4",
