@@ -11,7 +11,8 @@ COPY prisma ./prisma
 RUN npm install -g pnpm && pnpm install --frozen-lockfile
 
 COPY . .
-RUN pnpm prisma generate
+# Prisma 7 loads prisma.config.ts during generation, but this step does not connect to the database.
+RUN DATABASE_URL='postgresql://build:build@127.0.0.1:5432/build' pnpm prisma generate
 RUN pnpm build
 
 FROM node:26
