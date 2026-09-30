@@ -109,15 +109,24 @@ export function isExpenseAutoDebitedThisMonth(
   return startOfLocalDay(now) >= debitDate;
 }
 
-export function canPayExpenseEarly(
+export function canConfirmExpensePayment(
   expense: RecurringExpense,
   now = new Date(),
 ) {
   if (expense.frequency !== 'mensal' || expense.isInvoice) return false;
   if (!isExpenseScheduledThisMonth(expense, now)) return false;
   if (isExpensePaidThisMonth(expense, now)) return false;
-  if (isExpenseAutoDebitedThisMonth(expense, now)) return false;
   return expenseCashAmount(expense) > 0;
+}
+
+export function canPayExpenseEarly(
+  expense: RecurringExpense,
+  now = new Date(),
+) {
+  return (
+    canConfirmExpensePayment(expense, now) &&
+    !isExpenseAutoDebitedThisMonth(expense, now)
+  );
 }
 
 /** Despesa já entrou no saldo do mês corrente. */

@@ -27,8 +27,11 @@ type IncomeListCardProps = {
   income: Income;
   pending?: boolean;
   salaryPending?: boolean;
+  oneOffPending?: boolean;
   onSalaryReceived?: () => void;
   onSalaryWait?: () => void;
+  onOneOffReceived?: () => void;
+  onOneOffUndo?: (month: string) => void;
   onEdit: () => void;
   onDelete: () => void;
 };
@@ -37,16 +40,23 @@ export function IncomeListCard({
   income,
   pending,
   salaryPending,
+  oneOffPending,
   onSalaryReceived,
   onSalaryWait,
+  onOneOffReceived,
+  onOneOffUndo,
   onEdit,
   onDelete,
 }: IncomeListCardProps) {
   const received = isIncomeReceivedThisMonth(income);
-  const salaryMonthly = income.type === 'salario' && income.frequency === 'mensal';
+  const salaryMonthly =
+    income.type === 'salario' && income.frequency === 'mensal';
   const salaryWaiting = isSalaryWaitingForConfirmation(income);
   const salaryManual = isSalaryManuallyReceived(income);
-  const salaryAutomatic = salaryMonthly && isIncomeAutoReceivedThisMonth(income);
+  const salaryAutomatic =
+    salaryMonthly && isIncomeAutoReceivedThisMonth(income);
+  const oneOffReceipt =
+    income.frequency === 'unica' ? income.receipts?.[0] : undefined;
 
   const receiveLabel =
     income.frequency === 'unica'
@@ -62,19 +72,32 @@ export function IncomeListCard({
         : null;
 
   const salaryStatus = (() => {
+    if (income.frequency === 'unica') {
+      return (
+        <p
+          className={
+            oneOffReceipt
+              ? 'text-xs text-neon-green'
+              : 'text-xs text-neon-amber'
+          }
+        >
+          {oneOffReceipt ? 'Recebimento confirmado' : 'Aguardando confirmação'}
+        </p>
+      );
+    }
     if (!salaryMonthly) return null;
     if (salaryWaiting) {
       return (
-        <p className='text-xs text-neon-amber'>
-          Aguardando confirmação manual
-        </p>
+        <p className='text-xs text-neon-amber'>Aguardando confirmação manual</p>
       );
     }
     if (salaryManual) {
       return <p className='text-xs text-neon-green'>Recebimento confirmado</p>;
     }
     if (salaryAutomatic) {
-      return <p className='text-xs text-neon-green'>Recebido automaticamente</p>;
+      return (
+        <p className='text-xs text-neon-green'>Recebido automaticamente</p>
+      );
     }
     return (
       <p className='text-xs text-muted-foreground'>
@@ -119,7 +142,12 @@ export function IncomeListCard({
       </div>
 
       <div className='mt-3 space-y-1 text-xs text-muted-foreground'>
-        {receiveLabel ? <p>Recebe: {receiveLabel}</p> : null}
+        {receiveLabel ? (
+          <p>
+            {income.frequency === 'unica' ? 'Previsto:' : 'Recebe:'}{' '}
+            {receiveLabel}
+          </p>
+        ) : null}
         {income.type !== 'salario' && income.endsAt ? (
           <p>Término: {income.endsAt.split('-').reverse().join('/')}</p>
         ) : null}
@@ -153,16 +181,59 @@ export function IncomeListCard({
               </Button>
             ) : null}
           </>
+        ) : income.frequency === 'unica' ? (
+          <>
+            <Button
+              variant={oneOffReceipt ? 'ghost' : 'secondary'}
+              size='sm'
+              className='rounded-lg'
+              disabled={oneOffPending}
+              onClick={() =>
+                oneOffReceipt
+                  ? onOneOffUndo?.(oneOffReceipt.month)
+                  : onOneOffReceived?.()
+              }
+            >
+              {oneOffReceipt ? 'Desfazer recebimento' : 'Já recebi'}
+            </Button>
+            {income.type !== 'salario' ? (
+              <>
+                <Button
+                  variant='ghost'
+                  size='icon-sm'
+                  aria-label={`Editar ${income.name}`}
+                  onClick={onEdit}
+                >
+                  <Pencil className='size-4' />
+                </Button>
+                <Button
+                  variant='ghost'
+                  size='icon-sm'
+                  aria-label={`Excluir ${income.name}`}
+                  disabled={pending}
+                  onClick={onDelete}
+                >
+                  <Trash2 className='size-4' />
+                </Button>
+              </>
+            ) : null}
+          </>
         ) : income.type === 'salario' ? (
           <span className='text-xs text-muted-foreground'>Perfil</span>
         ) : (
           <>
-            <Button variant='ghost' size='icon-sm' onClick={onEdit}>
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              aria-label={`Editar ${income.name}`}
+              onClick={onEdit}
+            >
               <Pencil className='size-4' />
             </Button>
             <Button
               variant='ghost'
               size='icon-sm'
+              aria-label={`Excluir ${income.name}`}
               disabled={pending}
               onClick={onDelete}
             >

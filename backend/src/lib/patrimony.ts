@@ -2,13 +2,13 @@ import { Prisma } from '@/generated/prisma/client';
 
 import { dateKey, dateOnlyUtc, decimal, money, ZERO } from '@/lib/decimal';
 import {
+  MAX_HISTORY_RANGE_DAYS,
   getAssetHistory,
   getAssetQuote,
   getCdiHistory,
   getIpcaHistory,
   type MarketPoint,
 } from '@/lib/market-data';
-import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { prisma } from '@/lib/prisma';
 
 type ExpenseWithSplits = Prisma.ExpenseGetPayload<{
@@ -60,6 +60,22 @@ function cycleMonthKey(year: number, month: number) {
   return `${year}-${String(month + 1).padStart(2, '0')}`;
 }
 
+function parseHistoryDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new PatrimonyError('Data inválida');
+  }
+  const date = dateOnlyUtc(value);
+  if (Number.isNaN(date.getTime()) || dateKey(date) !== value) {
+    throw new PatrimonyError('Data inválida');
+  }
+  return date;
+}
+
+export function calculationStart(base: Date, today: Date) {
+  const earliest = addDays(today, 11 - MAX_HISTORY_RANGE_DAYS);
+  return base < earliest ? earliest : base;
+}
+
 function eventDateForMonth(
   explicitDate: Date | null,
   fallbackUpdatedAt: Date,
@@ -76,18 +92,11 @@ export function resolveExpenseOccurrenceDate(
   scheduledDate: Date,
   monthKey: string,
 ) {
-  if (
-    expense.frequency !== 'mensal' ||
-    expense.paidForMonth !== monthKey
-  ) {
+  if (expense.frequency !== 'mensal' || expense.paidForMonth !== monthKey) {
     return scheduledDate;
   }
 
-  const paidAt = eventDateForMonth(
-    expense.paidAt,
-    expense.updatedAt,
-    monthKey,
-  );
+  const paidAt = eventDateForMonth(expense.paidAt, expense.updatedAt, monthKey);
   if (!paidAt) return scheduledDate;
 
   // Se pagou antes, o caixa sai no pagamento. Se marcou depois do vencimento,
@@ -176,10 +185,7 @@ function buildCashFlows(args: {
     for (const { year, month } of months) {
       const day = clampDay(year, month, expense.dueDay ?? 1);
       const scheduledDate = new Date(Date.UTC(year, month, day, 12));
-      if (
-        expense.startsAt &&
-        scheduledDate < dateOnlyUtc(expense.startsAt)
-      ) {
+      if (expense.startsAt && scheduledDate < dateOnlyUtc(expense.startsAt)) {
         continue;
       }
       if (expense.endsAt && scheduledDate > dateOnlyUtc(expense.endsAt)) {
@@ -285,8 +291,6 @@ export async function getPatrimonyHistory(
   fromInput?: string,
   toInput?: string,
 ) {
-  await catchUpPiggyInterest(userId);
-
   const settings = await prisma.patrimonySettings.findUnique({
     where: { userId },
   });
@@ -296,9 +300,14 @@ export async function getPatrimonyHistory(
 
   const today = dateOnlyUtc(new Date());
   const base = dateOnlyUtc(settings.baseDate);
-  const requestedFrom = fromInput ? dateOnlyUtc(fromInput) : base;
-  const requestedTo = toInput ? dateOnlyUtc(toInput) : today;
-  const from = requestedFrom < base ? base : requestedFrom;
+  const requestedFrom = fromInput ? parseHistoryDate(fromInput) : base;
+  const requestedTo = toInput ? parseHistoryDate(toInput) : today;
+  if (requestedFrom > today || requestedTo > today) {
+    throw new PatrimonyError('Data futura não permitida');
+  }
+  const calculationBase = calculationStart(base, today);
+  const from =
+    requestedFrom < calculationBase ? calculationBase : requestedFrom;
   const to = requestedTo > today ? today : requestedTo;
   if (from > to) throw new PatrimonyError('Período inválido');
 
@@ -345,13 +354,15 @@ export async function getPatrimonyHistory(
     flowsByDay.set(flow.date, list);
   }
 
-  const marketFrom = addDays(base, -10);
-  const ipcaFrom = addDays(base, -800);
+  const calculationBaseKey = dateKey(calculationBase);
+  const storedBaseKey = dateKey(base);
+  const marketFrom = addDays(calculationBase, -10);
+  const ipcaFrom = addDays(calculationBase, -800);
   const [btcSeries, usdSeries, cdiSeries, ipcaSeries, btcQuote, usdQuote] =
     await Promise.all([
       getAssetHistory('BTC', dateKey(marketFrom), dateKey(to)),
       getAssetHistory('USD', dateKey(marketFrom), dateKey(to)),
-      getCdiHistory(dateKey(base), dateKey(to)),
+      getCdiHistory(calculationBaseKey, dateKey(to)),
       getIpcaHistory(dateKey(ipcaFrom), dateKey(to)),
       getAssetQuote('BTC'),
       getAssetQuote('USD'),
@@ -365,27 +376,42 @@ export async function getPatrimonyHistory(
     usdSeries.points = dedupeMarket(usdSeries.points);
   }
 
-  const baseKey = dateKey(base);
-  const baseBtcPrice = latestPointAtOrBefore(btcSeries.points, baseKey);
-  const baseUsdPrice = latestPointAtOrBefore(usdSeries.points, baseKey);
+  const baseBtcPrice = latestPointAtOrBefore(
+    btcSeries.points,
+    calculationBaseKey,
+  );
+  const baseUsdPrice = latestPointAtOrBefore(
+    usdSeries.points,
+    calculationBaseKey,
+  );
   if (!baseBtcPrice || !baseUsdPrice) {
     throw new PatrimonyError(
       'Histórico de cotação insuficiente para a data-base',
     );
   }
 
-  const baseBtc = assetQuantityAt(assetTransactions, 'BTC', baseKey).mul(
-    baseBtcPrice.value,
+  const baseBtc = assetQuantityAt(
+    assetTransactions,
+    'BTC',
+    calculationBaseKey,
+  ).mul(baseBtcPrice.value);
+  const baseUsd = assetQuantityAt(
+    assetTransactions,
+    'USD',
+    calculationBaseKey,
+  ).mul(baseUsdPrice.value);
+  const basePiggy = sumPiggyAt(piggyTransactions, calculationBaseKey);
+  let cash = flows.reduce(
+    (balance, flow) =>
+      flow.date > storedBaseKey && flow.date <= calculationBaseKey
+        ? balance.plus(flow.amount)
+        : balance,
+    decimal(settings.openingCashBrl),
   );
-  const baseUsd = assetQuantityAt(assetTransactions, 'USD', baseKey).mul(
-    baseUsdPrice.value,
-  );
-  const basePiggy = sumPiggyAt(piggyTransactions, baseKey);
-  let cash = decimal(settings.openingCashBrl);
   const baseReal = cash.plus(basePiggy).plus(baseBtc).plus(baseUsd);
   let cdiBenchmark = baseReal;
   let ipcaBenchmark = baseReal;
-  let lastIpca = latestPointAtOrBefore(ipcaSeries.points, baseKey);
+  let lastIpca = latestPointAtOrBefore(ipcaSeries.points, calculationBaseKey);
 
   const cdiMap = new Map(
     cdiSeries.points.map((point) => [point.date, decimal(point.value)]),
@@ -395,10 +421,10 @@ export async function getPatrimonyHistory(
   );
   const rows: Array<Record<string, string>> = [];
 
-  let cursor = base;
+  let cursor = calculationBase;
   while (cursor <= to) {
     const key = dateKey(cursor);
-    if (key !== baseKey) {
+    if (key !== calculationBaseKey) {
       const dayFlows = flowsByDay.get(key) ?? [];
       for (const flow of dayFlows) cash = cash.plus(flow.amount);
       const externalFlow = dayFlows
@@ -417,9 +443,7 @@ export async function getPatrimonyHistory(
       cdiBenchmark = cdiBenchmark.plus(externalFlow);
       const cdiRate = cdiMap.get(key);
       if (cdiRate) {
-        cdiBenchmark = cdiBenchmark.mul(
-          decimal(1).plus(cdiRate.div(100)),
-        );
+        cdiBenchmark = cdiBenchmark.mul(decimal(1).plus(cdiRate.div(100)));
       }
     }
 
@@ -460,7 +484,7 @@ export async function getPatrimonyHistory(
 
   return {
     settings: {
-      baseDate: baseKey,
+      baseDate: storedBaseKey,
       openingCashBrl: settings.openingCashBrl.toString(),
     },
     summary: {
@@ -498,11 +522,9 @@ export async function savePatrimonySettings(
   baseDateInput: unknown,
   openingCashInput: unknown,
 ) {
-  const baseDate = dateOnlyUtc(String(baseDateInput ?? ''));
-  if (Number.isNaN(baseDate.getTime())) {
-    throw new PatrimonyError('Data-base inválida');
-  }
-  if (baseDate > dateOnlyUtc(new Date())) {
+  const baseDate = parseHistoryDate(String(baseDateInput ?? ''));
+  const today = dateOnlyUtc(new Date());
+  if (baseDate > today) {
     throw new PatrimonyError('Data-base futura não é permitida');
   }
 

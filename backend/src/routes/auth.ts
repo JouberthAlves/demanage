@@ -11,6 +11,7 @@ import {
   toPublicUser,
 } from '@/lib/auth';
 import { parseReceiveDay } from '@/lib/entry-schedule';
+import { createLogoutHandler } from '@/lib/logout-handler';
 import { prisma } from '@/lib/prisma';
 import {
   generateRecoveryCode,
@@ -29,9 +30,13 @@ authRoutes.post('/auth/register', async (req, res) => {
       password?: string;
     };
 
-    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
-    const normalizedEmail = parseAbnt2Text(email, { required: true })
-      ?.toLowerCase();
+    const trimmedName = parseAbnt2Text(name, {
+      maxLength: 100,
+      required: true,
+    });
+    const normalizedEmail = parseAbnt2Text(email, {
+      required: true,
+    })?.toLowerCase();
 
     if (!trimmedName || !normalizedEmail || !password) {
       return res.status(400).json({
@@ -214,10 +219,7 @@ authRoutes.post('/auth/recover-password', async (req, res) => {
   }
 });
 
-authRoutes.post('/auth/logout', (req, res) => {
-  clearAuthCookie(res, req);
-  return res.json({ ok: true });
-});
+authRoutes.post('/auth/logout', createLogoutHandler());
 
 authRoutes.get('/auth/me', requireAuth, async (req, res) => {
   const userId = req.user?.id;
@@ -305,9 +307,7 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
         });
 
         const nextSalary =
-          salaryValue !== undefined
-            ? salaryValue
-            : Number(updatedUser.salary);
+          salaryValue !== undefined ? salaryValue : Number(updatedUser.salary);
         const nextReceiveDay =
           receiveDayValue !== undefined
             ? receiveDayValue
@@ -351,7 +351,10 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
     const nextSalaryReceiveDay = await getSalaryReceiveDay(userId);
     return res.json({ user: toPublicUser(user, nextSalaryReceiveDay) });
   } catch (error) {
-    if (error instanceof Error && error.message === 'MISSING_SALARY_RECEIVE_DAY') {
+    if (
+      error instanceof Error &&
+      error.message === 'MISSING_SALARY_RECEIVE_DAY'
+    ) {
       return res.status(400).json({
         error: 'Informe o dia em que recebe o salário (1-31)',
       });

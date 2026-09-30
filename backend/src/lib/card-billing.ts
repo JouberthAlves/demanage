@@ -1,6 +1,6 @@
 import type { Card, Expense, ExpenseSplit } from '@/generated/prisma/client';
 
-import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
 const BILLING_TIMEZONE = 'America/Sao_Paulo';
 
@@ -183,80 +183,72 @@ export function chargesTotalForClosing(
 
 export async function processUserCardBilling(userId: string) {
   const today = todayInSaoPaulo();
-  const cards = await prisma.card.findMany({
-    where: { userId },
-    include: {
-      expenses: { include: { splits: true } },
-      expenseSplits: {
-        where: { kind: 'card' },
-        include: { expense: { include: { splits: true } } },
+  return withUserWriteLockTransaction(userId, async (tx) => {
+    const cards = await tx.card.findMany({
+      where: { userId },
+      include: {
+        expenses: { include: { splits: true } },
+        expenseSplits: {
+          where: { kind: 'card' },
+          include: { expense: { include: { splits: true } } },
+        },
       },
-    },
-  });
+    });
 
-  let createdCount = 0;
+    let createdCount = 0;
 
-  for (const card of cards) {
-    const expenseMap = new Map<string, ExpenseForBilling>();
-    for (const expense of card.expenses) {
-      expenseMap.set(expense.id, expense);
-    }
-    for (const split of card.expenseSplits) {
-      expenseMap.set(split.expense.id, split.expense);
-    }
-    const expenses = [...expenseMap.values()];
-
-    let periodStart = card.lastInvoicedOn
-      ? dayKeyToUtcNoon(dateOnlyToDayKey(card.lastInvoicedOn))
-      : dayKeyToUtcNoon(instantToSpDayKey(card.createdAt));
-
-    const dueDates = listDueClosingDates(card.closingDay, periodStart, today);
-
-    for (const closingOn of dueDates) {
-      const amount = chargesTotalForClosing(
-        expenses,
-        card.id,
-        closingOn,
-        periodStart,
-      );
-
-      const closingKey = dateOnlyToDayKey(closingOn);
-
-      if (amount <= 0) {
-        await prisma.card.update({
-          where: { id: card.id },
-          data: { lastInvoicedOn: closingOn },
-        });
-        periodStart = closingOn;
-        continue;
+    for (const card of cards) {
+      const expenseMap = new Map<string, ExpenseForBilling>();
+      for (const expense of card.expenses) {
+        expenseMap.set(expense.id, expense);
       }
+      for (const split of card.expenseSplits) {
+        expenseMap.set(split.expense.id, split.expense);
+      }
+      const expenses = [...expenseMap.values()];
 
-      await prisma.$transaction(async (tx) => {
-        await tx.expense.create({
-          data: {
-            userId,
-            cardId: card.id,
-            name: `Fatura do cartão ${card.name}`,
-            amount,
-            category: 'outro',
-            frequency: 'unica',
-            isInvoice: true,
-            notes: `Fechamento ${formatPtBrDayKey(closingKey)}`,
-          },
-        });
+      let periodStart = card.lastInvoicedOn
+        ? dayKeyToUtcNoon(dateOnlyToDayKey(card.lastInvoicedOn))
+        : dayKeyToUtcNoon(instantToSpDayKey(card.createdAt));
+
+      const dueDates = listDueClosingDates(card.closingDay, periodStart, today);
+
+      for (const closingOn of dueDates) {
+        const amount = chargesTotalForClosing(
+          expenses,
+          card.id,
+          closingOn,
+          periodStart,
+        );
+
+        const closingKey = dateOnlyToDayKey(closingOn);
+
+        if (amount > 0) {
+          await tx.expense.create({
+            data: {
+              userId,
+              cardId: card.id,
+              name: `Fatura do cartão ${card.name}`,
+              amount,
+              category: 'outro',
+              frequency: 'unica',
+              isInvoice: true,
+              notes: `Fechamento ${formatPtBrDayKey(closingKey)}`,
+            },
+          });
+          createdCount += 1;
+        }
 
         await tx.card.update({
           where: { id: card.id },
           data: { lastInvoicedOn: closingOn },
         });
-      });
-
-      periodStart = closingOn;
-      createdCount += 1;
+        periodStart = closingOn;
+      }
     }
-  }
 
-  return { createdCount };
+    return { createdCount };
+  });
 }
 
 export function serializeCard(card: Card) {

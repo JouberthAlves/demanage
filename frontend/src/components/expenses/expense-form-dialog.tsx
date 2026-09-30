@@ -36,10 +36,7 @@ import {
   buildScheduleStartsAt,
   formatStartsAtPreview,
 } from '@/lib/expense-schedule';
-import {
-  availableCardLimit,
-  buildCommittedByCard,
-} from '@/lib/expense-splits';
+import { availableCardLimit, buildCommittedByCard } from '@/lib/expense-splits';
 import type { ExpensePayload } from '@/lib/expenses-api';
 import {
   formatBrlInputValue,
@@ -131,6 +128,10 @@ export function ExpenseFormDialog({
   const [form, setForm] = useState<FormState>(emptyForm);
   const [tagDialogOpen, setTagDialogOpen] = useState(false);
   const [categorySelectKey, setCategorySelectKey] = useState(0);
+  const [validationError, setValidationError] = useState<{
+    fieldId: string;
+    message: string;
+  } | null>(null);
   const submitting = createExpense.isPending || updateExpense.isPending;
   const isUnique = form.frequency === 'unica';
   const isRecurring =
@@ -140,13 +141,24 @@ export function ExpenseFormDialog({
     expenses.filter((item) => item.id !== expense?.id),
   );
   const amountValue = parseCurrencyInput(form.amount);
-  const percent1 = Math.min(
-    99,
-    Math.max(1, Number(form.cardPercent) || 0),
-  );
+  const percent1 = Math.min(99, Math.max(1, Number(form.cardPercent) || 0));
   const percent2 = roundMoney(100 - percent1);
   const share1 = roundMoney((amountValue * percent1) / 100);
   const share2 = roundMoney(amountValue - share1);
+
+  function validationMessageFor(fieldId: string) {
+    if (validationError?.fieldId !== fieldId) return null;
+
+    return (
+      <p
+        id='expense-form-error'
+        role='alert'
+        className='text-sm text-destructive'
+      >
+        {validationError.message}
+      </p>
+    );
+  }
 
   const limitBlocked = (() => {
     const shares: Array<{ cardId: string; amount: number }> = [];
@@ -176,6 +188,7 @@ export function ExpenseFormDialog({
 
   useEffect(() => {
     if (!open) return;
+    setValidationError(null);
 
     if (expense) {
       const startsMonth = expense.startsAt
@@ -184,8 +197,7 @@ export function ExpenseFormDialog({
       const mode = payModeFromExpense(expense);
       const splits = expense.splits ?? [];
       const cardSplits = splits.filter((split) => split.kind === 'card');
-      const firstCard =
-        cardSplits[0]?.cardId ?? expense.cardId ?? 'none';
+      const firstCard = cardSplits[0]?.cardId ?? expense.cardId ?? 'none';
       const secondCard = cardSplits[1]?.cardId ?? 'none';
       const firstPercent =
         mode === 'two_cards' || mode === 'card_pix'
@@ -201,9 +213,7 @@ export function ExpenseFormDialog({
         cardId: firstCard,
         cardId2: secondCard,
         cardPercent: firstPercent,
-        dueDay: expense.dueDay
-          ? String(expense.dueDay).padStart(2, '0')
-          : '05',
+        dueDay: expense.dueDay ? String(expense.dueDay).padStart(2, '0') : '05',
         dueMonth: startsMonth,
         endsAt: expense.endsAt ?? '',
         notes: expense.notes ?? '',
@@ -216,10 +226,21 @@ export function ExpenseFormDialog({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    setValidationError(null);
+
+    function rejectValidation(message: string, fieldId: string) {
+      setValidationError({ fieldId, message });
+      toast.error(message);
+      document.getElementById(fieldId)?.focus();
+    }
 
     const amount = parseCurrencyInput(form.amount);
-    if (!form.name.trim() || amount <= 0) {
-      toast.error('Informe nome e um valor válido');
+    if (!form.name.trim()) {
+      rejectValidation('Informe o nome da despesa', 'expense-name');
+      return;
+    }
+    if (amount <= 0) {
+      rejectValidation('Informe um valor válido', 'expense-amount');
       return;
     }
 
@@ -236,41 +257,56 @@ export function ExpenseFormDialog({
       dueDay = normalized ? Number(normalized) : NaN;
       const dueMonth = Number(form.dueMonth);
       if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) {
-        toast.error('Informe o dia em que será descontado (01-31)');
+        rejectValidation(
+          'Informe o dia em que será descontado (01-31)',
+          'expense-due',
+        );
         return;
       }
       if (!Number.isInteger(dueMonth) || dueMonth < 1 || dueMonth > 12) {
-        toast.error('Informe o mês em que será descontado');
+        rejectValidation(
+          'Informe o mês em que será descontado',
+          'expense-due-month',
+        );
         return;
       }
       startsAt = buildScheduleStartsAt(dueDay, dueMonth);
       if (form.endsAt && form.endsAt < startsAt) {
-        toast.error('Data de término deve ser após o primeiro desconto');
+        rejectValidation(
+          'Data de término deve ser após o primeiro desconto',
+          'expense-ends-at',
+        );
         return;
       }
     }
 
     let cardId: string | null = null;
-    let splits: ExpensePayload['splits'] = null;
+    let splits: NonNullable<ExpensePayload['splits']>;
 
     if (form.payMode === 'one_card') {
       if (form.cardId === 'none') {
-        toast.error('Selecione um cartão');
+        rejectValidation('Selecione um cartão', 'expense-card');
         return;
       }
       cardId = form.cardId;
       splits = [{ kind: 'card', cardId: form.cardId, percent: 100 }];
     } else if (form.payMode === 'two_cards') {
       if (form.cardId === 'none' || form.cardId2 === 'none') {
-        toast.error('Selecione os dois cartões');
+        rejectValidation(
+          'Selecione os dois cartões',
+          form.cardId === 'none' ? 'expense-card-1' : 'expense-card-2',
+        );
         return;
       }
       if (form.cardId === form.cardId2) {
-        toast.error('Escolha dois cartões diferentes');
+        rejectValidation('Escolha dois cartões diferentes', 'expense-card-2');
         return;
       }
       if (percent1 < 1 || percent1 > 99) {
-        toast.error('Informe um percentual entre 1 e 99');
+        rejectValidation(
+          'Informe um percentual entre 1 e 99',
+          'expense-card-percent',
+        );
         return;
       }
       splits = [
@@ -279,11 +315,14 @@ export function ExpenseFormDialog({
       ];
     } else if (form.payMode === 'card_pix') {
       if (form.cardId === 'none') {
-        toast.error('Selecione o cartão');
+        rejectValidation('Selecione o cartão', 'expense-card-1');
         return;
       }
       if (percent1 < 1 || percent1 > 99) {
-        toast.error('Informe um percentual entre 1 e 99');
+        rejectValidation(
+          'Informe um percentual entre 1 e 99',
+          'expense-card-percent',
+        );
         return;
       }
       splits = [
@@ -317,8 +356,9 @@ export function ExpenseFormDialog({
         committed: committedByCard.get(card.id) ?? 0,
       });
       if (available != null && share.amount > available + 0.001) {
-        toast.error(
+        rejectValidation(
           `Limite insuficiente no cartão ${card.name} (disponível ${formatCurrency(available)})`,
+          form.payMode === 'one_card' ? 'expense-card' : 'expense-card-1',
         );
         return;
       }
@@ -370,12 +410,19 @@ export function ExpenseFormDialog({
 
           <form
             onSubmit={(event) => void handleSubmit(event)}
+            onChangeCapture={() => setValidationError(null)}
             className='flex min-w-0 flex-col gap-4'
           >
             <div className='flex min-w-0 flex-col gap-2'>
               <Label htmlFor='expense-name'>Nome</Label>
               <Input
                 id='expense-name'
+                aria-invalid={validationError?.fieldId === 'expense-name'}
+                aria-describedby={
+                  validationError?.fieldId === 'expense-name'
+                    ? 'expense-form-error'
+                    : undefined
+                }
                 value={form.name}
                 onChange={(event) =>
                   setForm((current) => ({
@@ -387,27 +434,38 @@ export function ExpenseFormDialog({
                 maxLength={100}
                 className='min-w-0 rounded-lg'
               />
+              {validationMessageFor('expense-name')}
             </div>
 
             <div className='flex flex-col gap-2'>
               <Label htmlFor='expense-amount'>Valor</Label>
               <CurrencyInput
                 id='expense-amount'
+                aria-invalid={validationError?.fieldId === 'expense-amount'}
+                aria-describedby={
+                  validationError?.fieldId === 'expense-amount'
+                    ? 'expense-form-error'
+                    : undefined
+                }
                 value={form.amount}
                 onValueChange={(amount) =>
                   setForm((current) => ({ ...current, amount }))
                 }
                 className='rounded-lg'
               />
+              {validationMessageFor('expense-amount')}
             </div>
 
             <div className='grid grid-cols-2 gap-3'>
               <div className='flex flex-col gap-2'>
-                <Label>Categoria</Label>
+                <Label id='expense-category-label' htmlFor='expense-category'>
+                  Categoria
+                </Label>
                 <Select
                   key={categorySelectKey}
                   value={form.categoryKey}
                   onValueChange={(value) => {
+                    setValidationError(null);
                     if (!value) return;
                     if (value === NEW_TYPE_VALUE) {
                       setCategorySelectKey((current) => current + 1);
@@ -420,7 +478,11 @@ export function ExpenseFormDialog({
                     }));
                   }}
                 >
-                  <SelectTrigger className='rounded-lg'>
+                  <SelectTrigger
+                    id='expense-category'
+                    aria-labelledby='expense-category-label'
+                    className='rounded-lg'
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -447,10 +509,13 @@ export function ExpenseFormDialog({
                 </Select>
               </div>
               <div className='flex flex-col gap-2'>
-                <Label>Frequência</Label>
+                <Label id='expense-frequency-label' htmlFor='expense-frequency'>
+                  Frequência
+                </Label>
                 <Select
                   value={form.frequency}
                   onValueChange={(value) => {
+                    setValidationError(null);
                     if (!value) return;
                     setForm((current) => ({
                       ...current,
@@ -464,7 +529,11 @@ export function ExpenseFormDialog({
                     }));
                   }}
                 >
-                  <SelectTrigger className='rounded-lg'>
+                  <SelectTrigger
+                    id='expense-frequency'
+                    aria-labelledby='expense-frequency-label'
+                    className='rounded-lg'
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -483,12 +552,25 @@ export function ExpenseFormDialog({
             {isRecurring ? (
               <>
                 <div className='flex flex-col gap-2'>
-                  <Label>Quando será descontado</Label>
+                  <p className='text-sm font-medium'>Quando será descontado</p>
                   <div className='grid grid-cols-2 gap-3'>
                     <div className='flex flex-col gap-1.5'>
-                      <span className='text-xs text-muted-foreground'>Dia</span>
+                      <Label
+                        htmlFor='expense-due'
+                        className='text-xs text-muted-foreground'
+                      >
+                        Dia
+                      </Label>
                       <Input
                         id='expense-due'
+                        aria-invalid={
+                          validationError?.fieldId === 'expense-due'
+                        }
+                        aria-describedby={
+                          validationError?.fieldId === 'expense-due'
+                            ? 'expense-form-error'
+                            : undefined
+                        }
                         inputMode='numeric'
                         maxLength={2}
                         value={form.dueDay}
@@ -507,12 +589,20 @@ export function ExpenseFormDialog({
                         placeholder='05'
                         className='rounded-lg'
                       />
+                      {validationMessageFor('expense-due')}
                     </div>
                     <div className='flex flex-col gap-1.5'>
-                      <span className='text-xs text-muted-foreground'>Mês</span>
+                      <Label
+                        id='expense-due-month-label'
+                        htmlFor='expense-due-month'
+                        className='text-xs text-muted-foreground'
+                      >
+                        Mês
+                      </Label>
                       <Select
                         value={form.dueMonth}
                         onValueChange={(value) => {
+                          setValidationError(null);
                           if (value) {
                             setForm((current) => ({
                               ...current,
@@ -521,7 +611,19 @@ export function ExpenseFormDialog({
                           }
                         }}
                       >
-                        <SelectTrigger className='rounded-lg'>
+                        <SelectTrigger
+                          id='expense-due-month'
+                          aria-labelledby='expense-due-month-label'
+                          aria-invalid={
+                            validationError?.fieldId === 'expense-due-month'
+                          }
+                          aria-describedby={
+                            validationError?.fieldId === 'expense-due-month'
+                              ? 'expense-form-error'
+                              : undefined
+                          }
+                          className='rounded-lg'
+                        >
                           <SelectValue placeholder='Mês' />
                         </SelectTrigger>
                         <SelectContent>
@@ -535,6 +637,7 @@ export function ExpenseFormDialog({
                           ))}
                         </SelectContent>
                       </Select>
+                      {validationMessageFor('expense-due-month')}
                     </div>
                   </div>
                   {(() => {
@@ -573,12 +676,22 @@ export function ExpenseFormDialog({
                   <DatePicker
                     id='expense-ends-at'
                     value={form.endsAt}
-                    onValueChange={(endsAt) =>
-                      setForm((current) => ({ ...current, endsAt }))
-                    }
+                    onValueChange={(endsAt) => {
+                      setValidationError(null);
+                      setForm((current) => ({ ...current, endsAt }));
+                    }}
                     placeholder='Sem data de término'
                     allowClear
+                    ariaInvalid={
+                      validationError?.fieldId === 'expense-ends-at'
+                    }
+                    ariaDescribedBy={
+                      validationError?.fieldId === 'expense-ends-at'
+                        ? 'expense-form-error'
+                        : undefined
+                    }
                   />
+                  {validationMessageFor('expense-ends-at')}
                   <p className='text-xs text-muted-foreground'>
                     Opcional. Vazio = sem fim.
                   </p>
@@ -594,10 +707,13 @@ export function ExpenseFormDialog({
 
             <div className='flex flex-col gap-3'>
               <div className='flex flex-col gap-2'>
-                <Label>Pagamento</Label>
+                <Label id='expense-pay-mode-label' htmlFor='expense-pay-mode'>
+                  Pagamento
+                </Label>
                 <Select
                   value={form.payMode}
                   onValueChange={(value) => {
+                    setValidationError(null);
                     if (!value) return;
                     setForm((current) => ({
                       ...current,
@@ -624,7 +740,11 @@ export function ExpenseFormDialog({
                     }));
                   }}
                 >
-                  <SelectTrigger className='rounded-lg'>
+                  <SelectTrigger
+                    id='expense-pay-mode'
+                    aria-labelledby='expense-pay-mode-label'
+                    className='rounded-lg'
+                  >
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -648,16 +768,29 @@ export function ExpenseFormDialog({
 
               {form.payMode === 'one_card' ? (
                 <div className='flex flex-col gap-2'>
-                  <Label>Cartão</Label>
+                  <Label id='expense-card-label' htmlFor='expense-card'>
+                    Cartão
+                  </Label>
                   <Select
                     value={form.cardId}
                     onValueChange={(value) => {
+                      setValidationError(null);
                       if (value) {
                         setForm((current) => ({ ...current, cardId: value }));
                       }
                     }}
                   >
-                    <SelectTrigger className='rounded-lg'>
+                    <SelectTrigger
+                      id='expense-card'
+                      aria-labelledby='expense-card-label'
+                      aria-invalid={validationError?.fieldId === 'expense-card'}
+                      aria-describedby={
+                        validationError?.fieldId === 'expense-card'
+                          ? 'expense-form-error'
+                          : undefined
+                      }
+                      className='rounded-lg'
+                    >
                       <SelectValue placeholder='Selecione' />
                     </SelectTrigger>
                     <SelectContent>
@@ -677,6 +810,7 @@ export function ExpenseFormDialog({
                       })}
                     </SelectContent>
                   </Select>
+                  {validationMessageFor('expense-card')}
                 </div>
               ) : null}
 
@@ -684,10 +818,13 @@ export function ExpenseFormDialog({
                 <div className='space-y-3 rounded-xl border border-border bg-black/20 p-3'>
                   <div className='grid gap-3 sm:grid-cols-2'>
                     <div className='flex flex-col gap-2'>
-                      <Label>Cartão 1</Label>
+                      <Label id='expense-card-1-label' htmlFor='expense-card-1'>
+                        Cartão 1
+                      </Label>
                       <Select
                         value={form.cardId}
                         onValueChange={(value) => {
+                          setValidationError(null);
                           if (value) {
                             setForm((current) => ({
                               ...current,
@@ -700,7 +837,19 @@ export function ExpenseFormDialog({
                           }
                         }}
                       >
-                        <SelectTrigger className='rounded-lg'>
+                        <SelectTrigger
+                          id='expense-card-1'
+                          aria-labelledby='expense-card-1-label'
+                          aria-invalid={
+                            validationError?.fieldId === 'expense-card-1'
+                          }
+                          aria-describedby={
+                            validationError?.fieldId === 'expense-card-1'
+                              ? 'expense-form-error'
+                              : undefined
+                          }
+                          className='rounded-lg'
+                        >
                           <SelectValue placeholder='Selecione' />
                         </SelectTrigger>
                         <SelectContent>
@@ -711,13 +860,20 @@ export function ExpenseFormDialog({
                           ))}
                         </SelectContent>
                       </Select>
+                      {validationMessageFor('expense-card-1')}
                     </div>
                     {form.payMode === 'two_cards' ? (
                       <div className='flex flex-col gap-2'>
-                        <Label>Cartão 2</Label>
+                        <Label
+                          id='expense-card-2-label'
+                          htmlFor='expense-card-2'
+                        >
+                          Cartão 2
+                        </Label>
                         <Select
                           value={form.cardId2}
                           onValueChange={(value) => {
+                            setValidationError(null);
                             if (value) {
                               setForm((current) => ({
                                 ...current,
@@ -726,7 +882,19 @@ export function ExpenseFormDialog({
                             }
                           }}
                         >
-                          <SelectTrigger className='rounded-lg'>
+                          <SelectTrigger
+                            id='expense-card-2'
+                            aria-labelledby='expense-card-2-label'
+                            aria-invalid={
+                              validationError?.fieldId === 'expense-card-2'
+                            }
+                            aria-describedby={
+                              validationError?.fieldId === 'expense-card-2'
+                                ? 'expense-form-error'
+                                : undefined
+                            }
+                            className='rounded-lg'
+                          >
                             <SelectValue placeholder='Selecione' />
                           </SelectTrigger>
                           <SelectContent>
@@ -739,6 +907,7 @@ export function ExpenseFormDialog({
                               ))}
                           </SelectContent>
                         </Select>
+                        {validationMessageFor('expense-card-2')}
                       </div>
                     ) : (
                       <div className='flex flex-col justify-end gap-1 rounded-lg border border-border/70 bg-black/25 px-3 py-2'>
@@ -751,11 +920,17 @@ export function ExpenseFormDialog({
                   </div>
 
                   <div className='flex flex-col gap-2'>
-                    <Label htmlFor='expense-card-percent'>
-                      % no cartão 1
-                    </Label>
+                    <Label htmlFor='expense-card-percent'>% no cartão 1</Label>
                     <Input
                       id='expense-card-percent'
+                      aria-invalid={
+                        validationError?.fieldId === 'expense-card-percent'
+                      }
+                      aria-describedby={
+                        validationError?.fieldId === 'expense-card-percent'
+                          ? 'expense-form-error'
+                          : undefined
+                      }
                       inputMode='numeric'
                       value={form.cardPercent}
                       onChange={(event) => {
@@ -769,6 +944,7 @@ export function ExpenseFormDialog({
                       }}
                       className='rounded-lg'
                     />
+                    {validationMessageFor('expense-card-percent')}
                     <p className='text-xs text-muted-foreground'>
                       Cartão 1: {percent1}% · {formatCurrency(share1)}
                       {' · '}
@@ -882,7 +1058,11 @@ export function ExpenseFormDialog({
               >
                 Cancelar
               </Button>
-              <Button type='submit' className='rounded-lg' disabled={submitting || limitBlocked}>
+              <Button
+                type='submit'
+                className='rounded-lg'
+                disabled={submitting || limitBlocked}
+              >
                 {submitting ? <Spinner data-icon='inline-start' /> : null}
                 Salvar
               </Button>

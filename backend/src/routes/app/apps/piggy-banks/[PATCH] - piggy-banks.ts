@@ -8,7 +8,7 @@ import {
   piggyGoalAmount,
   serializePiggyBank,
 } from '@/lib/piggy';
-import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { parsePositiveAmount } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
@@ -26,134 +26,131 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const id = String(req.params.id);
     if (!userId) return res.status(401).json({ error: 'Não autenticado' });
 
-    const existing = await prisma.piggyBank.findFirst({
-      where: { id, userId },
-      include: { transactions: true },
-    });
-    if (!existing) {
-      return res.status(404).json({ error: 'Cofre não encontrado' });
-    }
-    if (existing.archivedAt) {
-      return res
-        .status(400)
-        .json({ error: 'Cofre arquivado não pode ser editado' });
-    }
-
-    const {
-      name,
-      goalAmount,
-      targetDate,
-      monthlyGoal: monthlyGoalInput,
-      autoDebit,
-      autoDebitDay,
-      isEmergency,
-      yieldEnabled,
-      cdiPercent,
-    } = req.body;
-
-    let nextGoal = piggyGoalAmount(existing.goalAmount);
-    if (goalAmount !== undefined) {
-      if (goalAmount == null || goalAmount === '') {
-        nextGoal = null;
-      } else {
-        const parsed = parsePositiveAmount(goalAmount);
-        if (parsed == null) {
-          return res
-            .status(400)
-            .json({ error: 'Meta final deve ser maior que zero' });
-        }
-        nextGoal = parsed;
-      }
-    }
-
-    let nextTarget = existing.targetDate;
-    if (targetDate !== undefined) {
-      try {
-        nextTarget = parseOptionalTargetDate(targetDate);
-      } catch {
-        return res.status(400).json({ error: 'Data de conclusão inválida' });
-      }
-    }
-
-    const computedMonthly = computeMonthlyGoal(nextGoal, nextTarget);
-    let monthlyGoal = computedMonthly;
-    const nextAutoDebit =
-      autoDebit !== undefined ? Boolean(autoDebit) : existing.autoDebit;
-    if (nextAutoDebit && monthlyGoal <= 0) {
-      const parsedMonthly = parsePositiveAmount(
-        monthlyGoalInput !== undefined
-          ? monthlyGoalInput
-          : existing.monthlyGoal,
-      );
-      if (parsedMonthly == null) {
-        return res
-          .status(400)
-          .json({ error: 'Informe o valor do débito automático' });
-      }
-      monthlyGoal = parsedMonthly;
-    }
-
-    let nextAutoDebitDay = existing.autoDebitDay;
-    if (
-      autoDebitDay !== undefined ||
-      (autoDebit !== undefined && nextAutoDebit)
-    ) {
-      const day = parseAutoDebitDay(
-        autoDebitDay !== undefined ? autoDebitDay : existing.autoDebitDay,
-      );
-      if (nextAutoDebit && day == null) {
-        return res.status(400).json({
-          error: 'Dia do débito automático deve ser entre 1 e 31',
-        });
-      }
-      if (day != null) nextAutoDebitDay = day;
-    }
-
-    let nextName: string | undefined;
-    if (name !== undefined) {
-      const parsed = parseAbnt2Text(name, {
-        maxLength: 50,
-        required: true,
+    const result = await withUserWriteLockTransaction(userId, async (tx) => {
+      const existing = await tx.piggyBank.findFirst({
+        where: { id, userId },
+        include: { transactions: true },
       });
-      if (!parsed) return res.status(400).json({ error: 'Nome inválido' });
-      nextName = parsed;
-    }
-
-    const nextYieldEnabled =
-      yieldEnabled !== undefined
-        ? Boolean(yieldEnabled)
-        : existing.yieldEnabled;
-    let nextCdiPercent = Number(existing.cdiPercent);
-    if (cdiPercent !== undefined) {
-      const parsed = parseCdiPercent(cdiPercent);
-      if (parsed == null) {
-        return res
-          .status(400)
-          .json({ error: '% do CDI deve estar entre 0 e 1000' });
+      if (!existing) return { error: 'Cofre não encontrado', status: 404 };
+      if (existing.archivedAt) {
+        return { error: 'Cofre arquivado não pode ser editado', status: 400 };
       }
-      nextCdiPercent = parsed;
-    }
-    if (!nextYieldEnabled) nextCdiPercent = 0;
 
-    const bank = await prisma.piggyBank.update({
-      where: { id },
-      data: {
-        ...(nextName !== undefined ? { name: nextName } : {}),
-        goalAmount: nextGoal,
-        targetDate: nextTarget,
-        monthlyGoal,
-        autoDebit: nextAutoDebit,
-        autoDebitDay: nextAutoDebitDay,
-        yieldEnabled: nextYieldEnabled,
-        cdiPercent: nextCdiPercent,
-        ...(isEmergency !== undefined
-          ? { isEmergency: Boolean(isEmergency) }
-          : {}),
-      },
-      include: { transactions: true },
+      const {
+        name,
+        goalAmount,
+        targetDate,
+        monthlyGoal: monthlyGoalInput,
+        autoDebit,
+        autoDebitDay,
+        isEmergency,
+        yieldEnabled,
+        cdiPercent,
+      } = req.body;
+
+      let nextGoal = piggyGoalAmount(existing.goalAmount);
+      if (goalAmount !== undefined) {
+        if (goalAmount == null || goalAmount === '') {
+          nextGoal = null;
+        } else {
+          const parsed = parsePositiveAmount(goalAmount);
+          if (parsed == null) {
+            return { error: 'Meta final deve ser maior que zero', status: 400 };
+          }
+          nextGoal = parsed;
+        }
+      }
+
+      let nextTarget = existing.targetDate;
+      if (targetDate !== undefined) {
+        try {
+          nextTarget = parseOptionalTargetDate(targetDate);
+        } catch {
+          return { error: 'Data de conclusão inválida', status: 400 };
+        }
+      }
+
+      const computedMonthly = computeMonthlyGoal(nextGoal, nextTarget);
+      let monthlyGoal = computedMonthly;
+      const nextAutoDebit =
+        autoDebit !== undefined ? Boolean(autoDebit) : existing.autoDebit;
+      if (nextAutoDebit && monthlyGoal <= 0) {
+        const parsedMonthly = parsePositiveAmount(
+          monthlyGoalInput !== undefined
+            ? monthlyGoalInput
+            : existing.monthlyGoal,
+        );
+        if (parsedMonthly == null) {
+          return { error: 'Informe o valor do débito automático', status: 400 };
+        }
+        monthlyGoal = parsedMonthly;
+      }
+
+      let nextAutoDebitDay = existing.autoDebitDay;
+      if (
+        autoDebitDay !== undefined ||
+        (autoDebit !== undefined && nextAutoDebit)
+      ) {
+        const day = parseAutoDebitDay(
+          autoDebitDay !== undefined ? autoDebitDay : existing.autoDebitDay,
+        );
+        if (nextAutoDebit && day == null) {
+          return {
+            error: 'Dia do débito automático deve ser entre 1 e 31',
+            status: 400,
+          };
+        }
+        if (day != null) nextAutoDebitDay = day;
+      }
+
+      let nextName: string | undefined;
+      if (name !== undefined) {
+        const parsed = parseAbnt2Text(name, {
+          maxLength: 50,
+          required: true,
+        });
+        if (!parsed) return { error: 'Nome inválido', status: 400 };
+        nextName = parsed;
+      }
+
+      const nextYieldEnabled =
+        yieldEnabled !== undefined
+          ? Boolean(yieldEnabled)
+          : existing.yieldEnabled;
+      let nextCdiPercent = Number(existing.cdiPercent);
+      if (cdiPercent !== undefined) {
+        const parsed = parseCdiPercent(cdiPercent);
+        if (parsed == null) {
+          return { error: '% do CDI deve estar entre 0 e 1000', status: 400 };
+        }
+        nextCdiPercent = parsed;
+      }
+      if (!nextYieldEnabled) nextCdiPercent = 0;
+
+      const bank = await tx.piggyBank.update({
+        where: { id },
+        data: {
+          ...(nextName !== undefined ? { name: nextName } : {}),
+          goalAmount: nextGoal,
+          targetDate: nextTarget,
+          monthlyGoal,
+          autoDebit: nextAutoDebit,
+          autoDebitDay: nextAutoDebitDay,
+          yieldEnabled: nextYieldEnabled,
+          cdiPercent: nextCdiPercent,
+          ...(isEmergency !== undefined
+            ? { isEmergency: Boolean(isEmergency) }
+            : {}),
+        },
+        include: { transactions: true },
+      });
+      return { bank };
     });
 
-    return res.json(serializePiggyBank(bank));
+    if ('error' in result) {
+      return res.status(result.status ?? 400).json({ error: result.error });
+    }
+    return res.json(serializePiggyBank(result.bank));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });

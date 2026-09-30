@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
 import { parseAbnt2Text } from '@/lib/abnt2';
+import { entryReceiptInclude } from '@/lib/entry-receipts';
 import {
   parseEndsAt,
   parseReceiveDay,
@@ -220,7 +221,10 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           ? { customTagId: resolvedCustomTagId }
           : {}),
       },
-      include: { customTag: { select: customTagSelect } },
+      include: {
+        customTag: { select: customTagSelect },
+        ...entryReceiptInclude,
+      },
     });
 
     return res.json(entry);

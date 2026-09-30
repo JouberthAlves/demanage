@@ -1,11 +1,8 @@
 import { Router, Request, Response } from 'express';
 
 import { customTagSelect } from '@/lib/custom-tag';
-import {
-  expenseSplitInclude,
-  serializeExpense,
-} from '@/lib/expense-splits';
-import { prisma } from '@/lib/prisma';
+import { expenseSplitInclude, serializeExpense } from '@/lib/expense-splits';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
@@ -39,65 +36,94 @@ router.post('/:id/pay', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Mês de pagamento inválido' });
     }
 
-    const existing = await prisma.expense.findFirst({
-      where: { id, userId },
-      include: {
-        customTag: { select: customTagSelect },
-        ...expenseSplitInclude,
-      },
+    const result = await withUserWriteLockTransaction(userId, async (tx) => {
+      const existing = await tx.expense.findFirst({
+        where: { id, userId },
+        include: {
+          customTag: { select: customTagSelect },
+          ...expenseSplitInclude,
+        },
+      });
+
+      if (!existing) return { status: 404, error: 'Despesa não encontrada' };
+
+      if (existing.isInvoice || existing.frequency !== 'mensal') {
+        return {
+          status: 400,
+          error:
+            'Pagamento antecipado é permitido apenas para despesas fixas mensais',
+        };
+      }
+
+      const cashAmount =
+        existing.splits.length > 0
+          ? existing.splits
+              .filter((split) => split.kind === 'pix')
+              .reduce((sum, split) => sum + Number(split.amount), 0)
+          : existing.cardId
+            ? 0
+            : Number(existing.amount);
+
+      if (cashAmount <= 0) {
+        return {
+          status: 400,
+          error: 'Despesas somente no cartão entram no saldo pela fatura',
+        };
+      }
+
+      const bounds = monthBounds(paidForMonth);
+      if (existing.startsAt && existing.startsAt > bounds.end) {
+        return {
+          status: 400,
+          error: 'Essa despesa ainda não começou no mês selecionado',
+        };
+      }
+      if (existing.endsAt && existing.endsAt < bounds.start) {
+        return {
+          status: 400,
+          error: 'Essa despesa já terminou antes do mês selecionado',
+        };
+      }
+
+      const now = new Date();
+      const payment = await tx.expensePayment.upsert({
+        where: {
+          expenseId_month: { expenseId: id, month: paidForMonth },
+        },
+        update: {},
+        create: {
+          expenseId: id,
+          month: paidForMonth,
+          amount: cashAmount,
+          paidAt:
+            existing.paidForMonth === paidForMonth && existing.paidAt
+              ? existing.paidAt
+              : now,
+        },
+      });
+
+      if (existing.paidForMonth !== paidForMonth) {
+        await tx.expense.update({
+          where: { id },
+          data: { paidForMonth, paidAt: payment.paidAt },
+        });
+      }
+
+      const expense = await tx.expense.findFirst({
+        where: { id, userId },
+        include: {
+          customTag: { select: customTagSelect },
+          ...expenseSplitInclude,
+        },
+      });
+      if (!expense) return { status: 404, error: 'Despesa não encontrada' };
+      return { expense };
     });
 
-    if (!existing) {
-      return res.status(404).json({ error: 'Despesa não encontrada' });
+    if ('error' in result) {
+      return res.status(result.status ?? 500).json({ error: result.error });
     }
-
-    if (existing.isInvoice || existing.frequency !== 'mensal') {
-      return res.status(400).json({
-        error: 'Pagamento antecipado é permitido apenas para despesas fixas mensais',
-      });
-    }
-
-    const cashAmount =
-      existing.splits.length > 0
-        ? existing.splits
-            .filter((split) => split.kind === 'pix')
-            .reduce((sum, split) => sum + Number(split.amount), 0)
-        : existing.cardId
-          ? 0
-          : Number(existing.amount);
-
-    if (cashAmount <= 0) {
-      return res.status(400).json({
-        error: 'Despesas somente no cartão entram no saldo pela fatura',
-      });
-    }
-
-    const bounds = monthBounds(paidForMonth);
-    if (existing.startsAt && existing.startsAt > bounds.end) {
-      return res.status(400).json({
-        error: 'Essa despesa ainda não começou no mês selecionado',
-      });
-    }
-    if (existing.endsAt && existing.endsAt < bounds.start) {
-      return res.status(400).json({
-        error: 'Essa despesa já terminou antes do mês selecionado',
-      });
-    }
-
-    if (existing.paidForMonth === paidForMonth) {
-      return res.json(serializeExpense(existing));
-    }
-
-    const expense = await prisma.expense.update({
-      where: { id },
-      data: { paidForMonth, paidAt: new Date() },
-      include: {
-        customTag: { select: customTagSelect },
-        ...expenseSplitInclude,
-      },
-    });
-
-    return res.json(serializeExpense(expense));
+    return res.json(serializeExpense(result.expense));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });

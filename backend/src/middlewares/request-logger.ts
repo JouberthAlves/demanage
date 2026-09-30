@@ -1,5 +1,14 @@
 import { NextFunction, Request, Response } from 'express';
 
+export function sanitizeLogValue(value: string, maxLength = 2048) {
+  return (
+    value
+      // eslint-disable-next-line no-control-regex -- Strip controls before writing untrusted values to logs.
+      .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, '?')
+      .slice(0, maxLength)
+  );
+}
+
 export async function requestLogger(
   req: Request,
   res: Response,
@@ -24,8 +33,8 @@ export async function requestLogger(
 
     const time = chalk.gray(localTime);
 
-    const method = chalk.blue(req.method);
-    const url = chalk.cyan(req.originalUrl);
+    const method = chalk.blue(sanitizeLogValue(req.method, 32));
+    const url = chalk.cyan(sanitizeLogValue(req.originalUrl));
     const status =
       res.statusCode >= 500
         ? chalk.red(res.statusCode)
@@ -34,9 +43,7 @@ export async function requestLogger(
           : chalk.green(res.statusCode);
 
     const duration = chalk.gray(`${durationMs}ms`);
-    const ip = chalk.magenta(
-      req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip,
-    );
+    const ip = chalk.magenta(sanitizeLogValue(req.ip || 'unknown', 128));
 
     console.log(`${time} ${ip} - ${method} ${url} ${status} - ${duration}`);
   });

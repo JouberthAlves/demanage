@@ -22,6 +22,8 @@ type DatePickerProps = {
   allowClear?: boolean;
   min?: string;
   max?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
 };
 
 function parseDateValue(value: string): Date | undefined {
@@ -49,6 +51,8 @@ export function DatePicker({
   allowClear = false,
   min,
   max,
+  ariaInvalid,
+  ariaDescribedBy,
 }: DatePickerProps) {
   const [open, setOpen] = useState(false);
   const selected = parseDateValue(value);
@@ -64,6 +68,8 @@ export function DatePicker({
             type='button'
             variant='outline'
             disabled={disabled}
+            aria-invalid={ariaInvalid}
+            aria-describedby={ariaDescribedBy}
             data-empty={!selected}
             className={cn(
               'h-9 w-full justify-start rounded-lg border-transparent bg-input/50 px-3 font-normal hover:bg-input/70',

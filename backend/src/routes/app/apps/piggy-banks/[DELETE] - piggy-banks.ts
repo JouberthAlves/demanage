@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 
-import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
@@ -13,15 +13,16 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Não autenticado' });
     }
 
-    const existing = await prisma.piggyBank.findFirst({
-      where: { id, userId },
+    const deleted = await withUserWriteLockTransaction(userId, async (tx) => {
+      const existing = await tx.piggyBank.findFirst({
+        where: { id, userId },
+      });
+      if (!existing) return false;
+      await tx.piggyBank.delete({ where: { id } });
+      return true;
     });
-
-    if (!existing) {
+    if (!deleted)
       return res.status(404).json({ error: 'Cofre não encontrado' });
-    }
-
-    await prisma.piggyBank.delete({ where: { id } });
     return res.status(204).send();
   } catch (err) {
     console.error(err);
