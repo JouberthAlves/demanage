@@ -46,6 +46,30 @@ export function verifyAuthToken(token: string) {
   return jwt.verify(token, JWT_SECRET) as JwtPayload;
 }
 
+export async function revokeAuthToken(token: string) {
+  let payload: JwtPayload;
+  try {
+    payload = verifyAuthToken(token);
+  } catch {
+    return;
+  }
+
+  if (
+    typeof payload.userId !== 'string' ||
+    !Number.isSafeInteger(payload.sessionVersion ?? 0)
+  ) {
+    return;
+  }
+
+  await prisma.user.updateMany({
+    where: {
+      id: payload.userId,
+      sessionVersion: payload.sessionVersion ?? 0,
+    },
+    data: { sessionVersion: { increment: 1 } },
+  });
+}
+
 function resolveSameSite(req?: Request): 'lax' | 'none' {
   if (COOKIE_SAME_SITE === 'none' || COOKIE_SAME_SITE === 'lax') {
     return COOKIE_SAME_SITE;
@@ -85,8 +109,7 @@ function jwtExpiresToMs(value: string) {
 
 export function authCookieOptions(req?: Request): CookieOptions {
   const sameSite = resolveSameSite(req);
-  const secure =
-    sameSite === 'none' ? true : NODE_ENV === 'production';
+  const secure = sameSite === 'none' ? true : NODE_ENV === 'production';
 
   return {
     httpOnly: true,

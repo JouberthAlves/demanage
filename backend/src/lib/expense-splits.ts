@@ -1,4 +1,10 @@
-import type { Card, Expense, ExpenseSplit, Prisma } from '@/generated/prisma/client';
+import type {
+  Card,
+  Expense,
+  ExpensePayment,
+  ExpenseSplit,
+  Prisma,
+} from '@/generated/prisma/client';
 
 import { prisma } from '@/lib/prisma';
 
@@ -26,7 +32,11 @@ function roundMoney(value: number) {
 
 export function allocateSplitAmounts(
   total: number,
-  parts: Array<{ kind: 'card' | 'pix'; cardId: string | null; percent: number }>,
+  parts: Array<{
+    kind: 'card' | 'pix';
+    cardId: string | null;
+    percent: number;
+  }>,
 ): ResolvedSplit[] {
   const amounts = parts.map((part, index) => {
     if (index === parts.length - 1) return 0;
@@ -119,9 +129,7 @@ export function validateSplitShape(inputs: SplitInput[]) {
   }
 
   if (pixCount === 1 && inputs.length === 1) {
-    throw new ExpenseSplitError(
-      'PIX 100% não usa split — deixe sem cartão',
-    );
+    throw new ExpenseSplitError('PIX 100% não usa split — deixe sem cartão');
   }
 
   if (pixCount === 1 && cardInputs.length !== 1) {
@@ -206,10 +214,7 @@ export async function getCommittedByCard(args: {
   const map = new Map<string, number>();
   for (const split of splits) {
     if (!split.cardId) continue;
-    map.set(
-      split.cardId,
-      (map.get(split.cardId) ?? 0) + Number(split.amount),
-    );
+    map.set(split.cardId, (map.get(split.cardId) ?? 0) + Number(split.amount));
   }
   return map;
 }
@@ -245,9 +250,7 @@ export function denormalizedCardId(resolved: ResolvedSplit[]): string | null {
 }
 
 export function serializeExpenseSplits(
-  splits: Array<
-    ExpenseSplit & { card?: Pick<Card, 'id' | 'name'> | null }
-  >,
+  splits: Array<ExpenseSplit & { card?: Pick<Card, 'id' | 'name'> | null }>,
 ) {
   return splits.map((split) => ({
     id: split.id,
@@ -264,20 +267,26 @@ export const expenseSplitInclude = {
     include: { card: { select: { id: true, name: true } } },
     orderBy: [{ kind: 'asc' as const }, { percent: 'desc' as const }],
   },
+  payments: {
+    orderBy: [{ paidAt: 'asc' as const }, { createdAt: 'asc' as const }],
+  },
 } satisfies Prisma.ExpenseInclude;
 
 export function serializeExpense(
   expense: Expense & {
     customTag?: unknown;
-    splits?: Array<
-      ExpenseSplit & { card?: Pick<Card, 'id' | 'name'> | null }
-    >;
+    splits?: Array<ExpenseSplit & { card?: Pick<Card, 'id' | 'name'> | null }>;
+    payments?: ExpensePayment[];
   },
 ) {
   return {
     ...expense,
     amount: Number(expense.amount),
     splits: serializeExpenseSplits(expense.splits ?? []),
+    payments: expense.payments?.map((payment) => ({
+      ...payment,
+      amount: Number(payment.amount),
+    })),
   };
 }
 
@@ -286,7 +295,9 @@ export async function replaceExpenseSplits(args: {
   expenseId: string;
   resolved: ResolvedSplit[];
 }) {
-  await args.tx.expenseSplit.deleteMany({ where: { expenseId: args.expenseId } });
+  await args.tx.expenseSplit.deleteMany({
+    where: { expenseId: args.expenseId },
+  });
 
   if (args.resolved.length === 0) return;
 

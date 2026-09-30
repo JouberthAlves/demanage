@@ -48,7 +48,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       splits,
     } = req.body;
 
-    const trimmedName = parseAbnt2Text(name, { maxLength: 100, required: true });
+    const trimmedName = parseAbnt2Text(name, {
+      maxLength: 100,
+      required: true,
+    });
     if (!trimmedName || amount == null || !category) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, amount, category',
@@ -163,6 +166,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           amount: parsedAmount,
           category,
           frequency: resolvedFrequency,
+          occurredAt: resolvedFrequency === 'unica' ? new Date() : null,
           cardId: denormalizedCardId(resolvedSplits),
           dueDay: resolvedDueDay,
           startsAt: resolvedStartsAt,

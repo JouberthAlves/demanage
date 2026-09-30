@@ -11,7 +11,13 @@ import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { usePiggyBanks } from '@/hooks/use-piggy-banks';
-import { formatCurrencyCompact, formatPercent, getFirstName, moneyValueClass } from '@/lib/format';
+import { buildMonthlyHistory } from '@/lib/monthly-history';
+import {
+  formatCurrencyCompact,
+  formatPercent,
+  getFirstName,
+  moneyValueClass,
+} from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
 import {
   selectAverageMonthlyExpense,
@@ -23,14 +29,24 @@ import {
 
 export function DashboardPage() {
   const userName = useAuthStore((state) => state.user?.name ?? '');
-  const history = useFinanceStore((state) => state.history);
+  const expenseRecords = useFinanceStore((state) => state.expenses);
+  const incomeRecords = useFinanceStore((state) => state.incomes);
+  const calendarDayKey = useFinanceStore((state) => state.calendarDayKey);
+  const history = useMemo(() => {
+    const [year, month, day] = calendarDayKey.split('-').map(Number);
+    return buildMonthlyHistory(
+      expenseRecords,
+      incomeRecords,
+      new Date(year, month - 1, day),
+    );
+  }, [calendarDayKey, expenseRecords, incomeRecords]);
   const income = useFinanceStore(selectMonthlyIncome);
   const expenses = useFinanceStore(selectMonthlyExpenses);
   const averageExpense = useFinanceStore(selectAverageMonthlyExpense);
   const recurringShare = useFinanceStore(selectRecurringShare);
   const { data: piggyBanks = [] } = usePiggyBanks();
   const balance = income - expenses;
-  const hasHistory = history.length > 0;
+  const hasHistory = history.slice(0, -1).some((month) => month.hasActivity);
   const piggyTotal = useMemo(
     () => piggyBanks.reduce((sum, bank) => sum + bank.balance, 0),
     [piggyBanks],
@@ -131,8 +147,8 @@ export function DashboardPage() {
           title='Entrada vs saída'
           description={
             hasHistory
-              ? 'Comparativo dos últimos meses'
-              : 'Histórico mensal ainda não disponível'
+              ? 'Pagamentos e recebimentos registrados; previsões, recorrências semanais sem confirmação e faturas sem baixa ficam fora'
+              : 'O histórico mostra somente pagamentos e recebimentos registrados'
           }
           className='lg:col-span-2'
         >
@@ -159,8 +175,8 @@ export function DashboardPage() {
           title='Este mês vs mês passado'
           description={
             hasHistory
-              ? 'Entradas e saídas lado a lado'
-              : 'Histórico mensal ainda não disponível'
+              ? 'Comparação entre pagamentos e recebimentos registrados'
+              : 'A comparação aparece quando houver registros em um mês anterior'
           }
         >
           <MonthCompareBarChart />

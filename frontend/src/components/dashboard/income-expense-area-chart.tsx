@@ -1,8 +1,10 @@
 import { CalendarClock } from 'lucide-react';
+import { useMemo } from 'react';
 import {
   Area,
   AreaChart,
   CartesianGrid,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -10,42 +12,50 @@ import {
 } from 'recharts';
 
 import { formatCurrencyCompact, formatMonthLabel } from '@/lib/format';
-import {
-  selectMonthlyExpenses,
-  selectMonthlyIncome,
-  useFinanceStore,
-} from '@/stores/finance-store';
+import { buildMonthlyHistory } from '@/lib/monthly-history';
+import { useFinanceStore } from '@/stores/finance-store';
 
 export function IncomeExpenseAreaChart() {
-  const history = useFinanceStore((state) => state.history);
-  const currentIncome = useFinanceStore(selectMonthlyIncome);
-  const currentExpense = useFinanceStore(selectMonthlyExpenses);
+  const expenses = useFinanceStore((state) => state.expenses);
+  const incomes = useFinanceStore((state) => state.incomes);
+  const calendarDayKey = useFinanceStore((state) => state.calendarDayKey);
+  const history = useMemo(() => {
+    const [year, month, day] = calendarDayKey.split('-').map(Number);
+    return buildMonthlyHistory(
+      expenses,
+      incomes,
+      new Date(year, month - 1, day),
+    );
+  }, [calendarDayKey, expenses, incomes]);
+  const currentMonth = history[history.length - 1];
+  const currentIncome = currentMonth?.income ?? 0;
+  const currentExpense = currentMonth?.expense ?? 0;
 
-  if (history.length === 0) {
+  if (!history.some((month) => month.hasActivity)) {
     return (
       <div className='flex h-72 flex-col items-center justify-center gap-3 px-6 text-center'>
         <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-amber/10'>
           <CalendarClock className='size-6 text-neon-amber' />
         </div>
         <div className='space-y-1'>
-          <p className='font-medium'>Histórico mensal em breve</p>
+          <p className='font-medium'>
+            Sem pagamentos ou recebimentos registrados
+          </p>
           <p className='text-sm text-muted-foreground'>
-            Este mês no saldo: {formatCurrencyCompact(currentIncome)} entradas ·{' '}
-            {formatCurrencyCompact(currentExpense)} saídas.
+            O gráfico mostra valores registrados como pagos ou recebidos. Este
+            mês: {formatCurrencyCompact(currentIncome)} recebidos ·{' '}
+            {formatCurrencyCompact(currentExpense)} pagos.
           </p>
         </div>
       </div>
     );
   }
 
-  const data = history.map((item, index) => {
-    const isLast = index === history.length - 1;
-    return {
-      label: formatMonthLabel(item.month),
-      income: isLast ? currentIncome : item.income,
-      expense: isLast ? currentExpense : item.expense,
-    };
-  });
+  const data = history.map((item) => ({
+    label: formatMonthLabel(item.month),
+    income: item.income,
+    expense: item.expense,
+  }));
 
   return (
     <div className='h-72 w-full'>
@@ -91,6 +101,7 @@ export function IncomeExpenseAreaChart() {
             labelStyle={{ color: '#f5f5f5' }}
             formatter={(value) => formatCurrencyCompact(Number(value))}
           />
+          <Legend />
           <Area
             type='monotone'
             dataKey='income'
