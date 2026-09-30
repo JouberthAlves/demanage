@@ -2,6 +2,7 @@ import { create } from 'zustand';
 
 import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { incomeContributionThisMonth } from '@/lib/income-schedule';
+import { buildMonthlyHistory } from '@/lib/monthly-history';
 import type {
   Card,
   FinanceState,
@@ -28,7 +29,6 @@ const emptyFinanceState: FinanceState = {
   },
   expenses: [],
   incomes: [],
-  history: [],
 };
 
 const LEGACY_STORAGE_KEYS = [
@@ -99,10 +99,18 @@ export function selectMonthlyExpenses(state: FinanceStore) {
   );
 }
 
+export function monthlyHistoryForState(state: FinanceStore) {
+  const now = dateFromDayKey(state.calendarDayKey);
+  return buildMonthlyHistory(state.expenses, state.incomes, now);
+}
+
 export function selectAverageMonthlyExpense(state: FinanceStore) {
-  if (state.history.length === 0) return selectMonthlyExpenses(state);
-  const total = state.history.reduce((sum, item) => sum + item.expense, 0);
-  return total / state.history.length;
+  const history = monthlyHistoryForState(state).filter(
+    (item) => item.hasActivity,
+  );
+  if (history.length === 0) return selectMonthlyExpenses(state);
+  const total = history.reduce((sum, item) => sum + item.expense, 0);
+  return total / history.length;
 }
 
 export function selectRecurringShare(state: FinanceStore) {

@@ -2,12 +2,37 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { dateKey } from '@/lib/decimal';
+import { validateHistoryRange } from '@/lib/market-data';
 import {
+  calculationStart,
   resolveEntryOccurrenceDate,
   resolveExpenseOccurrenceDate,
 } from '@/lib/patrimony';
 
 const scheduled = new Date('2026-09-10T12:00:00.000Z');
+
+test('baseline patrimonial antiga preserva o início da janela de dez anos', () => {
+  const start = calculationStart(
+    new Date('2010-01-01T12:00:00.000Z'),
+    new Date('2026-09-29T12:00:00.000Z'),
+  );
+
+  assert.equal(dateKey(start), '2016-09-29');
+});
+
+test('lookup de preço limita o lookback sem exceder o intervalo máximo', () => {
+  const today = new Date('2030-01-01T12:00:00.000Z');
+  const start = calculationStart(new Date('2010-01-01T12:00:00.000Z'), today);
+  const marketFrom = new Date(start);
+  marketFrom.setUTCDate(marketFrom.getUTCDate() - 10);
+
+  assert.equal(dateKey(start), '2020-01-02');
+  assert.equal(dateKey(marketFrom), '2019-12-23');
+  assert.ok(marketFrom < start);
+  assert.doesNotThrow(() =>
+    validateHistoryRange(dateKey(marketFrom), dateKey(today), today),
+  );
+});
 
 test('patrimônio baixa despesa fixa na data do pagamento antecipado', () => {
   const result = resolveExpenseOccurrenceDate(

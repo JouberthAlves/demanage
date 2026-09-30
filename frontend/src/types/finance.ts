@@ -22,12 +22,7 @@ export type CustomTag = {
 };
 
 export type ExpenseCategory =
-  | 'assinatura'
-  | 'parcela'
-  | 'divida'
-  | 'outro'
-  | 'cofrinho'
-  | 'investimento';
+  'assinatura' | 'parcela' | 'divida' | 'outro' | 'cofrinho' | 'investimento';
 
 export type PiggyBank = {
   id: string;
@@ -79,6 +74,12 @@ export type ExpenseSplit = {
   cardName?: string | null;
 };
 
+export type ExpensePaymentOccurrence = {
+  month: string;
+  amount: number;
+  paidAt: string;
+};
+
 export type RecurringExpense = {
   id: string;
   name: string;
@@ -89,17 +90,27 @@ export type RecurringExpense = {
   dueDay?: number;
   startsAt?: string;
   endsAt?: string;
+  occurredAt?: string;
   registeredAt?: string;
   paidForMonth?: string;
+  paidAt?: string;
+  createdAt?: string;
   notes?: string;
   isInvoice?: boolean;
   customTagId?: string;
   customTag?: Pick<CustomTag, 'id' | 'name' | 'color'>;
   splits?: ExpenseSplit[];
+  payments?: ExpensePaymentOccurrence[];
 };
 
 export type IncomeType = 'salario' | 'freelance' | 'outro';
 export type IncomeFrequency = 'mensal' | 'semanal' | 'unica';
+
+export type EntryReceiptOccurrence = {
+  month: string;
+  amount: number;
+  receivedAt: string;
+};
 
 export type Income = {
   id: string;
@@ -113,19 +124,22 @@ export type Income = {
   date?: string;
   receiptHoldForMonth?: string;
   receivedForMonth?: string;
+  receivedAt?: string;
+  createdAt?: string;
   customTagId?: string;
   customTag?: Pick<CustomTag, 'id' | 'name' | 'color'>;
+  receipts?: EntryReceiptOccurrence[];
 };
 
 export type MonthlySnapshot = {
   month: string;
   income: number;
   expense: number;
+  hasActivity: boolean;
 };
 
 export type FinanceState = {
   profile: Profile;
   expenses: RecurringExpense[];
   incomes: Income[];
-  history: MonthlySnapshot[];
 };

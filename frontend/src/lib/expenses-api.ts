@@ -2,6 +2,7 @@ import { api } from '@/lib/api';
 import type {
   ExpenseCategory,
   ExpenseFrequency,
+  ExpensePaymentOccurrence,
   ExpenseSplit,
   RecurringExpense,
 } from '@/types/finance';
@@ -27,6 +28,7 @@ export type ApiExpense = {
   endsAt?: string | null;
   occurredAt?: string | null;
   paidForMonth?: string | null;
+  paidAt?: string | null;
   notes: string | null;
   isInvoice?: boolean;
   createdAt?: string;
@@ -37,6 +39,11 @@ export type ApiExpense = {
     color: string;
   } | null;
   splits?: ApiExpenseSplit[];
+  payments?: Array<{
+    month: string;
+    amount: string | number;
+    paidAt: string;
+  }>;
 };
 
 export type ExpenseSplitPayload =
@@ -95,13 +102,21 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     dueDay: expense.dueDay ?? undefined,
     startsAt: mapDateOnly(expense.startsAt),
     endsAt: mapDateOnly(expense.endsAt),
+    occurredAt: expense.occurredAt ?? undefined,
     registeredAt: registeredAt ? toLocalDateOnly(registeredAt) : undefined,
     paidForMonth: expense.paidForMonth ?? undefined,
+    paidAt: expense.paidAt ?? undefined,
+    createdAt: expense.createdAt,
     notes: expense.notes ?? undefined,
     isInvoice: Boolean(expense.isInvoice),
     customTagId: expense.customTagId ?? undefined,
     customTag: expense.customTag ?? undefined,
     splits: mapSplits(expense.splits),
+    payments: expense.payments?.map((payment): ExpensePaymentOccurrence => ({
+      month: payment.month,
+      amount: Number(payment.amount),
+      paidAt: payment.paidAt,
+    })),
   };
 }
 

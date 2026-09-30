@@ -39,6 +39,10 @@ export function RegisterPage() {
   const [submitting, setSubmitting] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [confirmPasswordError, setConfirmPasswordError] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     void fetchMe();
@@ -59,11 +63,14 @@ export function RegisterPage() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setError(null);
+    setEmailError(null);
+    setConfirmPasswordError(null);
 
     if (password !== confirmPassword) {
       const message = 'As senhas não coincidem';
-      setError(message);
+      setConfirmPasswordError(message);
       toast.error(message);
+      document.getElementById('register-confirm-password')?.focus();
       return;
     }
 
@@ -77,7 +84,11 @@ export function RegisterPage() {
       const message = isAxiosError(err)
         ? (err.response?.data?.error ?? 'Não foi possível criar a conta')
         : 'Não foi possível criar a conta';
-      setError(message);
+      if (isAxiosError(err) && err.response?.status === 409) {
+        setEmailError(message);
+      } else {
+        setError(message);
+      }
       toast.error(message);
     } finally {
       setSubmitting(false);
@@ -94,7 +105,9 @@ export function RegisterPage() {
             className='size-16 drop-shadow-[0_0_24px_rgba(52,211,153,0.35)]'
           />
           <div>
-            <p className='text-2xl font-semibold tracking-tight'>Conta criada</p>
+            <p className='text-2xl font-semibold tracking-tight'>
+              Conta criada
+            </p>
             <p className='mt-1 text-sm text-muted-foreground'>
               Salve seu código antes de continuar
             </p>
@@ -156,7 +169,12 @@ export function RegisterPage() {
         <CardContent>
           <form onSubmit={handleSubmit}>
             <FieldGroup>
-              <Field data-invalid={error ? true : undefined}>
+              {error ? (
+                <p role='alert' className='text-sm text-destructive'>
+                  {error}
+                </p>
+              ) : null}
+              <Field>
                 <FieldLabel htmlFor='register-name'>Nome</FieldLabel>
                 <Input
                   id='register-name'
@@ -164,21 +182,31 @@ export function RegisterPage() {
                   autoComplete='name'
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  aria-invalid={Boolean(error)}
                   required
                 />
               </Field>
-              <Field data-invalid={error ? true : undefined}>
+              <Field data-invalid={emailError ? true : undefined}>
                 <FieldLabel htmlFor='register-email'>E-mail</FieldLabel>
                 <Input
                   id='register-email'
                   type='email'
                   autoComplete='email'
                   value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  aria-invalid={Boolean(error)}
+                  onChange={(event) => {
+                    setEmail(event.target.value);
+                    setEmailError(null);
+                  }}
+                  aria-invalid={Boolean(emailError)}
+                  aria-describedby={
+                    emailError ? 'register-email-error' : undefined
+                  }
                   required
                 />
+                {emailError ? (
+                  <FieldError id='register-email-error'>
+                    {emailError}
+                  </FieldError>
+                ) : null}
               </Field>
               <Field>
                 <FieldLabel htmlFor='register-password'>Senha</FieldLabel>
@@ -193,7 +221,7 @@ export function RegisterPage() {
                 />
                 <FieldDescription>Mínimo de 6 caracteres.</FieldDescription>
               </Field>
-              <Field data-invalid={error ? true : undefined}>
+              <Field data-invalid={confirmPasswordError ? true : undefined}>
                 <FieldLabel htmlFor='register-confirm-password'>
                   Confirmar senha
                 </FieldLabel>
@@ -202,12 +230,24 @@ export function RegisterPage() {
                   type='password'
                   autoComplete='new-password'
                   value={confirmPassword}
-                  onChange={(event) => setConfirmPassword(event.target.value)}
-                  aria-invalid={Boolean(error)}
+                  onChange={(event) => {
+                    setConfirmPassword(event.target.value);
+                    setConfirmPasswordError(null);
+                  }}
+                  aria-invalid={Boolean(confirmPasswordError)}
+                  aria-describedby={
+                    confirmPasswordError
+                      ? 'register-confirm-password-error'
+                      : undefined
+                  }
                   minLength={6}
                   required
                 />
-                {error ? <FieldError>{error}</FieldError> : null}
+                {confirmPasswordError ? (
+                  <FieldError id='register-confirm-password-error'>
+                    {confirmPasswordError}
+                  </FieldError>
+                ) : null}
               </Field>
               <Button type='submit' className='w-full' disabled={submitting}>
                 {submitting ? <Spinner data-icon='inline-start' /> : null}
