@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { MarketDataError, validateHistoryRange } from '@/lib/market-data';
+import {
+  ipcaPeriodRange,
+  MarketDataError,
+  validateHistoryRange,
+} from '@/lib/market-data';
 
 const now = new Date('2026-09-29T12:00:00.000Z');
 
@@ -27,5 +31,18 @@ test('rejects future and invalid calendar dates', () => {
   assert.throws(
     () => validateHistoryRange('2026-02-31', '2026-03-01', now),
     /Data inválida/,
+  );
+});
+
+test('limits SIDRA IPCA queries to reference months that can affect the range', () => {
+  const from = new Date('2026-01-01T12:00:00.000Z');
+  const to = new Date('2026-09-30T12:00:00.000Z');
+  assert.equal(ipcaPeriodRange(from, to), '202512-202608');
+  assert.equal(
+    ipcaPeriodRange(
+      new Date('2026-09-01T12:00:00.000Z'),
+      new Date('2026-09-10T12:00:00.000Z'),
+    ),
+    null,
   );
 });
