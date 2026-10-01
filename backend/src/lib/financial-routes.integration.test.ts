@@ -3,20 +3,20 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
-
 import cookieParser from 'cookie-parser';
 import express from 'express';
 
 import { AUTH_COOKIE_NAME, signAuthToken } from '@/lib/auth';
 import { todayInSaoPaulo } from '@/lib/card-billing';
-import { prisma } from '@/lib/prisma';
 import {
   ExpenseSplitError,
   getCommittedByCard,
   replaceExpenseSplits,
   resolveAndValidateSplits,
 } from '@/lib/expense-splits';
+import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
+import { csrfProtection } from '@/middlewares/csrf-protection';
 import cardsRouter from '@/routes/app/apps/cards/index';
 import entriesRouter from '@/routes/app/apps/entries/index';
 import expensesRouter from '@/routes/app/apps/expenses/index';
@@ -61,6 +61,7 @@ async function cleanupUser(userId: string) {
 async function startApi(userId: string) {
   const app = express();
   app.use(cookieParser());
+  app.use(csrfProtection);
   app.use(express.json());
   app.use('/expenses', expensesRouter);
   app.use('/entries', entriesRouter);
@@ -74,11 +75,17 @@ async function startApi(userId: string) {
   const cookie = `${AUTH_COOKIE_NAME}=${signAuthToken(userId, 0)}`;
 
   return {
-    async request(path: string, method: string, body?: unknown) {
+    async request(
+      path: string,
+      method: string,
+      body?: unknown,
+      requestOrigin = origin,
+    ) {
       const response = await fetch(`${origin}${path}`, {
         method,
         headers: {
           Cookie: cookie,
+          Origin: requestOrigin,
           ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -113,6 +120,18 @@ test('invoice settlement is authorized, idempotent, immutable, and survives arch
   const api = await startApi(user.id);
 
   try {
+    const crossSite = await api.request(
+      `/expenses/${invoice.id}/pay`,
+      'POST',
+      { month: '2026-09' },
+      'https://attacker.invalid',
+    );
+    assert.equal(crossSite.response.status, 403);
+    assert.equal(
+      await prisma.expensePayment.count({ where: { expenseId: invoice.id } }),
+      0,
+    );
+
     const wrongCycle = await api.request(
       `/expenses/${invoice.id}/pay`,
       'POST',
