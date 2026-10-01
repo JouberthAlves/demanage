@@ -1,7 +1,6 @@
 import { Router } from 'express';
 
 import { parseAbnt2Text, sanitizeAbnt2 } from '@/lib/abnt2';
-import { todayInSaoPaulo } from '@/lib/card-billing';
 import {
   clearAuthCookie,
   comparePassword,
@@ -11,6 +10,7 @@ import {
   signAuthToken,
   toPublicUser,
 } from '@/lib/auth';
+import { todayInSaoPaulo } from '@/lib/card-billing';
 import { parseReceiveDay } from '@/lib/entry-schedule';
 import { createLogoutHandler } from '@/lib/logout-handler';
 import { passwordPolicyError } from '@/lib/password-policy';
@@ -20,8 +20,8 @@ import {
   hashRecoveryCode,
   verifyRecoveryCode,
 } from '@/lib/recovery-code';
-import { requireAuth } from '@/middlewares/require-auth';
 import { MAX_MONEY_AMOUNT, parseMoneyAmount } from '@/lib/validate';
+import { requireAuth } from '@/middlewares/require-auth';
 
 const authRoutes = Router();
 
@@ -42,9 +42,15 @@ authRoutes.post('/auth/register', async (req, res) => {
     })?.toLowerCase();
 
     if (
+      // codeql[js/user-controlled-bypass] -- This validates required fields on intentionally public registration; it grants no existing-user permission.
+
       !trimmedName ||
+      // codeql[js/user-controlled-bypass] -- This validates required fields on intentionally public registration; it grants no existing-user permission.
+
       !normalizedEmail ||
       typeof password !== 'string' ||
+      // codeql[js/user-controlled-bypass] -- This validates required fields on intentionally public registration; it grants no existing-user permission.
+
       !password
     ) {
       return res.status(400).json({
@@ -188,9 +194,15 @@ authRoutes.post('/auth/recover-password', async (req, res) => {
 
     const normalizedEmail = email?.trim().toLowerCase();
     if (
+      // codeql[js/user-controlled-bypass] -- These are request-shape checks; the password change is authorized by verifyRecoveryCode below.
+
       !normalizedEmail ||
+      // codeql[js/user-controlled-bypass] -- These are request-shape checks; the password change is authorized by verifyRecoveryCode below.
+
       !recoveryCode?.trim() ||
       typeof newPassword !== 'string' ||
+      // codeql[js/user-controlled-bypass] -- These are request-shape checks; the password change is authorized by verifyRecoveryCode below.
+
       !newPassword
     ) {
       return res.status(400).json({
