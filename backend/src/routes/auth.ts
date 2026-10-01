@@ -10,14 +10,17 @@ import {
   signAuthToken,
   toPublicUser,
 } from '@/lib/auth';
+import { todayInSaoPaulo } from '@/lib/card-billing';
 import { parseReceiveDay } from '@/lib/entry-schedule';
 import { createLogoutHandler } from '@/lib/logout-handler';
+import { passwordPolicyError } from '@/lib/password-policy';
 import { prisma } from '@/lib/prisma';
 import {
   generateRecoveryCode,
   hashRecoveryCode,
   verifyRecoveryCode,
 } from '@/lib/recovery-code';
+import { MAX_MONEY_AMOUNT, parseMoneyAmount } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const authRoutes = Router();
@@ -38,7 +41,15 @@ authRoutes.post('/auth/register', async (req, res) => {
       required: true,
     })?.toLowerCase();
 
-    if (!trimmedName || !normalizedEmail || !password) {
+    if (
+      // codeql[js/user-controlled-bypass] -- This validates required fields on intentionally public registration; it grants no existing-user permission.
+      !trimmedName ||
+      // codeql[js/user-controlled-bypass] -- This validates required fields on intentionally public registration; it grants no existing-user permission.
+      !normalizedEmail ||
+      typeof password !== 'string' ||
+      // codeql[js/user-controlled-bypass] -- This validates required fields on intentionally public registration; it grants no existing-user permission.
+      !password
+    ) {
       return res.status(400).json({
         error: 'Campos obrigatórios: name, email, password',
       });
@@ -50,9 +61,10 @@ authRoutes.post('/auth/register', async (req, res) => {
       });
     }
 
-    if (password.length < 6) {
+    const passwordError = passwordPolicyError(password);
+    if (passwordError) {
       return res.status(400).json({
-        error: 'A senha deve ter pelo menos 6 caracteres',
+        error: passwordError,
       });
     }
 
@@ -130,8 +142,20 @@ authRoutes.post('/auth/login', async (req, res) => {
 authRoutes.post('/auth/recovery-code', requireAuth, async (req, res) => {
   try {
     const userId = req.user?.id;
+    const currentPassword = req.body?.currentPassword;
     if (!userId) {
       return res.status(401).json({ error: 'Não autenticado' });
+    }
+    if (typeof currentPassword !== 'string' || !currentPassword) {
+      return res.status(400).json({ error: 'Informe a senha atual' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true },
+    });
+    if (!user || !(await comparePassword(currentPassword, user.passwordHash))) {
+      return res.status(401).json({ error: 'Senha atual inválida' });
     }
 
     const recoveryCode = generateRecoveryCode();
@@ -141,6 +165,11 @@ authRoutes.post('/auth/recovery-code', requireAuth, async (req, res) => {
         recoveryCodeHash: hashRecoveryCode(recoveryCode),
         recoveryCodeCreatedAt: new Date(),
       },
+    });
+
+    console.info('[security] recovery_code_rotated', {
+      userId,
+      at: new Date().toISOString(),
     });
 
     return res.json({ recoveryCode });
@@ -157,11 +186,19 @@ authRoutes.post('/auth/recover-password', async (req, res) => {
     const { email, recoveryCode, newPassword } = req.body as {
       email?: string;
       recoveryCode?: string;
-      newPassword?: string;
+      newPassword?: unknown;
     };
 
     const normalizedEmail = email?.trim().toLowerCase();
-    if (!normalizedEmail || !recoveryCode?.trim() || !newPassword) {
+    if (
+      // codeql[js/user-controlled-bypass] -- These are request-shape checks; the password change is authorized by verifyRecoveryCode below.
+      !normalizedEmail ||
+      // codeql[js/user-controlled-bypass] -- These are request-shape checks; the password change is authorized by verifyRecoveryCode below.
+      !recoveryCode?.trim() ||
+      typeof newPassword !== 'string' ||
+      // codeql[js/user-controlled-bypass] -- These are request-shape checks; the password change is authorized by verifyRecoveryCode below.
+      !newPassword
+    ) {
       return res.status(400).json({
         error: 'Campos obrigatórios: email, recoveryCode, newPassword',
       });
@@ -176,9 +213,10 @@ authRoutes.post('/auth/recover-password', async (req, res) => {
       });
     }
 
-    if (newPassword.length < 6) {
+    const passwordError = passwordPolicyError(newPassword);
+    if (passwordError) {
       return res.status(400).json({
-        error: 'A senha deve ter pelo menos 6 caracteres',
+        error: passwordError,
       });
     }
 
@@ -247,10 +285,13 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
 
     let salaryValue: number | undefined;
     if (salary !== undefined) {
-      salaryValue = typeof salary === 'string' ? Number(salary) : salary;
-      if (!Number.isFinite(salaryValue) || salaryValue < 0) {
-        return res.status(400).json({ error: 'Salário inválido' });
+      const parsedSalary = parseMoneyAmount(salary, true);
+      if (parsedSalary == null) {
+        return res.status(400).json({
+          error: `Salário inválido (máximo R$ ${MAX_MONEY_AMOUNT.toFixed(2)})`,
+        });
       }
+      salaryValue = parsedSalary;
     }
 
     let receiveDayValue: number | null | undefined;
@@ -341,7 +382,14 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
             });
           }
         } else if (salaryEntry) {
-          await tx.entry.delete({ where: { id: salaryEntry.id } });
+          const today = todayInSaoPaulo();
+          const lastActiveDay = new Date(
+            Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0, 12),
+          );
+          await tx.entry.update({
+            where: { id: salaryEntry.id },
+            data: { amount: 0, endsAt: lastActiveDay },
+          });
         }
       }
 

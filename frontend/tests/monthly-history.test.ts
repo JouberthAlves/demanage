@@ -221,3 +221,33 @@ test('faturas só entram com pagamento registrado e o histórico fica limitado a
   });
   assert.equal(history.at(-1)?.hasActivity, false);
 });
+
+test('month boundaries and timestamps follow the São Paulo financial calendar', () => {
+  const now = new Date('2026-10-01T02:45:00.000Z');
+  const history = buildMonthlyHistory(
+    [
+      expense({
+        payments: [
+          {
+            month: '2026-09',
+            amount: 80,
+            paidAt: '2026-10-01T02:30:00.000Z',
+          },
+        ],
+      }),
+      expense({
+        id: 'future-one-off',
+        frequency: 'unica',
+        occurredAt: '2026-10-01T12:00:00.000Z',
+        registeredAt: '2026-10-01',
+        amount: 50,
+      }),
+    ],
+    [],
+    now,
+    2,
+  );
+
+  assert.deepEqual(history.map((month) => month.month), ['2026-08', '2026-09']);
+  assert.equal(history.at(-1)?.expense, 80);
+});

@@ -42,6 +42,14 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         error: 'O salário é gerenciado pela aba Perfil',
       });
     }
+    if (existing.archivedAt) {
+      return res.status(404).json({ error: 'Entrada não encontrada' });
+    }
+    if (existing.systemOrigin !== 'manual') {
+      return res.status(400).json({
+        error: 'Movimentações de cofrinho ou ativos não podem ser editadas aqui',
+      });
+    }
 
     const {
       name,

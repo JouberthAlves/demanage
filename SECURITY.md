@@ -44,6 +44,10 @@ Reports are especially useful for:
 
 Use test accounts and disposable data only. Do not test against third-party systems, accounts, or data you do not own or have explicit authorization to assess.
 
+## Accepted product trade-off
+
+Self-registration is enabled for this self-hosted app. The registration endpoint returns a distinct conflict response for an email already in use, so someone can test whether an account exists. The app accepts this usability trade-off and applies the same rate limit to registration, login, recovery-code, and password-recovery requests. If registration is opened to a broader audience, consider invitation-only signup or a non-enumerating registration flow.
+
 ## Disclosure
 
 Please allow reasonable time to investigate, fix, and publish an advisory before public disclosure.

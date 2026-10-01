@@ -1,4 +1,4 @@
-import type { RecurringExpense } from '@/types/finance';
+import type { Card, RecurringExpense } from '@/types/finance';
 
 export function expenseCashAmount(expense: RecurringExpense) {
   if (expense.isInvoice) return expense.amount;
@@ -31,27 +31,74 @@ export function expenseCardCommittedAmount(
   return 0;
 }
 
-export function buildCommittedByCard(expenses: RecurringExpense[]) {
-  const map = new Map<string, number>();
-  for (const expense of expenses) {
-    if (expense.isInvoice) continue;
+function dayKeyInSaoPaulo(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
 
-    const splits = expense.splits ?? [];
-    if (splits.length > 0) {
-      for (const split of splits) {
-        if (split.kind !== 'card' || !split.cardId) continue;
-        map.set(
-          split.cardId,
-          (map.get(split.cardId) ?? 0) + split.amount,
-        );
+export function buildCommittedByCard(
+  expenses: RecurringExpense[],
+  cards: Card[],
+  now = new Date(),
+) {
+  const map = new Map<string, number>();
+  const through = dayKeyInSaoPaulo(now);
+
+  for (const card of cards) {
+    const periodStart = card.lastInvoicedOn
+      ? card.lastInvoicedOn.slice(0, 10)
+      : card.createdAt
+        ? dayKeyInSaoPaulo(new Date(card.createdAt))
+        : through;
+    const hasClosedPeriod = Boolean(card.lastInvoicedOn);
+    const processedAt = card.lastBillingProcessedAt
+      ? Date.parse(card.lastBillingProcessedAt)
+      : Number.NaN;
+
+    for (const expense of expenses) {
+      if (expense.isInvoice) continue;
+      const committed = expenseCardCommittedAmount(expense, card.id);
+      if (committed <= 0) continue;
+
+      if (expense.frequency === 'unica') {
+        const occurred =
+          expense.registeredAt ??
+          (expense.createdAt
+            ? dayKeyInSaoPaulo(new Date(expense.createdAt))
+            : null);
+        if (
+          occurred &&
+          occurred <= through &&
+          (hasClosedPeriod ? occurred > periodStart : occurred >= periodStart)
+        ) {
+          map.set(card.id, (map.get(card.id) ?? 0) + committed);
+        } else if (
+          hasClosedPeriod &&
+          Number.isFinite(processedAt) &&
+          expense.createdAt &&
+          Date.parse(expense.createdAt) > processedAt &&
+          occurred &&
+          occurred <= periodStart
+        ) {
+          map.set(card.id, (map.get(card.id) ?? 0) + committed);
+        }
+        continue;
       }
-      continue;
+
+      if (expense.startsAt && expense.startsAt.slice(0, 10) > through) continue;
+      if (expense.endsAt && expense.endsAt.slice(0, 10) < through) continue;
+      const multiplier = expense.frequency === 'semanal' ? 4 : 1;
+      map.set(
+        card.id,
+        (map.get(card.id) ?? 0) + committed * multiplier,
+      );
     }
-    if (!expense.cardId) continue;
-    map.set(
-      expense.cardId,
-      (map.get(expense.cardId) ?? 0) + expense.amount,
-    );
   }
   return map;
 }

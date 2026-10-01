@@ -1,24 +1,22 @@
-import type {
-  Asset,
-  AssetTransaction,
-  AssetTransactionType,
-} from '@/generated/prisma/client';
+import { Prisma } from '@/generated/prisma/client';
+import type { Asset, AssetTransaction } from '@/generated/prisma/client';
 
 import {
   calculateAssetAccounting,
-  countDecimalPlaces,
   enrichAccountingWithQuote,
+  isAssetTimelineValid,
 } from '@/lib/asset-accounting';
 import {
   dateOnlyUtc,
   decimal,
-  type DecimalLike,
   money,
   ZERO,
 } from '@/lib/decimal';
+import { todayInSaoPaulo } from '@/lib/card-billing';
 import { getAssetQuote } from '@/lib/market-data';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
+import { MAX_MONEY_AMOUNT } from '@/lib/validate';
 
 export function parseAsset(value: unknown): Asset | null {
   return value === 'BTC' || value === 'USD' ? value : null;
@@ -87,22 +85,40 @@ export class AssetValidationError extends Error {
   }
 }
 
-function parseDate(value: unknown) {
+export function parseAssetDate(value: unknown, now = new Date()) {
   const date = new Date(String(value ?? ''));
   if (Number.isNaN(date.getTime())) {
     throw new AssetValidationError('Data inválida');
   }
   const normalized = dateOnlyUtc(date);
-  if (normalized.getTime() > dateOnlyUtc(new Date()).getTime()) {
+  if (normalized.getTime() > dateOnlyUtc(todayInSaoPaulo(now)).getTime()) {
     throw new AssetValidationError('Data futura não é permitida');
   }
   return normalized;
 }
 
-function parseNonNegative(value: unknown, field: string) {
+function parseDecimalValue(
+  value: unknown,
+  field: string,
+  precision: number,
+  scale: number,
+  allowNegative: boolean,
+) {
+  const raw = String(value ?? '').trim();
+  const pattern = allowNegative ? /^-?\d+(?:\.\d+)?$/ : /^\d+(?:\.\d+)?$/;
+  const unsigned = raw.startsWith('-') ? raw.slice(1) : raw;
+  const [integerPart, fractionPart = ''] = unsigned.split('.');
+  const integerDigits = integerPart?.replace(/^0+/, '').length ?? 0;
+  if (!pattern.test(raw)) {
+    throw new AssetValidationError(`${field} inválido`);
+  }
+  if (integerDigits > precision - scale || fractionPart.length > scale) {
+    throw new AssetValidationError(`${field} excede a precisão permitida`);
+  }
+
   try {
-    const parsed = decimal(String(value ?? '0'));
-    if (!parsed.isFinite() || parsed.lt(0)) throw new Error();
+    const parsed = decimal(raw);
+    if (!parsed.isFinite() || (!allowNegative && parsed.lt(0))) throw new Error();
     return parsed;
   } catch {
     throw new AssetValidationError(`${field} inválido`);
@@ -110,50 +126,57 @@ function parseNonNegative(value: unknown, field: string) {
 }
 
 function parseQuantity(value: unknown, asset: Asset, allowNegative: boolean) {
-  try {
-    const raw = String(value ?? '').trim();
-    const parsed = decimal(raw);
-    if (
-      !parsed.isFinite() ||
-      parsed.eq(0) ||
-      (!allowNegative && parsed.lt(0))
-    ) {
-      throw new Error();
-    }
-    if (asset === 'BTC' && countDecimalPlaces(raw) > 8) {
-      throw new AssetValidationError('BTC aceita no máximo 8 casas decimais');
-    }
-    return parsed;
-  } catch (error) {
-    if (error instanceof AssetValidationError) throw error;
-    throw new AssetValidationError('Quantidade inválida');
-  }
+  const scale = asset === 'BTC' ? 8 : 12;
+  const parsed = parseDecimalValue(value, 'Quantidade', 30, scale, allowNegative);
+  if (parsed.eq(0)) throw new AssetValidationError('Quantidade inválida');
+  return parsed;
 }
 
-function parseTransactionValues(
+export function parseAssetTransactionValues(
   asset: Asset,
   input: UpdateAssetTransactionInput,
 ) {
   const allowNegative = input.type === 'MANUAL_ADJUSTMENT';
   const quantity = parseQuantity(input.quantity, asset, allowNegative);
-  const cash = parseNonNegative(input.cashAmountBrl, 'Valor em BRL');
+  const cash = parseDecimalValue(input.cashAmountBrl, 'Valor em BRL', 18, 8, false);
   const feePercent =
     input.feePercent == null || input.feePercent === ''
       ? null
-      : parseNonNegative(input.feePercent, 'Percentual de taxa');
+      : parseDecimalValue(
+          input.feePercent,
+          'Percentual de taxa',
+          12,
+          8,
+          false,
+        );
   let fee =
     input.feeAmountBrl == null || input.feeAmountBrl === ''
       ? ZERO
-      : parseNonNegative(input.feeAmountBrl, 'Taxa');
+      : parseDecimalValue(input.feeAmountBrl, 'Taxa', 18, 8, false);
   if (fee.eq(0) && feePercent != null && cash.gt(0)) {
-    fee = cash.mul(feePercent).div(100);
+    fee = parseDecimalValue(
+      cash
+        .mul(feePercent)
+        .div(100)
+        .toDecimalPlaces(8, Prisma.Decimal.ROUND_HALF_UP)
+        .toFixed(8),
+      'Taxa',
+      18,
+      8,
+      false,
+    );
   }
   if (input.type !== 'MANUAL_ADJUSTMENT' && cash.lte(0)) {
     throw new AssetValidationError(
       'Compra/venda exige valor efetivo em BRL maior que zero',
     );
   }
-  const date = parseDate(input.date);
+  if (input.type !== 'MANUAL_ADJUSTMENT' && money(cash).gt(MAX_MONEY_AMOUNT)) {
+    throw new AssetValidationError(
+      'Valor em BRL excede o limite das movimentações financeiras',
+    );
+  }
+  const date = parseAssetDate(input.date);
   const costBasisKnown =
     input.type === 'MANUAL_ADJUSTMENT'
       ? Boolean(input.costBasisKnown && cash.gt(0))
@@ -163,68 +186,22 @@ function parseTransactionValues(
 }
 
 function assertTransactionTimelineValid(
-  transactions: Array<{
-    id: string;
-    type: AssetTransactionType;
-    quantity: DecimalLike;
-    date: Date;
-  }>,
+  transactions: Parameters<typeof isAssetTimelineValid>[0],
 ) {
-  const ordered = [...transactions].sort((left, right) => {
-    const dateDiff = left.date.getTime() - right.date.getTime();
-    return dateDiff !== 0 ? dateDiff : left.id.localeCompare(right.id);
-  });
-  let balance = ZERO;
-
-  for (const transaction of ordered) {
-    const quantity = decimal(transaction.quantity);
-    if (transaction.type === 'BUY') {
-      balance = balance.plus(quantity);
-      continue;
-    }
-    if (transaction.type === 'SELL') {
-      if (quantity.gt(balance)) {
-        throw new AssetValidationError(
-          'A edição deixaria uma venda sem saldo disponível nessa data',
-        );
-      }
-      balance = balance.minus(quantity);
-      continue;
-    }
-    balance = balance.plus(quantity);
-    if (balance.lt(0)) {
-      throw new AssetValidationError(
-        'A edição deixaria a posição negativa nessa data',
-      );
-    }
+  if (!isAssetTimelineValid(transactions)) {
+    throw new AssetValidationError(
+      'A movimentação deixaria a posição negativa em uma data',
+    );
   }
 }
 
 export async function createAssetTransaction(
   input: CreateAssetTransactionInput,
 ) {
-  const parsed = parseTransactionValues(input.asset, input);
+  const parsed = parseAssetTransactionValues(input.asset, input);
   const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
 
   return withUserWriteLockTransaction(input.userId, async (tx) => {
-    const existing = await tx.assetTransaction.findMany({
-      where: { userId: input.userId, asset: input.asset },
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-    });
-    const current = calculateAssetAccounting(input.asset, existing);
-    if (input.type === 'SELL' && quantity.gt(decimal(current.quantity))) {
-      throw new AssetValidationError('Venda maior que a posição disponível');
-    }
-    if (
-      input.type === 'MANUAL_ADJUSTMENT' &&
-      quantity.lt(0) &&
-      quantity.abs().gt(decimal(current.quantity))
-    ) {
-      throw new AssetValidationError(
-        'Ajuste removeria mais unidades do que a posição atual',
-      );
-    }
-
     let expenseId: string | null = null;
     let entryId: string | null = null;
 
@@ -237,6 +214,7 @@ export async function createAssetTransaction(
           category: 'investimento',
           frequency: 'unica',
           occurredAt: date,
+          systemOrigin: 'asset',
           notes: input.note || `Transferência interna para ${input.asset}`,
         },
       });
@@ -252,12 +230,13 @@ export async function createAssetTransaction(
           type: 'outro',
           frequency: 'unica',
           date,
+          systemOrigin: 'asset',
         },
       });
       entryId = entry.id;
     }
 
-    return tx.assetTransaction.create({
+    const created = await tx.assetTransaction.create({
       data: {
         userId: input.userId,
         asset: input.asset,
@@ -273,6 +252,13 @@ export async function createAssetTransaction(
         entryId,
       },
     });
+
+    const timeline = await tx.assetTransaction.findMany({
+      where: { userId: input.userId, asset: input.asset },
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+    });
+    assertTransactionTimelineValid(timeline);
+    return created;
   });
 }
 
@@ -289,20 +275,24 @@ export async function updateAssetTransaction(
       throw new AssetValidationError('Movimentação não encontrada');
     }
 
-    const parsed = parseTransactionValues(target.asset, input);
+    const parsed = parseAssetTransactionValues(target.asset, input);
     const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
     const remaining = await tx.assetTransaction.findMany({
       where: { userId, asset: target.asset, id: { not: target.id } },
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
 
     assertTransactionTimelineValid([
       ...remaining,
       {
         id: target.id,
+        asset: target.asset,
         type: input.type,
         quantity,
+        cashAmountBrl: cash,
+        costBasisKnown,
         date,
+        createdAt: target.createdAt,
       },
     ]);
 
@@ -323,6 +313,7 @@ export async function updateAssetTransaction(
             category: 'investimento',
             frequency: 'unica',
             occurredAt: date,
+            systemOrigin: 'asset',
             notes: input.note || `Transferência interna para ${target.asset}`,
           },
         });
@@ -335,6 +326,7 @@ export async function updateAssetTransaction(
             category: 'investimento',
             frequency: 'unica',
             occurredAt: date,
+            systemOrigin: 'asset',
             notes: input.note || `Transferência interna para ${target.asset}`,
           },
         });
@@ -354,6 +346,7 @@ export async function updateAssetTransaction(
             type: 'outro',
             frequency: 'unica',
             date,
+            systemOrigin: 'asset',
           },
         });
       } else {
@@ -365,6 +358,7 @@ export async function updateAssetTransaction(
             type: 'outro',
             frequency: 'unica',
             date,
+            systemOrigin: 'asset',
           },
         });
         entryId = entry.id;
@@ -412,23 +406,9 @@ export async function deleteAssetTransaction(
 
     const remaining = await tx.assetTransaction.findMany({
       where: { userId, asset: target.asset, id: { not: target.id } },
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
     });
-    let balance = ZERO;
-    for (const transaction of remaining) {
-      if (transaction.type === 'BUY')
-        balance = balance.plus(transaction.quantity);
-      else if (transaction.type === 'SELL') {
-        balance = balance.minus(transaction.quantity);
-      } else {
-        balance = balance.plus(transaction.quantity);
-      }
-      if (balance.lt(0)) {
-        throw new AssetValidationError(
-          'Não é possível excluir: uma venda posterior ficaria sem saldo',
-        );
-      }
-    }
+    assertTransactionTimelineValid(remaining);
 
     await tx.assetTransaction.delete({ where: { id: target.id } });
     if (target.expenseId) {
