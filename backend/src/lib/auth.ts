@@ -32,6 +32,7 @@ export async function comparePassword(password: string, passwordHash: string) {
 
 export function signAuthToken(userId: string, sessionVersion: number) {
   const options: SignOptions = {
+    algorithm: 'HS256',
     expiresIn: JWT_EXPIRES_IN as SignOptions['expiresIn'],
   };
 
@@ -43,7 +44,7 @@ export function signAuthToken(userId: string, sessionVersion: number) {
 }
 
 export function verifyAuthToken(token: string) {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
 }
 
 export async function revokeAuthToken(token: string) {

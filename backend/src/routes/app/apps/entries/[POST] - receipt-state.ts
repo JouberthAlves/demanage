@@ -53,7 +53,7 @@ router.post(
 
       const result = await withUserWriteLockTransaction(userId, async (tx) => {
         const existing = await tx.entry.findFirst({
-          where: { id, userId },
+          where: { id, userId, archivedAt: null, systemOrigin: 'manual' },
           include: { customTag: { select: customTagSelect } },
         });
 
@@ -146,7 +146,7 @@ router.post(
         }
 
         const entry = await tx.entry.findFirst({
-          where: { id, userId },
+          where: { id, userId, archivedAt: null, systemOrigin: 'manual' },
           include: {
             customTag: { select: customTagSelect },
             ...entryReceiptInclude,

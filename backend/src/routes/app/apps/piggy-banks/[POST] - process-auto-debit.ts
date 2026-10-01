@@ -1,7 +1,6 @@
 import { Router, Request, Response } from 'express';
 
 import { catchUpPiggyInterest } from '@/lib/piggy-interest';
-import { processPiggyAutoDebits } from '@/lib/piggy';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
@@ -17,9 +16,9 @@ router.post(
       }
 
       const interest = await catchUpPiggyInterest(userId);
-      const autoDebit = await processPiggyAutoDebits(userId);
       return res.json({
-        createdCount: autoDebit.createdCount,
+        createdCount: interest.autoDebitCreatedCount,
+        autoDebitFailedCount: interest.autoDebitFailedCount,
         interestCreatedCount: interest.createdCount,
         interestStale: interest.stale,
       });

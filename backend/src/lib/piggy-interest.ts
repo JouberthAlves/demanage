@@ -1,5 +1,6 @@
 import { Prisma } from '@/generated/prisma/client';
 
+import { todayInSaoPaulo } from '@/lib/card-billing';
 import { dateKey, dateOnlyUtc, decimal, money, ZERO } from '@/lib/decimal';
 import {
   getCdiHistory,
@@ -8,6 +9,7 @@ import {
   type MarketSeries,
 } from '@/lib/market-data';
 import { prisma } from '@/lib/prisma';
+import { processPiggyAutoDebits } from '@/lib/piggy';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
 function signedAmount(
@@ -29,7 +31,7 @@ export function calculateCdiInterest(
 }
 
 export function lastCompletedWeekday(now = new Date()) {
-  const target = dateOnlyUtc(now);
+  const target = dateOnlyUtc(todayInSaoPaulo(now));
   target.setUTCDate(target.getUTCDate() - 1);
 
   while (target.getUTCDay() === 0 || target.getUTCDay() === 6) {
@@ -57,13 +59,14 @@ export function splitCdiHistoryRange(from: Date, to: Date) {
 async function getCdiHistoryInChunks(
   from: Date,
   to: Date,
+  fetchHistory: typeof getCdiHistory = getCdiHistory,
 ): Promise<MarketSeries> {
   const points = new Map<string, MarketPoint>();
   let provider = 'bcb_sgs_12';
   let stale = false;
 
   for (const range of splitCdiHistoryRange(from, to)) {
-    const series = await getCdiHistory(range.from, range.to);
+    const series = await fetchHistory(range.from, range.to);
     provider = series.provider;
     stale ||= series.stale;
     for (const point of series.points) points.set(point.date, point);
@@ -76,16 +79,48 @@ async function getCdiHistoryInChunks(
   };
 }
 
-export async function catchUpPiggyInterest(userId: string) {
+export async function catchUpPiggyInterest(
+  userId: string,
+  options: { now?: Date; fetchHistory?: typeof getCdiHistory } = {},
+) {
+  let autoDebitCreatedCount = 0;
+  let autoDebitFailedCount = 0;
   try {
-    return await accruePiggyInterest(userId);
+    const autoDebit = await processPiggyAutoDebits(userId, options.now);
+    autoDebitCreatedCount = autoDebit.createdCount;
+    autoDebitFailedCount = autoDebit.failedCount;
+    if (autoDebitFailedCount > 0) {
+      return {
+        createdCount: 0,
+        stale: true,
+        autoDebitCreatedCount,
+        autoDebitFailedCount,
+      };
+    }
+
+    return {
+      ...(await accruePiggyInterest(userId, options)),
+      autoDebitCreatedCount,
+      autoDebitFailedCount,
+    };
   } catch (error) {
     console.error(error);
-    return { createdCount: 0, stale: true };
+    return {
+      createdCount: 0,
+      stale: true,
+      autoDebitCreatedCount,
+      autoDebitFailedCount,
+    };
   }
 }
 
-async function accruePiggyInterest(userId: string) {
+async function accruePiggyInterest(
+  userId: string,
+  {
+    now = new Date(),
+    fetchHistory = getCdiHistory,
+  }: { now?: Date; fetchHistory?: typeof getCdiHistory },
+) {
   const banks = await prisma.piggyBank.findMany({
     where: {
       userId,
@@ -100,19 +135,19 @@ async function accruePiggyInterest(userId: string) {
     },
   });
 
-  const target = lastCompletedWeekday();
+  const target = lastCompletedWeekday(now);
   const seriesByBank = new Map<string, MarketSeries>();
   let stale = false;
 
   for (const bank of banks) {
     const start = bank.interestAccruedThrough
       ? new Date(bank.interestAccruedThrough.getTime() + 86_400_000)
-      : dateOnlyUtc(bank.createdAt);
+      : dateOnlyUtc(todayInSaoPaulo(bank.createdAt));
     if (start > target) continue;
 
     let series: MarketSeries;
     try {
-      series = await getCdiHistoryInChunks(start, target);
+      series = await getCdiHistoryInChunks(start, target, fetchHistory);
       seriesByBank.set(bank.id, series);
       stale ||= series.stale;
     } catch {
@@ -142,7 +177,7 @@ async function accruePiggyInterest(userId: string) {
 
         const start = bank.interestAccruedThrough
           ? new Date(bank.interestAccruedThrough.getTime() + 86_400_000)
-          : dateOnlyUtc(bank.createdAt);
+          : dateOnlyUtc(todayInSaoPaulo(bank.createdAt));
         if (start > target) continue;
 
         const transactions = [...bank.transactions];
@@ -159,7 +194,7 @@ async function accruePiggyInterest(userId: string) {
 
           let balance = ZERO;
           for (const transaction of transactions) {
-            if (dateOnlyUtc(transaction.date) > day) continue;
+            if (dateOnlyUtc(todayInSaoPaulo(transaction.date)) > day) continue;
             balance = balance.plus(
               signedAmount(transaction.type, decimal(transaction.amount)),
             );

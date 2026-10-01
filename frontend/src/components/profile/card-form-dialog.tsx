@@ -68,8 +68,8 @@ export function CardFormDialog({
         name: card.name,
         limit: card.limit != null ? formatBrlInputValue(card.limit) : '',
         noLimit: card.limit == null,
-        closingDay: card.closingDay
-          ? String(card.closingDay).padStart(2, '0')
+        closingDay: (card.pendingClosingDay ?? card.closingDay)
+          ? String(card.pendingClosingDay ?? card.closingDay).padStart(2, '0')
           : '',
         expiresAt: formatCardExpiry(card.expiresAt),
       });
@@ -126,8 +126,12 @@ export function CardFormDialog({
 
     try {
       if (card) {
-        await updateCard.mutateAsync({ id: card.id, payload });
-        toast.success('Cartão atualizado');
+        const updated = await updateCard.mutateAsync({ id: card.id, payload });
+        toast.success(
+          updated.pendingClosingDay != null
+            ? 'Fechamento agendado para depois do ciclo atual'
+            : 'Cartão atualizado',
+        );
       } else {
         await createCard.mutateAsync(payload);
         toast.success('Cartão adicionado');
@@ -256,6 +260,12 @@ export function CardFormDialog({
               />
             </div>
           </div>
+          {card ? (
+            <p className='text-xs text-muted-foreground'>
+              Uma mudança no dia de fechamento entra em vigor após o próximo
+              ciclo. O primeiro ciclo ajustado terá pelo menos 28 dias.
+            </p>
+          ) : null}
 
           <DialogFooter>
             <Button

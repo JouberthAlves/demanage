@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 
 import { parseAbnt2Text } from '@/lib/abnt2';
+import { todayInSaoPaulo } from '@/lib/card-billing';
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
 import {
   parseEndsAt,
@@ -15,11 +16,12 @@ import {
   resolveAndValidateSplits,
   serializeExpense,
 } from '@/lib/expense-splits';
-import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import {
   isValidExpenseCategory,
   isValidFrequency,
   parsePositiveAmount,
+  parseUniqueDate,
   positiveAmountError,
 } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -39,6 +41,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       amount,
       category,
       frequency,
+      date,
       cardId,
       dueDay,
       startsAt,
@@ -78,19 +81,17 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Frequência inválida' });
     }
 
-    let resolvedSplits;
-    try {
-      resolvedSplits = await resolveAndValidateSplits({
-        userId,
-        totalAmount: parsedAmount,
-        splits,
-        cardId,
+    const uniqueDate =
+      resolvedFrequency === 'unica' ? parseUniqueDate(date) : null;
+    if (resolvedFrequency === 'unica' && !uniqueDate) {
+      return res.status(400).json({
+        error: 'Informe uma data válida para a despesa avulsa',
       });
-    } catch (error) {
-      if (error instanceof ExpenseSplitError) {
-        return res.status(400).json({ error: error.message });
-      }
-      throw error;
+    }
+    if (uniqueDate && uniqueDate > todayInSaoPaulo()) {
+      return res.status(400).json({
+        error: 'A data da despesa avulsa não pode ser futura',
+      });
     }
 
     let resolvedCustomTagId: string | null = null;
@@ -158,7 +159,14 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       throw error;
     }
 
-    const expense = await prisma.$transaction(async (tx) => {
+    const expense = await withUserWriteLockTransaction(userId, async (tx) => {
+      const resolvedSplits = await resolveAndValidateSplits({
+        userId,
+        totalAmount: parsedAmount,
+        splits,
+        cardId,
+        tx,
+      });
       const created = await tx.expense.create({
         data: {
           userId,
@@ -166,7 +174,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
           amount: parsedAmount,
           category,
           frequency: resolvedFrequency,
-          occurredAt: resolvedFrequency === 'unica' ? new Date() : null,
+          occurredAt: uniqueDate,
           cardId: denormalizedCardId(resolvedSplits),
           dueDay: resolvedDueDay,
           startsAt: resolvedStartsAt,
@@ -185,6 +193,25 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         resolved: resolvedSplits,
       });
 
+      if (uniqueDate) {
+        const cashAmount =
+          resolvedSplits.length > 0
+            ? resolvedSplits
+                .filter((split) => split.kind === 'pix')
+                .reduce((sum, split) => sum + split.amount, 0)
+            : parsedAmount;
+        if (cashAmount > 0) {
+          await tx.expensePayment.create({
+            data: {
+              expenseId: created.id,
+              month: uniqueDate.toISOString().slice(0, 7),
+              amount: cashAmount,
+              paidAt: uniqueDate,
+            },
+          });
+        }
+      }
+
       return tx.expense.findUniqueOrThrow({
         where: { id: created.id },
         include: {
@@ -196,6 +223,9 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     return res.status(201).json(serializeExpense(expense));
   } catch (err) {
+    if (err instanceof ExpenseSplitError) {
+      return res.status(400).json({ error: err.message });
+    }
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });
   }

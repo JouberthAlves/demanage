@@ -1,6 +1,7 @@
 import type { Asset } from '@/generated/prisma/client';
 
 import { dateKey, dateOnlyUtc, decimal } from '@/lib/decimal';
+import { readBoundedJson } from '@/lib/external-json';
 import { prisma } from '@/lib/prisma';
 
 export type MarketPoint = {
@@ -36,6 +37,7 @@ const PROVIDERS = {
 } as const;
 
 const QUOTE_TTL_MS = 5 * 60 * 1000;
+const IPCA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const PROVIDER_COOLDOWN_MS = 2 * 60 * 1000;
 const HISTORY_MAX_GAP_MS = 3 * 86_400_000;
 // Includes ten days of provider look-back used by the patrimony chart.
@@ -165,7 +167,7 @@ async function fetchJson<T>(url: string): Promise<T> {
     if (contentType.includes('text/html')) {
       throw new MarketDataError('Provider bloqueado pela rede');
     }
-    return (await response.json()) as T;
+    return await readBoundedJson<T>(response);
   } catch (error) {
     if (error instanceof MarketDataError) throw error;
     const code = tlsCauseCode(error);
@@ -222,8 +224,9 @@ async function fetchBcbRows(url: string): Promise<BcbRow[]> {
     if (contentType.includes('text/html')) {
       throw new MarketDataError('Provider bloqueado pela rede');
     }
-    const body = (await response.json()) as
-      BcbRow[] | { erro?: { statusCode?: number } };
+    const body = await readBoundedJson<
+      BcbRow[] | { erro?: { statusCode?: number } }
+    >(response);
     if (!Array.isArray(body)) {
       if (body.erro?.statusCode === 404) return [];
       throw new MarketDataError('Resposta CDI inválida');
@@ -647,54 +650,103 @@ export async function getIpcaHistory(
   fromInput: string,
   toInput: string,
 ): Promise<MarketSeries> {
-  const from = parseDateInput(fromInput);
-  const to = parseDateInput(toInput);
-  if (from > to) throw new MarketDataError('Período inválido');
-  if (to > parseDateInput(dateKey(new Date()))) {
-    throw new MarketDataError('Data futura não permitida');
-  }
+  const { from, to } = validateHistoryRange(fromInput, toInput);
   const provider = PROVIDERS.IPCA;
   const key = 'IPCA_INDEX_EFFECTIVE';
+  return singleFlight(`ipca-history:${dateKey(from)}:${dateKey(to)}`, async () => {
+    const cachedRows = await prisma.marketDataCache.findMany({
+      where: { provider, key, at: { gte: from, lte: to } },
+      orderBy: { at: 'asc' },
+      select: { at: true, value: true, fetchedAt: true },
+    });
+    const cachedPoints = cachedRows.map((point) => ({
+      date: dateKey(point.at),
+      value: point.value.toString(),
+    }));
+    const now = Date.now();
+    const cacheIsFresh =
+      cachedRows.length > 0 &&
+      cachedRows[0].at.getTime() <= addDays(from, 45).getTime() &&
+      cachedRows[cachedRows.length - 1].at.getTime() >=
+        addDays(to, -45).getTime() &&
+      cachedRows.every(
+        (point) => now - point.fetchedAt.getTime() < IPCA_CACHE_TTL_MS,
+      );
+    if (cacheIsFresh) return { provider, stale: false, points: cachedPoints };
 
-  try {
-    const rows = await fetchJson<Array<Record<string, string>>>(
-      'https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/2266/p/all',
-    );
-    const today = dateOnlyUtc(new Date());
-    const points: MarketPoint[] = [];
-    for (const row of rows.slice(1)) {
-      const period = Object.values(row).find((value) => /^\d{6}$/.test(value));
-      const rawValue = row.V;
-      if (!period || !rawValue || rawValue === '...') continue;
-      const value = Number(rawValue.replace(',', '.'));
-      if (!Number.isFinite(value) || value <= 0) continue;
-      const year = Number(period.slice(0, 4));
-      const month = Number(period.slice(4, 6));
-      // Conservador contra lookahead: o índice só passa a valer no dia 15
-      // do mês seguinte ao mês de referência. Isso nunca antecipa publicação.
-      const effectiveAt = new Date(Date.UTC(year, month, 15, 12));
-      if (effectiveAt > today || effectiveAt < from || effectiveAt > to)
-        continue;
-      points.push({
-        date: dateKey(effectiveAt),
-        value: decimal(value).toString(),
-      });
+    const period = ipcaPeriodRange(from, to);
+    try {
+      if (!period) throw new MarketDataError('Sem histórico IPCA no período');
+      const rows = await fetchJson<Array<Record<string, string>>>(
+        `https://apisidra.ibge.gov.br/values/t/1737/n1/all/v/2266/p/${period}`,
+      );
+      const today = dateOnlyUtc(new Date());
+      const points: MarketPoint[] = [];
+      for (const row of rows.slice(1)) {
+        const referencePeriod = Object.values(row).find((value) =>
+          /^\d{6}$/.test(value),
+        );
+        const rawValue = row.V;
+        if (!referencePeriod || !rawValue || rawValue === '...') continue;
+        const value = Number(rawValue.replace(',', '.'));
+        if (!Number.isFinite(value) || value <= 0) continue;
+        const year = Number(referencePeriod.slice(0, 4));
+        const month = Number(referencePeriod.slice(4, 6));
+        // Conservador contra lookahead: o índice só passa a valer no dia 15
+        // do mês seguinte ao mês de referência. Isso nunca antecipa publicação.
+        const effectiveAt = new Date(Date.UTC(year, month, 15, 12));
+        if (effectiveAt > today || effectiveAt < from || effectiveAt > to)
+          continue;
+        points.push({
+          date: dateKey(effectiveAt),
+          value: decimal(value).toString(),
+        });
+      }
+      const deduped = dedupePoints(points);
+      if (deduped.length === 0) {
+        if (cachedPoints.length > 0) {
+          return { provider, stale: true, points: cachedPoints };
+        }
+        throw new MarketDataError('Sem histórico IPCA no período');
+      }
+      await prisma.$transaction(
+        deduped.map((point) => {
+          const at = parseDateInput(point.date);
+          return prisma.marketDataCache.upsert({
+            where: { provider_key_at: { provider, key, at } },
+            update: { value: point.value, fetchedAt: new Date() },
+            create: { provider, key, at, value: point.value },
+          });
+        }),
+      );
+      return { provider, stale: false, points: deduped };
+    } catch (error) {
+      if (cachedPoints.length === 0) throw error;
+      return { provider, stale: true, points: cachedPoints };
     }
-    const deduped = dedupePoints(points);
-    if (deduped.length === 0) {
-      const broadFrom = new Date(Date.UTC(from.getUTCFullYear() - 2, 0, 1, 12));
-      const cached = await cachedRange(provider, key, broadFrom, to);
-      if (cached.length > 0) return { provider, stale: true, points: cached };
-      throw new MarketDataError('Sem histórico IPCA no período');
-    }
-    await storePoints(provider, key, deduped);
-    return { provider, stale: false, points: deduped };
-  } catch (error) {
-    const broadFrom = new Date(Date.UTC(from.getUTCFullYear() - 2, 0, 1, 12));
-    const points = await cachedRange(provider, key, broadFrom, to);
-    if (points.length === 0) throw error;
-    return { provider, stale: true, points };
-  }
+  });
+}
+
+export function ipcaPeriodRange(from: Date, to: Date) {
+  const startReference = new Date(
+    Date.UTC(
+      from.getUTCFullYear(),
+      from.getUTCMonth() - (from.getUTCDate() <= 15 ? 1 : 0),
+      1,
+      12,
+    ),
+  );
+  const endReference = new Date(
+    Date.UTC(
+      to.getUTCFullYear(),
+      to.getUTCMonth() - (to.getUTCDate() >= 15 ? 1 : 2),
+      1,
+      12,
+    ),
+  );
+  if (startReference > endReference) return null;
+  const yearMonth = (date: Date) => date.toISOString().slice(0, 7).replace('-', '');
+  return `${yearMonth(startReference)}-${yearMonth(endReference)}`;
 }
 
 function dedupePoints(points: MarketPoint[]) {

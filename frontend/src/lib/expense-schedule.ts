@@ -30,8 +30,32 @@ function isSameMonth(date: Date, now: Date) {
 }
 
 export function expenseMonthKey(now = new Date()) {
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  return `${now.getFullYear()}-${month}`;
+  return timestampMonthKeyInSaoPaulo(now.toISOString()) ?? '';
+}
+
+function timestampMonthKeyInSaoPaulo(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}`;
+}
+
+export function isExpenseInvoicePaidThisMonth(
+  expense: RecurringExpense,
+  now = new Date(),
+) {
+  const month = expenseMonthKey(now);
+  return (
+    expense.isInvoice === true &&
+    (expense.payments ?? []).some(
+      (payment) => timestampMonthKeyInSaoPaulo(payment.paidAt) === month,
+    )
+  );
 }
 
 /** Monta YYYY-MM-DD do primeiro desconto/recebimento a partir de dia + mês (1-12). */
@@ -134,7 +158,7 @@ export function isExpenseDebitedThisMonth(
   expense: RecurringExpense,
   now = new Date(),
 ) {
-  if (expense.isInvoice) return true;
+  if (expense.isInvoice) return isExpenseInvoicePaidThisMonth(expense, now);
 
   if (expense.frequency === 'unica') {
     if (!expense.registeredAt) return false;
@@ -155,6 +179,14 @@ export function expenseContributionThisMonth(
   now = new Date(),
 ) {
   if (!isExpenseDebitedThisMonth(expense, now)) return 0;
+  if (expense.isInvoice) {
+    const month = expenseMonthKey(now);
+    return (expense.payments ?? []).reduce((sum, payment) => {
+      return timestampMonthKeyInSaoPaulo(payment.paidAt) === month
+        ? sum + payment.amount
+        : sum;
+    }, 0);
+  }
   const cash = expenseCashAmount(expense);
   if (cash <= 0) return 0;
   if (expense.frequency === 'unica') return cash;
