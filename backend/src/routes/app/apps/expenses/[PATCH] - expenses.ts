@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express';
 
 import { customTagSelect, resolveCustomTagId } from '@/lib/custom-tag';
 import { parseAbnt2Text } from '@/lib/abnt2';
+import { dateKey } from '@/lib/decimal';
+import { todayInSaoPaulo } from '@/lib/card-billing';
 import {
   parseEndsAt,
   parseReceiveDay,
@@ -22,10 +24,12 @@ import {
   type SplitInput,
 } from '@/lib/expense-splits';
 import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import {
   isValidExpenseCategory,
   isValidFrequency,
   parsePositiveAmount,
+  parseUniqueDate,
   positiveAmountError,
 } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -43,11 +47,24 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
 
     const existing = await prisma.expense.findFirst({
       where: { id, userId },
-      include: { splits: true },
+      include: { splits: true, payments: true },
     });
 
     if (!existing) {
       return res.status(404).json({ error: 'Despesa não encontrada' });
+    }
+    if (existing.archivedAt) {
+      return res.status(404).json({ error: 'Despesa não encontrada' });
+    }
+    if (existing.systemOrigin !== 'manual') {
+      return res.status(400).json({
+        error: 'Movimentações de cofrinho ou ativos não podem ser editadas aqui',
+      });
+    }
+    if (existing.isInvoice) {
+      return res.status(400).json({
+        error: 'Faturas preservam o valor calculado do ciclo e não podem ser editadas',
+      });
     }
 
     const {
@@ -55,6 +72,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       amount,
       category,
       frequency,
+      date,
       cardId,
       dueDay,
       startsAt,
@@ -123,6 +141,41 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         ? resolvedCustomTagId
         : existing.customTagId;
     const nextAmount = parsedAmount ?? Number(existing.amount);
+
+    let nextOccurredAt = existing.occurredAt;
+    if (nextFrequency === 'unica') {
+      if (date !== undefined) {
+        nextOccurredAt = parseUniqueDate(date);
+        if (!nextOccurredAt) {
+          return res.status(400).json({
+            error: 'Informe uma data válida para a despesa avulsa',
+          });
+        }
+      } else if (existing.frequency !== 'unica' || !existing.occurredAt) {
+        return res.status(400).json({
+          error: 'Informe uma data válida para a despesa avulsa',
+        });
+      }
+      if (
+        existing.frequency === 'unica' &&
+        existing.payments.length > 0 &&
+        date !== undefined &&
+        (!nextOccurredAt ||
+          !existing.occurredAt ||
+          dateKey(nextOccurredAt) !== dateKey(existing.occurredAt))
+      ) {
+        return res.status(400).json({
+          error: 'A data de uma despesa já registrada não pode ser alterada',
+        });
+      }
+    } else {
+      nextOccurredAt = null;
+    }
+    if (nextOccurredAt && nextOccurredAt > todayInSaoPaulo()) {
+      return res.status(400).json({
+        error: 'A data da despesa avulsa não pode ser futura',
+      });
+    }
 
     if (nextCustomTagId && nextCategory !== 'outro') {
       return res.status(400).json({
@@ -210,6 +263,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           splits,
           cardId,
           excludeExpenseId: id,
+          validateLimits: false,
         });
       } else if (existing.splits.length > 0) {
         const inputs: SplitInput[] = existing.splits.map((split) =>
@@ -221,7 +275,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
                 percent: Number(split.percent),
               },
         );
-        const cards = await assertCardsForSplits({ userId, inputs });
+        await assertCardsForSplits({ userId, inputs });
         resolvedSplits = allocateSplitAmounts(
           nextAmount,
           inputs.map((item) =>
@@ -230,11 +284,6 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
               : { kind: 'card', cardId: item.cardId, percent: item.percent },
           ),
         );
-        const committedByCard = await getCommittedByCard({
-          userId,
-          excludeExpenseId: id,
-        });
-        assertCardLimits({ cards, resolved: resolvedSplits, committedByCard });
       } else {
         resolvedSplits = [];
       }
@@ -245,7 +294,41 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
       throw error;
     }
 
-    const expense = await prisma.$transaction(async (tx) => {
+    const result = await withUserWriteLockTransaction(userId, async (tx) => {
+      const current = await tx.expense.findFirst({
+        where: { id, userId, archivedAt: null, systemOrigin: 'manual' },
+        select: { updatedAt: true },
+      });
+      if (!current) return { error: 'NOT_FOUND' as const };
+      if (current.updatedAt.getTime() !== existing.updatedAt.getTime()) {
+        return { error: 'CONFLICT' as const };
+      }
+
+      const cardInputs = resolvedSplits.flatMap((split) =>
+        split.kind === 'card' && split.cardId
+          ? [
+              {
+                kind: 'card' as const,
+                cardId: split.cardId,
+                percent: split.percent,
+              },
+            ]
+          : [],
+      );
+      if (cardInputs.length > 0) {
+        const cards = await assertCardsForSplits({
+          userId,
+          inputs: cardInputs,
+          tx,
+        });
+        const committedByCard = await getCommittedByCard({
+          userId,
+          excludeExpenseId: id,
+          tx,
+        });
+        assertCardLimits({ cards, resolved: resolvedSplits, committedByCard });
+      }
+
       await tx.expense.update({
         where: { id },
         data: {
@@ -253,9 +336,7 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
           ...(parsedAmount !== undefined ? { amount: parsedAmount } : {}),
           ...(category !== undefined ? { category } : {}),
           ...(frequency !== undefined ? { frequency } : {}),
-          ...(nextFrequency === 'unica' && existing.frequency !== 'unica'
-            ? { occurredAt: new Date() }
-            : {}),
+          occurredAt: nextOccurredAt,
           cardId: denormalizedCardId(resolvedSplits),
           ...(resolvedDueDay !== undefined ? { dueDay: resolvedDueDay } : {}),
           ...(resolvedStartsAt !== undefined
@@ -282,17 +363,57 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
         resolved: resolvedSplits,
       });
 
-      return tx.expense.findUniqueOrThrow({
+      if (
+        existing.frequency !== 'unica' &&
+        nextFrequency === 'unica' &&
+        nextOccurredAt
+      ) {
+        const month = nextOccurredAt.toISOString().slice(0, 7);
+        const cashAmount =
+          resolvedSplits.length > 0
+            ? resolvedSplits
+                .filter((split) => split.kind === 'pix')
+                .reduce((sum, split) => sum + split.amount, 0)
+            : nextAmount;
+        if (
+          cashAmount > 0 &&
+          !existing.payments.some((payment) => payment.month === month)
+        ) {
+          await tx.expensePayment.create({
+            data: {
+              expenseId: id,
+              month,
+              amount: cashAmount,
+              paidAt: nextOccurredAt,
+            },
+          });
+        }
+      }
+
+      const expense = await tx.expense.findUniqueOrThrow({
         where: { id },
         include: {
           customTag: { select: customTagSelect },
           ...expenseSplitInclude,
         },
       });
+      return { expense };
     });
+
+    if ('error' in result) {
+      return result.error === 'NOT_FOUND'
+        ? res.status(404).json({ error: 'Despesa não encontrada' })
+        : res.status(409).json({
+            error: 'Despesa alterada por outra operação; atualize e tente novamente',
+          });
+    }
+    const expense = result.expense;
 
     return res.json(serializeExpense(expense));
   } catch (err) {
+    if (err instanceof ExpenseSplitError) {
+      return res.status(400).json({ error: err.message });
+    }
     console.error(err);
     return res.status(500).json({ error: 'Internal server error' });
   }

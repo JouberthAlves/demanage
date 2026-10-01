@@ -10,6 +10,14 @@ import { CardFormDialog } from '@/components/profile/card-form-dialog';
 import { CreditCardTile } from '@/components/profile/credit-card-tile';
 import { Button } from '@/components/ui/button';
 import { CurrencyInput } from '@/components/ui/currency-input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
@@ -54,6 +62,8 @@ export function ProfilePage() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
   const [generatingRecoveryCode, setGeneratingRecoveryCode] = useState(false);
+  const [recoveryDialogOpen, setRecoveryDialogOpen] = useState(false);
+  const [recoveryPassword, setRecoveryPassword] = useState('');
   const [editingCard, setEditingCard] = useState<Card | null>(null);
 
   useEffect(() => {
@@ -68,8 +78,8 @@ export function ProfilePage() {
   }, [user?.name, user?.salary, user?.salaryReceiveDay, user?.notes]);
 
   const committedByCard = useMemo(
-    () => buildCommittedByCard(expenses),
-    [expenses],
+    () => buildCommittedByCard(expenses, cards),
+    [expenses, cards],
   );
 
   const totalLimit = useMemo(
@@ -148,12 +158,15 @@ export function ProfilePage() {
     }
   }
 
-  async function handleGenerateRecoveryCode() {
+  async function handleGenerateRecoveryCode(event: React.FormEvent) {
+    event.preventDefault();
     setGeneratingRecoveryCode(true);
 
     try {
-      const code = await generateRecoveryCode();
+      const code = await generateRecoveryCode(recoveryPassword);
       setRecoveryCode(code);
+      setRecoveryDialogOpen(false);
+      setRecoveryPassword('');
       toast.success(
         user?.hasRecoveryCode
           ? 'Novo código gerado. O anterior foi invalidado.'
@@ -377,7 +390,10 @@ export function ProfilePage() {
             variant='secondary'
             className='rounded-lg'
             disabled={generatingRecoveryCode}
-            onClick={() => void handleGenerateRecoveryCode()}
+            onClick={() => {
+              setRecoveryPassword('');
+              setRecoveryDialogOpen(true);
+            }}
           >
             {generatingRecoveryCode ? (
               <Spinner data-icon='inline-start' />
@@ -396,6 +412,51 @@ export function ProfilePage() {
         onOpenChange={setDialogOpen}
         card={editingCard}
       />
+      <Dialog
+        open={recoveryDialogOpen}
+        onOpenChange={(open) => {
+          setRecoveryDialogOpen(open);
+          if (!open) setRecoveryPassword('');
+        }}
+      >
+        <DialogContent className='rounded-xl sm:max-w-sm'>
+          <DialogHeader>
+            <DialogTitle>Confirme sua senha</DialogTitle>
+            <DialogDescription>
+              Digite sua senha atual para gerar um novo código de recuperação.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleGenerateRecoveryCode} className='space-y-4'>
+            <div className='space-y-2'>
+              <Label htmlFor='recovery-current-password'>Senha atual</Label>
+              <Input
+                id='recovery-current-password'
+                type='password'
+                autoComplete='current-password'
+                value={recoveryPassword}
+                onChange={(event) => setRecoveryPassword(event.target.value)}
+                required
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type='button'
+                variant='outline'
+                onClick={() => setRecoveryDialogOpen(false)}
+                disabled={generatingRecoveryCode}
+              >
+                Cancelar
+              </Button>
+              <Button type='submit' disabled={generatingRecoveryCode}>
+                {generatingRecoveryCode ? (
+                  <Spinner data-icon='inline-start' />
+                ) : null}
+                Gerar código
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

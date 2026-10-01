@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
+import { toast } from 'sonner';
 
 import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
 import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
@@ -34,6 +35,12 @@ export function usePiggyBanks(includeArchived = false) {
 
     void processPiggyAutoDebit()
       .then((result) => {
+        if (result.autoDebitFailedCount > 0) {
+          toast.error('Não foi possível processar todos os débitos automáticos.');
+        }
+        if (result.interestStale) {
+          toast.error('Os rendimentos do Cofrinho estão com atualização atrasada.');
+        }
         if (result.createdCount > 0) {
           void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
         }
@@ -46,7 +53,9 @@ export function usePiggyBanks(includeArchived = false) {
           void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
         }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        toast.error('Não foi possível atualizar os Cofrinhos agora.');
+      });
   }, [query.isSuccess, queryClient]);
 
   return query;

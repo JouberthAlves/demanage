@@ -8,6 +8,7 @@ import {
   piggyGoalAmount,
   serializePiggyBank,
 } from '@/lib/piggy';
+import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { parsePositiveAmount } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -25,6 +26,18 @@ router.patch('/:id', requireAuth, async (req: Request, res: Response) => {
     const userId = req.user?.id;
     const id = String(req.params.id);
     if (!userId) return res.status(401).json({ error: 'Não autenticado' });
+
+    if (
+      req.body?.yieldEnabled !== undefined ||
+      req.body?.cdiPercent !== undefined
+    ) {
+      const catchUp = await catchUpPiggyInterest(userId);
+      if (catchUp.stale) {
+        return res.status(503).json({
+          error: 'Não foi possível fechar o rendimento anterior; alteração não aplicada',
+        });
+      }
+    }
 
     const result = await withUserWriteLockTransaction(userId, async (tx) => {
       const existing = await tx.piggyBank.findFirst({

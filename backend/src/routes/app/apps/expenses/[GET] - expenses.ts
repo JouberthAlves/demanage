@@ -19,7 +19,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     const expenses = await prisma.expense.findMany({
-      where: { userId },
+      where: { userId, archivedAt: null, systemOrigin: 'manual' },
       include: {
         customTag: { select: customTagSelect },
         ...expenseSplitInclude,

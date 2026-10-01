@@ -37,6 +37,10 @@ function instantToSpDayKey(date: Date): DayKey {
   return `${map.year}-${map.month}-${map.day}`;
 }
 
+export function dateKeyInSaoPaulo(date: Date): DayKey {
+  return instantToSpDayKey(date);
+}
+
 /**
  * Date-only persistido via Date.UTC (startsAt/endsAt/lastInvoicedOn)
  * → usa componentes UTC para não deslocar o dia no fuso SP.
@@ -109,15 +113,27 @@ function chargeBaseForClosing(
   expense: Expense,
   closingOn: Date,
   periodStart: Date,
+  includePeriodStart: boolean,
 ) {
   if (expense.isInvoice) return 0;
 
   const closingKey = dateOnlyToDayKey(closingOn);
   const periodStartKey = dateOnlyToDayKey(periodStart);
 
-  const startsKey = expense.startsAt
-    ? dateOnlyToDayKey(expense.startsAt)
-    : instantToSpDayKey(expense.createdAt);
+  if (
+    expense.frequency !== 'unica' &&
+    expense.archivedAt &&
+    compareDayKeys(instantToSpDayKey(expense.archivedAt), closingKey) < 0
+  ) {
+    return 0;
+  }
+
+  const startsKey =
+    expense.frequency === 'unica'
+      ? instantToSpDayKey(expense.occurredAt ?? expense.createdAt)
+      : expense.startsAt
+        ? dateOnlyToDayKey(expense.startsAt)
+        : instantToSpDayKey(expense.createdAt);
   if (compareDayKeys(startsKey, closingKey) > 0) return 0;
 
   if (expense.endsAt) {
@@ -126,9 +142,13 @@ function chargeBaseForClosing(
   }
 
   if (expense.frequency === 'unica') {
-    const createdKey = instantToSpDayKey(expense.createdAt);
+    const createdKey = instantToSpDayKey(
+      expense.occurredAt ?? expense.createdAt,
+    );
+    const periodStartComparison = compareDayKeys(createdKey, periodStartKey);
     if (
-      compareDayKeys(createdKey, periodStartKey) <= 0 ||
+      periodStartComparison < 0 ||
+      (!includePeriodStart && periodStartComparison === 0) ||
       compareDayKeys(createdKey, closingKey) > 0
     ) {
       return 0;
@@ -162,8 +182,14 @@ export function chargeAmountForClosing(
   cardId: string,
   closingOn: Date,
   periodStart: Date,
+  includePeriodStart = false,
 ) {
-  const multiplier = chargeBaseForClosing(expense, closingOn, periodStart);
+  const multiplier = chargeBaseForClosing(
+    expense,
+    closingOn,
+    periodStart,
+    includePeriodStart,
+  );
   if (multiplier <= 0) return 0;
   return cardShareAmount(expense, cardId) * multiplier;
 }
@@ -173,19 +199,61 @@ export function chargesTotalForClosing(
   cardId: string,
   closingOn: Date,
   periodStart: Date,
+  includePeriodStart = false,
 ) {
   return expenses.reduce(
     (sum, expense) =>
-      sum + chargeAmountForClosing(expense, cardId, closingOn, periodStart),
+      sum +
+      chargeAmountForClosing(
+        expense,
+        cardId,
+        closingOn,
+        periodStart,
+        includePeriodStart,
+      ),
     0,
   );
 }
 
-export async function processUserCardBilling(userId: string) {
-  const today = todayInSaoPaulo();
+/**
+ * A one-off purchase entered after a card close but dated on or before that
+ * close is included as an adjustment in the next invoice. The per-card
+ * processing timestamp prevents the same adjustment from being billed twice.
+ */
+export function lateOneOffsTotalForClosing(
+  expenses: ExpenseForBilling[],
+  cardId: string,
+  closedThrough: Date,
+  processedAt: Date,
+) {
+  const closedThroughKey = dateOnlyToDayKey(closedThrough);
+  return expenses.reduce((sum, expense) => {
+    if (
+      expense.isInvoice ||
+      expense.frequency !== 'unica' ||
+      expense.createdAt <= processedAt
+    ) {
+      return sum;
+    }
+
+    const occurredKey = instantToSpDayKey(
+      expense.occurredAt ?? expense.createdAt,
+    );
+    if (compareDayKeys(occurredKey, closedThroughKey) > 0) return sum;
+    return sum + cardShareAmount(expense, cardId);
+  }, 0);
+}
+
+export async function processUserCardBilling(
+  userId: string,
+  now = new Date(),
+) {
+  const today = todayInSaoPaulo(now);
+  const cutoff = new Date(today);
+  cutoff.setUTCDate(cutoff.getUTCDate() - 1);
   return withUserWriteLockTransaction(userId, async (tx) => {
     const cards = await tx.card.findMany({
-      where: { userId },
+      where: { userId, archivedAt: null },
       include: {
         expenses: { include: { splits: true } },
         expenseSplits: {
@@ -210,16 +278,46 @@ export async function processUserCardBilling(userId: string) {
       let periodStart = card.lastInvoicedOn
         ? dayKeyToUtcNoon(dateOnlyToDayKey(card.lastInvoicedOn))
         : dayKeyToUtcNoon(instantToSpDayKey(card.createdAt));
+      let lastBillingProcessedAt = card.lastBillingProcessedAt;
+      let hasClosedCycle = card.lastInvoicedOn != null;
+      let closingDay = card.closingDay;
+      let pendingClosingDay = card.pendingClosingDay;
+      let includePeriodStart = card.lastInvoicedOn == null;
+      const pendingSetAt = card.pendingClosingDaySetAt
+        ? dayKeyToUtcNoon(instantToSpDayKey(card.pendingClosingDaySetAt))
+        : null;
+      let minimumNextClosingOn = card.minimumNextClosingOn
+        ? dayKeyToUtcNoon(dateOnlyToDayKey(card.minimumNextClosingOn))
+        : null;
 
-      const dueDates = listDueClosingDates(card.closingDay, periodStart, today);
-
-      for (const closingOn of dueDates) {
-        const amount = chargesTotalForClosing(
+      while (true) {
+        const dueDates = listDueClosingDates(closingDay, periodStart, cutoff);
+        const closingOn = dueDates.find(
+          (candidate) =>
+            !minimumNextClosingOn ||
+            compareDayKeys(
+              dateOnlyToDayKey(candidate),
+              dateOnlyToDayKey(minimumNextClosingOn),
+            ) >= 0,
+        );
+        if (!closingOn) break;
+        const cycleAmount = chargesTotalForClosing(
           expenses,
           card.id,
           closingOn,
           periodStart,
+          includePeriodStart,
         );
+        const lateAdjustmentAmount =
+          hasClosedCycle && lastBillingProcessedAt
+            ? lateOneOffsTotalForClosing(
+                expenses,
+                card.id,
+                periodStart,
+                lastBillingProcessedAt,
+              )
+            : 0;
+        const amount = cycleAmount + lateAdjustmentAmount;
 
         const closingKey = dateOnlyToDayKey(closingOn);
 
@@ -233,17 +331,64 @@ export async function processUserCardBilling(userId: string) {
               category: 'outro',
               frequency: 'unica',
               isInvoice: true,
-              notes: `Fechamento ${formatPtBrDayKey(closingKey)}`,
+              occurredAt: closingOn,
+              billingPeriodStart: periodStart,
+              billingPeriodEnd: closingOn,
+              notes:
+                lateAdjustmentAmount > 0
+                  ? `Fechamento ${formatPtBrDayKey(closingKey)} · inclui compras retroativas informadas após o fechamento anterior`
+                  : `Fechamento ${formatPtBrDayKey(closingKey)}`,
             },
           });
           createdCount += 1;
         }
 
+        const updatedCardData: {
+          lastInvoicedOn: Date;
+          lastBillingProcessedAt?: Date;
+          closingDay?: number;
+          pendingClosingDay?: number | null;
+          pendingClosingDaySetAt?: Date | null;
+          minimumNextClosingOn?: Date | null;
+        } = { lastInvoicedOn: closingOn };
+        updatedCardData.lastBillingProcessedAt = now;
+        if (
+          pendingClosingDay != null &&
+          (!pendingSetAt ||
+            compareDayKeys(
+              closingKey,
+              dateOnlyToDayKey(pendingSetAt),
+            ) >= 0)
+        ) {
+          closingDay = pendingClosingDay;
+          updatedCardData.closingDay = closingDay;
+          updatedCardData.pendingClosingDay = null;
+          updatedCardData.pendingClosingDaySetAt = null;
+          minimumNextClosingOn = new Date(closingOn);
+          minimumNextClosingOn.setUTCDate(
+            minimumNextClosingOn.getUTCDate() + 28,
+          );
+          updatedCardData.minimumNextClosingOn = minimumNextClosingOn;
+          pendingClosingDay = null;
+        } else if (
+          minimumNextClosingOn &&
+          compareDayKeys(
+            closingKey,
+            dateOnlyToDayKey(minimumNextClosingOn),
+          ) >= 0
+        ) {
+          minimumNextClosingOn = null;
+          updatedCardData.minimumNextClosingOn = null;
+        }
+
         await tx.card.update({
           where: { id: card.id },
-          data: { lastInvoicedOn: closingOn },
+          data: updatedCardData,
         });
+        lastBillingProcessedAt = now;
+        hasClosedCycle = true;
         periodStart = closingOn;
+        includePeriodStart = false;
       }
     }
 
@@ -257,8 +402,11 @@ export function serializeCard(card: Card) {
     name: card.name,
     limit: card.limit == null ? null : Number(card.limit),
     closingDay: card.closingDay,
+    pendingClosingDay: card.pendingClosingDay,
+    archivedAt: card.archivedAt,
     expiresAt: card.expiresAt,
     lastInvoicedOn: card.lastInvoicedOn,
+    lastBillingProcessedAt: card.lastBillingProcessedAt,
     createdAt: card.createdAt,
     updatedAt: card.updatedAt,
     expired: card.expiresAt ? card.expiresAt.getTime() < Date.now() : false,

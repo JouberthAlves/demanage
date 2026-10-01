@@ -16,7 +16,7 @@ Internet
 
 O host publica somente `127.0.0.1:8080`. PostgreSQL e API não possuem `ports:` no Compose de produção.
 
-O self-host usa PostgreSQL 18 para ficar alinhado ao banco de origem. Na imagem oficial do PostgreSQL 18, o volume persistente deve ser montado em `/var/lib/postgresql`; o `PGDATA` interno é versionado (`/var/lib/postgresql/18/docker`).
+O self-host usa PostgreSQL 18 para ficar alinhado ao banco de origem. Na imagem oficial do PostgreSQL 18, o volume persistente deve ser montado em `/var/lib/postgresql`; o `PGDATA` interno é versionado (`/var/lib/postgresql/18/docker`). As imagens de produção usam tags de patch e digests imutáveis; atualize a tag e o digest juntos após revisar a nova imagem.
 
 ## 1. Pré-requisitos no servidor
 
@@ -48,6 +48,8 @@ notepad .env
 ```
 
 Preencha `POSTGRES_PASSWORD` e `JWT_SECRET` com valores aleatórios fortes. Para `POSTGRES_PASSWORD`, prefira hexadecimal porque o valor também faz parte da `DATABASE_URL`.
+
+O frontend usa `/api` na mesma origem por padrão. Se a API estiver em uma origem própria, defina `VITE_API_URL` no `.env` antes do build; a política CSP permite somente a origem HTTP(S) configurada.
 
 Exemplo de gerador compatível com PowerShell:
 
@@ -91,6 +93,7 @@ Teste no próprio servidor:
 ```powershell
 curl.exe http://127.0.0.1:8080/
 curl.exe http://127.0.0.1:8080/api/health
+curl.exe -I http://127.0.0.1:8080/
 ```
 
 O segundo comando deve chegar ao backend através do Nginx. Não abra as portas 5432 ou 8888 no firewall/roteador.
@@ -148,10 +151,12 @@ Hostname: demanage-test.biel.dev.br
 Service URL: http://localhost:8080
 ```
 
-O Compose de produção liga a confiança no cabeçalho `CF-Connecting-IP` somente
-porque a porta do frontend fica em `127.0.0.1` e o Tunnel é a única entrada
-externa. Em uma implantação com ingress público direto, mantenha
-`TRUST_CF_CONNECTING_IP=0` para usar o endereço do peer recebido pelo Nginx.
+`TRUST_CF_CONNECTING_IP` fica em `0` por padrão. Mude para `1` no `.env` somente
+quando o Cloudflare Tunnel for a única entrada externa e o host publicar o
+frontend apenas em `127.0.0.1`. Nesse caso, o Nginx aceita `CF-Connecting-IP`
+para rate limiting. Em qualquer implantação com outro ingress, mantenha `0` e
+use o endereço do peer recebido pelo Nginx. `APP_URL` começa com `https://` na
+produção; o Nginx aplica HSTS somente nesse caso.
 
 Depois teste o endereço HTTPS pelo navegador fora da rede local.
 
@@ -198,7 +203,7 @@ pg_dump "SUA_DATABASE_URL_ANTIGA" --format=custom --no-owner --no-privileges --f
 Ou, preferencialmente, usando Docker:
 
 ```powershell
-docker run --rm -v "${PWD}:/backup" postgres:18-alpine `
+docker run --rm -v "${PWD}:/backup" postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873 `
   pg_dump "SUA_DATABASE_URL_ANTIGA" `
   --format=custom `
   --no-owner `

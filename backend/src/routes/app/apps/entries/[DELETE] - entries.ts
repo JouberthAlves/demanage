@@ -15,11 +15,17 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
     }
 
     const existing = await prisma.entry.findFirst({
-      where: { id, userId },
+      where: { id, userId, archivedAt: null },
     });
 
     if (!existing) {
       return res.status(404).json({ error: 'Entrada não encontrada' });
+    }
+
+    if (existing.systemOrigin !== 'manual') {
+      return res.status(400).json({
+        error: 'Movimentações de cofrinho ou ativos não podem ser excluídas aqui',
+      });
     }
 
     if (existing.type === 'salario') {
@@ -28,7 +34,10 @@ router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    await prisma.entry.delete({ where: { id } });
+    await prisma.entry.update({
+      where: { id },
+      data: { archivedAt: new Date() },
+    });
 
     return res.status(204).send();
   } catch (err) {

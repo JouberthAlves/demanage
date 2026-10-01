@@ -13,6 +13,7 @@ import {
   canConfirmExpensePayment,
   canPayExpenseEarly,
   isExpenseAutoDebitedThisMonth,
+  isExpenseInvoicePaidThisMonth,
   isExpensePaidThisMonth,
 } from '@/lib/expense-schedule';
 import {
@@ -59,7 +60,9 @@ export function ExpenseListCard({
 
   const payState = (() => {
     if (expense.isInvoice) {
-      return { label: 'Fatura pendente', disabled: true };
+      return isExpenseInvoicePaidThisMonth(expense)
+        ? { label: 'Pago', disabled: true }
+        : { label: 'Confirmar pagamento', disabled: Boolean(pending) };
     }
     if (!isRecurring) return { label: 'Pago', disabled: true };
     if (!hasCash) return { label: 'Via fatura', disabled: true };

@@ -57,18 +57,6 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Data de conclusão inválida' });
     }
 
-    if (parsedTarget) {
-      const today = new Date();
-      const todayUtc = new Date(
-        Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()),
-      );
-      if (parsedTarget.getTime() < todayUtc.getTime()) {
-        return res.status(400).json({
-          error: 'Data de conclusão deve ser hoje ou no futuro',
-        });
-      }
-    }
-
     const computedMonthly = computeMonthlyGoal(parsedGoal, parsedTarget);
     const wantsAutoDebit = Boolean(autoDebit);
     let monthlyGoal = computedMonthly;

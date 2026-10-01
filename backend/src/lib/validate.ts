@@ -13,12 +13,33 @@ const FREQUENCIES = new Set(['mensal', 'semanal', 'unica']);
 /** Prisma Decimal(12, 2) — máximo absoluto < 10^10. */
 export const MAX_MONEY_AMOUNT = 9_999_999_999.99;
 
+export function parseMoneyAmount(
+  value: unknown,
+  allowZero = false,
+): number | null {
+  const raw =
+    typeof value === 'number'
+      ? String(value)
+      : typeof value === 'string'
+        ? value.trim()
+        : '';
+  if (!/^\d+(?:\.\d{1,2})?$/.test(raw)) return null;
+  const integerDigits = raw.split('.')[0].replace(/^0+/, '').length;
+  if (integerDigits > 10) return null;
+
+  const amount = Number(raw);
+  if (
+    !Number.isFinite(amount) ||
+    amount > MAX_MONEY_AMOUNT ||
+    (allowZero ? amount < 0 : amount <= 0)
+  ) {
+    return null;
+  }
+  return amount;
+}
+
 export function parsePositiveAmount(value: unknown): number | null {
-  const amount = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(amount) || amount <= 0) return null;
-  const rounded = Math.round(amount * 100) / 100;
-  if (rounded > MAX_MONEY_AMOUNT) return null;
-  return rounded;
+  return parseMoneyAmount(value);
 }
 
 export function positiveAmountError(value: unknown): string {
@@ -26,7 +47,19 @@ export function positiveAmountError(value: unknown): string {
   if (Number.isFinite(amount) && amount > MAX_MONEY_AMOUNT) {
     return 'Valor máximo é R$ 9.999.999.999,99';
   }
-  return 'Valor deve ser maior que zero';
+  return 'Valor deve ser positivo e ter no máximo duas casas decimais';
+}
+
+export function parseOptionalCardLimit(value: unknown): {
+  value: number | null | undefined;
+  error: string | null;
+} {
+  if (value === undefined) return { value: undefined, error: null };
+  if (value === null || value === '') return { value: null, error: null };
+  const limit = parsePositiveAmount(value);
+  return limit == null
+    ? { value: null, error: positiveAmountError(value) }
+    : { value: limit, error: null };
 }
 
 export function isValidExpenseCategory(value: unknown): boolean {
@@ -42,8 +75,17 @@ export function isValidFrequency(value: unknown): boolean {
 }
 
 export function parseUniqueDate(value: unknown): Date | null {
-  if (value == null || value === '') return null;
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) return null;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return null;
+  }
+  const [year, month, day] = value.split('-').map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
   return date;
 }

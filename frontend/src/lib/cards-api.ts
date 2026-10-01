@@ -7,8 +7,11 @@ export type ApiCard = {
   name: string;
   limit: string | number | null;
   closingDay: number | null;
+  pendingClosingDay?: number | null;
   expiresAt: string | null;
   lastInvoicedOn: string | null;
+  lastBillingProcessedAt?: string | null;
+  createdAt: string;
   expired?: boolean;
 };
 
@@ -26,8 +29,11 @@ export function mapCardToLocal(card: ApiCard): Card {
     name: card.name,
     limit: card.limit == null ? undefined : Number(card.limit),
     closingDay: card.closingDay ?? undefined,
+    pendingClosingDay: card.pendingClosingDay ?? null,
     expiresAt,
     lastInvoicedOn: card.lastInvoicedOn ?? undefined,
+    lastBillingProcessedAt: card.lastBillingProcessedAt,
+    createdAt: card.createdAt,
     expired: card.expired ?? isCardExpired(expiresAt),
   };
 }
