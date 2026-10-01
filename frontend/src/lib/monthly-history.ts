@@ -5,18 +5,32 @@ import type {
   RecurringExpense,
 } from '@/types/finance';
 
-function localMonthKey(date: Date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+const FINANCIAL_TIMEZONE = 'America/Sao_Paulo';
+
+function datePartsInSaoPaulo(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: FINANCIAL_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
 
-function addMonths(date: Date, amount: number) {
-  return new Date(date.getFullYear(), date.getMonth() + amount, 1);
+function monthKeyInSaoPaulo(date: Date) {
+  const parts = datePartsInSaoPaulo(date);
+  return `${parts.year}-${parts.month}`;
+}
+
+function dayKeyInSaoPaulo(date: Date) {
+  const parts = datePartsInSaoPaulo(date);
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function monthFromTimestamp(value: string, now: Date) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime()) || date > now) return null;
-  return localMonthKey(date);
+  return monthKeyInSaoPaulo(date);
 }
 
 function monthFromDateOnly(value: string | undefined, now: Date) {
@@ -24,21 +38,21 @@ function monthFromDateOnly(value: string | undefined, now: Date) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   if (!match) return null;
 
-  const date = new Date(
-    Number(match[1]),
-    Number(match[2]) - 1,
-    Number(match[3]),
-  );
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const date = new Date(Date.UTC(year, month - 1, day, 12));
+  const currentDay = dayKeyInSaoPaulo(now);
   if (
     Number.isNaN(date.getTime()) ||
-    date.getFullYear() !== Number(match[1]) ||
-    date.getMonth() !== Number(match[2]) - 1 ||
-    date.getDate() !== Number(match[3]) ||
-    date > new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day ||
+    value > currentDay
   ) {
     return null;
   }
-  return localMonthKey(date);
+  return value.slice(0, 7);
 }
 
 function sumPaidExpenses(
@@ -98,23 +112,23 @@ export function buildMonthlyHistory(
 ): MonthlySnapshot[] {
   if (monthCount <= 0) return [];
 
-  const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-  const firstMonth = addMonths(currentMonth, -monthCount + 1);
   const history: MonthlySnapshot[] = [];
-  let cursor = firstMonth;
-
-  while (cursor <= currentMonth) {
-    const month = localMonthKey(cursor);
-    const income = sumReceivedIncome(incomes, month, now);
-    const expense = sumPaidExpenses(expenses, month, now);
+  const currentMonth = monthKeyInSaoPaulo(now);
+  const [year, month] = currentMonth.split('-').map(Number);
+  for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
+    const date = new Date(Date.UTC(year, month - 1 - offset, 1));
+    const keyYear = date.getUTCFullYear();
+    const keyMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
+    const monthKey = `${keyYear}-${keyMonth}`;
+    const income = sumReceivedIncome(incomes, monthKey, now);
+    const expense = sumPaidExpenses(expenses, monthKey, now);
 
     history.push({
-      month,
+      month: monthKey,
       income,
       expense,
       hasActivity: income > 0 || expense > 0,
     });
-    cursor = addMonths(cursor, 1);
   }
 
   return history;

@@ -16,7 +16,7 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
     }
 
     const entries = await prisma.entry.findMany({
-      where: { userId },
+      where: { userId, archivedAt: null, systemOrigin: 'manual' },
       include: {
         customTag: { select: customTagSelect },
         ...entryReceiptInclude,

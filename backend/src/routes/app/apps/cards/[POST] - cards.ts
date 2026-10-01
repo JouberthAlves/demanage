@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 
 import { parseAbnt2Text } from '@/lib/abnt2';
 import { serializeCard } from '@/lib/card-billing';
-import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
+import { parseOptionalCardLimit } from '@/lib/validate';
 import { requireAuth } from '@/middlewares/require-auth';
 
 const router = Router();
@@ -65,16 +66,22 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       });
     }
 
-    const card = await prisma.card.create({
-      data: {
-        userId,
-        name: trimmedName,
-        limit: limit ?? null,
-        closingDay: parsedClosingDay,
-        expiresAt: parsedExpiresAt,
-      },
-    });
+    const parsedLimit = parseOptionalCardLimit(limit);
+    if (parsedLimit.error) {
+      return res.status(400).json({ error: parsedLimit.error });
+    }
 
+    const card = await withUserWriteLockTransaction(userId, async (tx) => {
+      return tx.card.create({
+        data: {
+          userId,
+          name: trimmedName,
+          limit: parsedLimit.value ?? null,
+          closingDay: parsedClosingDay,
+          expiresAt: parsedExpiresAt,
+        },
+      });
+    });
     return res.status(201).json(serializeCard(card));
   } catch (err) {
     console.error(err);

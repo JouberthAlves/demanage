@@ -1,12 +1,13 @@
 services:
   db:
-    image: postgres:18-alpine
+    image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     container_name: demanage-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: demanage
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: demanage
+      TZ: UTC
     volumes:
       - demanage_pgdata:/var/lib/postgresql
     healthcheck:
@@ -23,8 +24,15 @@ services:
       context: ./backend
     container_name: demanage-backend
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     environment:
       NODE_ENV: production
+      TZ: UTC
+      HOME: /tmp
       API_PORT: 8888
       APP_URL: ${APP_URL:-https://demanage.biel.dev.br}
       DATABASE_URL: postgresql://demanage:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/demanage?schema=public
@@ -52,16 +60,18 @@ services:
     build:
       context: ./frontend
       args:
-        VITE_API_URL: /api
+        VITE_API_URL: ${VITE_API_URL:-/api}
     container_name: demanage-frontend
     restart: unless-stopped
     environment:
       PORT: 80
+      TZ: UTC
       API_HOST: backend
       API_PORT: 8888
       NGINX_RESOLVER: 127.0.0.11
       NGINX_RESOLVER_IPV6: 'off'
-      TRUST_CF_CONNECTING_IP: '1'
+      TRUST_CF_CONNECTING_IP: ${TRUST_CF_CONNECTING_IP:-0}
+      APP_URL: ${APP_URL:-https://demanage.biel.dev.br}
     ports:
       - '127.0.0.1:${DEMANAGE_PORT:-8080}:80'
     depends_on:

@@ -24,6 +24,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { api } from '@/lib/api';
+import { passwordPolicyError } from '@/lib/password-policy';
 import { useAuthStore } from '@/stores/auth-store';
 
 export function RecoverPasswordPage() {
@@ -68,6 +69,14 @@ export function RecoverPasswordPage() {
       setConfirmPasswordError(message);
       toast.error(message);
       document.getElementById('recovery-confirm-password')?.focus();
+      return;
+    }
+
+    const policyError = passwordPolicyError(password);
+    if (policyError) {
+      setError(policyError);
+      toast.error(policyError);
+      document.getElementById('recovery-password')?.focus();
       return;
     }
 
@@ -184,9 +193,12 @@ export function RecoverPasswordPage() {
                       setPassword(event.target.value);
                       setConfirmPasswordError(null);
                     }}
-                    minLength={6}
+                    minLength={12}
                     required
                   />
+                  <FieldDescription>
+                    Mínimo de 12 caracteres e máximo de 72 bytes em UTF-8.
+                  </FieldDescription>
                 </Field>
 
                 <Field data-invalid={confirmPasswordError ? true : undefined}>
@@ -208,7 +220,7 @@ export function RecoverPasswordPage() {
                         ? 'recovery-confirm-password-error'
                         : undefined
                     }
-                    minLength={6}
+                    minLength={12}
                     required
                   />
                   {confirmPasswordError ? (

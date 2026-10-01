@@ -11,13 +11,16 @@ import api from './api';
 import { csrfProtection } from './middlewares/csrf-protection';
 import { requestLogger } from './middlewares/request-logger';
 import { isAllowedBrowserOrigin } from './lib/request-origin';
-import { API_PORT, NODE_ENV } from './utils/var';
+import { API_PORT, APP_URL, NODE_ENV } from './utils/var';
 
 const app = express();
 const httpServer = createServer(app);
 if (NODE_ENV === 'production') {
   app.use(
     helmet({
+      hsts: APP_URL?.startsWith('https://')
+        ? { maxAge: 31_536_000 }
+        : false,
       crossOriginResourcePolicy: { policy: 'cross-origin' },
     }),
   );
@@ -33,6 +36,11 @@ if (NODE_ENV === 'production') {
   });
   app.use(limiter);
 }
+
+app.use((_req, res, next) => {
+  res.setHeader('Permissions-Policy', 'camera=(), geolocation=(), microphone=()');
+  next();
+});
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -73,6 +81,7 @@ app.use(requestLogger);
 
 app.use('/auth/login', authLimiter);
 app.use('/auth/register', authLimiter);
+app.use('/auth/recovery-code', authLimiter);
 app.use('/auth/recover-password', authLimiter);
 app.use(api);
 

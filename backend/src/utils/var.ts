@@ -1,5 +1,7 @@
 import '@/config/env';
 
+import { resolveJwtSecret } from '@/lib/jwt-secret';
+
 function requireInProduction(name: string, value: string | undefined) {
   if (process.env.NODE_ENV === 'production' && !value?.trim()) {
     throw new Error(
@@ -17,15 +19,7 @@ export const APP_URL = requireInProduction('APP_URL', process.env.APP_URL);
 requireInProduction('DATABASE_URL', process.env.DATABASE_URL);
 
 const jwtSecret = requireInProduction('JWT_SECRET', process.env.JWT_SECRET);
-export const JWT_SECRET =
-  jwtSecret?.trim() ||
-  (NODE_ENV === 'production'
-    ? (() => {
-        throw new Error(
-          '[deManage] Missing required env in production: JWT_SECRET',
-        );
-      })()
-    : 'demanage-dev-secret');
+export const JWT_SECRET = resolveJwtSecret(jwtSecret, NODE_ENV);
 
 export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '7d';
 

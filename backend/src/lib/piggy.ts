@@ -5,7 +5,7 @@ import type {
 } from '@/generated/prisma/client';
 
 import { todayInSaoPaulo } from '@/lib/card-billing';
-import { decimal, money, ZERO } from '@/lib/decimal';
+import { dateOnlyUtc, decimal, money, ZERO } from '@/lib/decimal';
 import { parseDateOnly } from '@/lib/entry-schedule';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
@@ -32,8 +32,9 @@ export function computeMonthlyGoal(
   from = new Date(),
 ) {
   if (!goalAmount || goalAmount <= 0 || !targetDate) return 0;
+  const today = todayInSaoPaulo(from);
   const months = monthsUntilTarget(
-    new Date(Date.UTC(from.getFullYear(), from.getMonth(), 1)),
+    new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1, 12)),
     targetDate,
   );
   return Math.round((goalAmount / months) * 100) / 100;
@@ -119,7 +120,9 @@ export function serializePiggyTransaction(transaction: PiggyTransaction) {
 export function parseTargetDate(value: unknown) {
   const date = parseDateOnly(value, 'INVALID_TARGET_DATE');
   if (!date) throw new Error('INVALID_TARGET_DATE');
-  return date;
+  const normalized = dateOnlyUtc(date);
+  if (normalized < todayInSaoPaulo()) throw new Error('PAST_TARGET_DATE');
+  return normalized;
 }
 
 export function parseOptionalTargetDate(value: unknown): Date | null {
@@ -148,9 +151,7 @@ async function depositToPiggyBankInTransaction(
   }: DepositParams,
 ) {
   const requested = money(amount);
-  const day = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12),
-  );
+  const day = todayInSaoPaulo(date);
 
   const bank = await tx.piggyBank.findFirst({
     where: { id: piggyBankId, userId },
@@ -201,9 +202,10 @@ async function depositToPiggyBankInTransaction(
       userId,
       name: `Cofrinho · ${bank.name}`,
       amount: depositAmount,
-      category: 'investimento',
+      category: 'cofrinho',
       frequency: 'unica',
       occurredAt: day,
+      systemOrigin: 'piggy',
       notes: note || `Transferência interna para o cofrinho ${bank.name}`,
     },
   });
@@ -261,9 +263,7 @@ export async function withdrawFromPiggyBank({
   date = new Date(),
 }: WithdrawParams) {
   const requested = money(amount);
-  const day = new Date(
-    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate(), 12),
-  );
+  const day = todayInSaoPaulo(date);
 
   return withUserWriteLockTransaction(userId, async (tx) => {
     const bank = await tx.piggyBank.findFirst({
@@ -286,6 +286,7 @@ export async function withdrawFromPiggyBank({
         type: 'outro',
         frequency: 'unica',
         date: day,
+        systemOrigin: 'piggy',
       },
     });
 
@@ -326,16 +327,43 @@ export function parseAutoDebitDay(value: unknown): number | null {
   return day;
 }
 
-export async function processPiggyAutoDebits(userId: string) {
-  const now = new Date();
-  const todaySp = todayInSaoPaulo(now);
-  const year = todaySp.getUTCFullYear();
-  const monthIndex = todaySp.getUTCMonth();
-  const todayDay = todaySp.getUTCDate();
+export function currentAutoDebitCycle(
+  now: Date,
+  createdAt: Date,
+  autoDebitDay: number,
+) {
+  const today = todayInSaoPaulo(now);
+  const year = today.getUTCFullYear();
+  const monthIndex = today.getUTCMonth();
   const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
-  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 12));
-  const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 23, 59, 59));
+  const dueDay = Math.min(autoDebitDay || 1, lastDay);
+  const dueOn = new Date(Date.UTC(year, monthIndex, dueDay, 12));
+  const createdDay = todayInSaoPaulo(createdAt);
 
+  if (today < dueOn || createdDay >= dueOn) return null;
+
+  return {
+    dueOn,
+    monthStart: new Date(Date.UTC(year, monthIndex, 1, 12)),
+    monthEnd: new Date(Date.UTC(year, monthIndex, lastDay, 12)),
+  };
+}
+
+export function hasAutoDebitInCycle(
+  transactions: Pick<PiggyTransaction, 'type' | 'source' | 'date'>[],
+  cycle: ReturnType<typeof currentAutoDebitCycle>,
+) {
+  if (!cycle) return false;
+  return transactions.some((transaction) => {
+    if (transaction.type !== 'deposit' || transaction.source !== 'auto_debit') {
+      return false;
+    }
+    const transactionDay = todayInSaoPaulo(transaction.date);
+    return transactionDay >= cycle.monthStart && transactionDay <= cycle.monthEnd;
+  });
+}
+
+export async function processPiggyAutoDebits(userId: string, now = new Date()) {
   const candidateBanks = await prisma.piggyBank.findMany({
     where: {
       userId,
@@ -346,6 +374,7 @@ export async function processPiggyAutoDebits(userId: string) {
     select: { id: true },
   });
   let createdCount = 0;
+  let failedCount = 0;
 
   for (const { id } of candidateBanks) {
     try {
@@ -362,18 +391,14 @@ export async function processPiggyAutoDebits(userId: string) {
         });
         if (!bank) return false;
 
-        const debitDay = Math.min(bank.autoDebitDay || 1, lastDay);
-        if (todayDay !== debitDay) return false;
-        const debitInstant = new Date(Date.UTC(year, monthIndex, debitDay, 12));
-        if (bank.createdAt.getTime() >= debitInstant.getTime()) return false;
-        const already = bank.transactions.some(
-          (transaction) =>
-            transaction.type === 'deposit' &&
-            transaction.source === 'auto_debit' &&
-            transaction.date >= monthStart &&
-            transaction.date <= monthEnd,
-        );
-        if (already || bank.monthlyGoal.lte(0)) return false;
+        const cycle = currentAutoDebitCycle(now, bank.createdAt, bank.autoDebitDay);
+        if (
+          !cycle ||
+          hasAutoDebitInCycle(bank.transactions, cycle) ||
+          bank.monthlyGoal.lte(0)
+        ) {
+          return false;
+        }
 
         const balance = balanceDecimalFromTransactions(bank.transactions);
         const goalAmount =
@@ -391,16 +416,18 @@ export async function processPiggyAutoDebits(userId: string) {
           amount: Number(amount),
           source: 'auto_debit',
           note: 'Débito automático mensal',
-          date: now,
+          date: cycle.dueOn,
         });
         return !deposit.alreadyProcessed;
       });
 
       if (created) createdCount += 1;
-    } catch {
-      // Uma falha pontual não deve interromper os demais cofres.
+    } catch (error) {
+      failedCount += 1;
+      const errorName = error instanceof Error ? error.name : 'UnknownError';
+      console.error('[piggy auto-debit] failed', { bankId: id, errorName });
     }
   }
 
-  return { createdCount };
+  return { createdCount, failedCount };
 }
