@@ -2,7 +2,7 @@
 # deManage API — multi-stage
 ###############################
 
-FROM node:26.8.2-trixie-slim@sha256:f7bb8247fdb16250dbec7fd0e24f091c6f5f0a29d256f3aef5816a7a369166b2 AS builder
+FROM node:26.10.0-trixie-slim@sha256:930557a230abacbc3f4fd9b8648abf8f4bee1e17cb72195dcdfb2f709bc85b33 AS builder
 
 WORKDIR /app
 ENV TZ=UTC
@@ -16,7 +16,7 @@ COPY . .
 RUN DATABASE_URL='postgresql://build:build@127.0.0.1:5432/build' pnpm prisma generate
 RUN pnpm build
 
-FROM node:26.8.2-trixie-slim@sha256:f7bb8247fdb16250dbec7fd0e24f091c6f5f0a29d256f3aef5816a7a369166b2
+FROM node:26.10.0-trixie-slim@sha256:930557a230abacbc3f4fd9b8648abf8f4bee1e17cb72195dcdfb2f709bc85b33
 
 WORKDIR /app
 ENV TZ=UTC
