@@ -70,8 +70,12 @@ jobs:
           node-version: 26.8.2
           cache: pnpm
           cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
+      - id: install
+        run: pnpm install --frozen-lockfile
       - run: pnpm audit --audit-level moderate
       - run: pnpm lint
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       - run: pnpm test
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       - run: pnpm build
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
