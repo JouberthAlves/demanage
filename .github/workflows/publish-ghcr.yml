@@ -1,0 +1,56 @@
+name: Publish verified GHCR images
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  images:
+    # Untrusted PRs must NEVER receive the package-write token.
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'master' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish exact validated commit
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          platforms: linux/amd64
+          push: true
+          provenance: true
+          tags: ghcr.io/${{ github.repository }}-${{ matrix.service }}:sha-${{ github.event.workflow_run.head_sha }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.event.workflow_run.head_sha }}
+          build-args: |
+            VITE_API_URL=/api
+          cache-from: type=gha,scope=demanage-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=demanage-${{ matrix.service }}
+      - name: Publish immutable digest in workflow summary
+        run: |
+          echo "### ${{ matrix.service }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`ghcr.io/${{ github.repository }}-${{ matrix.service }}@${{ steps.build.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"

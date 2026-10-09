@@ -282,6 +282,10 @@ Por padrão ele mantém os dumps em `backups/` e remove arquivos com mais de 30 
 
 A pasta `backups/` deve ser copiada periodicamente para outro dispositivo/serviço. Backup no mesmo SSD não protege contra falha do disco.
 
+## Deploy automatizado com aprovação (opcional)
+
+Para usar GitHub Actions, GHCR e agente de pull no Debian, consulte [CI/CD com aprovação manual](./continuous-deployment.md). Esse fluxo exige configuração explícita do ambiente protegido no GitHub, inventário do Compose personalizado em execução e bootstrap único do serviço systemd. Mergear na `master` por si só **não** atualiza a produção.
+
 ## 8. Atualizar o deManage depois
 
 Antes de atualizar, faça um backup. Depois:

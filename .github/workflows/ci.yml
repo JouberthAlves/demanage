@@ -79,3 +79,14 @@ jobs:
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
       - run: pnpm build
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+
+  deploy-safety:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate deploy agent syntax
+        run: python3 -m py_compile ops/cd/deploy_agent.py
+      - name: Run fail-closed deployment tests
+        run: python3 -m unittest discover -s ops/cd/tests -v

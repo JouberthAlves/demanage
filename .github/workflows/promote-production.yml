@@ -1,0 +1,143 @@
+name: Approve production release
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Full 40-character SHA already built and validated on master'
+        required: true
+        type: string
+      initial_live_sha:
+        description: 'First release only: verified SHA currently running on the Debian host'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+  packages: read
+
+concurrency:
+  group: demanage-production-approval
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    if: github.ref == 'refs/heads/master' && github.actor == 'bielxdh3'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Configure required reviewers and set PRODUCTION_GATE_CONFIGURED=true
+    # in this environment BEFORE the first manual promotion.
+    environment:
+      name: production
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TARGET_SHA: ${{ inputs.commit_sha }}
+      INITIAL_LIVE_SHA: ${{ inputs.initial_live_sha }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Confirm explicit environment gate
+        env:
+          GATE_ENABLED: ${{ vars.PRODUCTION_GATE_CONFIGURED }}
+        run: |
+          set -euo pipefail
+          if [[ "$GATE_ENABLED" != true ]]; then
+            echo "::error::Configure production required reviewers and PRODUCTION_GATE_CONFIGURED=true before promoting."
+            exit 1
+          fi
+      - name: Verify master ancestry, both passing checks and DB migration safety
+        run: |
+          set -euo pipefail
+          [[ "$TARGET_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::Invalid target SHA"; exit 1; }
+          git cat-file -e "$TARGET_SHA^{commit}"
+          git merge-base --is-ancestor "$TARGET_SHA" origin/master
+
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&event=push&per_page=100" > "$RUNNER_TEMP/checks.json"
+          for workflow in CI CodeQL; do
+            jq -e --arg sha "$TARGET_SHA" --arg name "$workflow" \
+              '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .name == $name and .conclusion == "success")] | length > 0' \
+              "$RUNNER_TEMP/checks.json" > /dev/null || {
+                echo "::error::$workflow was not successful for this exact push SHA"
+                exit 1
+              }
+          done
+
+          if git ls-remote --exit-code --heads origin production > /dev/null; then
+            gh api "repos/$GITHUB_REPOSITORY/contents/production.json?ref=production" > "$RUNNER_TEMP/previous.json"
+            PREVIOUS_SHA="$(jq -er '.content | @base64d | fromjson | select(.version == 1) | .source_commit' "$RUNNER_TEMP/previous.json")"
+            if [[ -n "$INITIAL_LIVE_SHA" ]]; then
+              echo "::error::initial_live_sha must be empty after initialization"
+              exit 1
+            fi
+          else
+            PREVIOUS_SHA="$INITIAL_LIVE_SHA"
+            [[ "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]] || {
+              echo "::error::First promotion requires the exact currently deployed full SHA"
+              exit 1
+            }
+          fi
+          git cat-file -e "$PREVIOUS_SHA^{commit}"
+          git merge-base --is-ancestor "$PREVIOUS_SHA" origin/master
+          if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
+            backend/prisma backend/prisma.config.ts backend/entrypoint.sh docker-compose.prod.yml; then
+            echo "::error::Migrations, entrypoint or base Compose changed; automatic promotion is blocked. Use a separate reviewed database/runbook migration."
+            exit 1
+          fi
+          echo "PREVIOUS_SHA=$PREVIOUS_SHA" >> "$GITHUB_ENV"
+      - name: Resolve both images by immutable registry digest
+        run: |
+          set -euo pipefail
+          for service in backend frontend; do
+            ref="ghcr.io/$GITHUB_REPOSITORY-$service:sha-$TARGET_SHA"
+            digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -er '.digest')"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+            echo "${service^^}_IMAGE=ghcr.io/$GITHUB_REPOSITORY-$service@$digest" >> "$GITHUB_ENV"
+          done
+      - name: Publish atomic production pointer (no SSH, no database access)
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg commit "$TARGET_SHA" \
+            --arg previous "$PREVIOUS_SHA" \
+            --arg backend "$BACKEND_IMAGE" \
+            --arg frontend "$FRONTEND_IMAGE" \
+            --arg reviewer "$GITHUB_ACTOR" \
+            --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            '{version:1, source_commit:$commit, previous_commit:$previous, backend:$backend, frontend:$frontend, approved_by:$reviewer, approved_at:$timestamp}' \
+            > "$RUNNER_TEMP/production.json"
+
+          blob_sha=''
+          if ! git ls-remote --exit-code --heads origin production > /dev/null; then
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref='refs/heads/production' \
+              -f sha="$GITHUB_SHA" > /dev/null
+          else
+            blob_sha="$(jq -r '.sha' "$RUNNER_TEMP/previous.json")"
+          fi
+
+          jq -n \
+            --arg message "deploy: approve $TARGET_SHA for production" \
+            --arg payload "$(base64 -w0 "$RUNNER_TEMP/production.json")" \
+            --arg blob "$blob_sha" \
+            '{message:$message, content:$payload, branch:"production"} + (if $blob == "" then {} else {sha:$blob} end)' \
+            > "$RUNNER_TEMP/payload.json"
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/production.json" \
+            --input "$RUNNER_TEMP/payload.json" > /dev/null
+          {
+            echo "## Production approved"
+            echo "- Commit: \`$TARGET_SHA\`"
+            echo "- Previous: \`$PREVIOUS_SHA\`"
+            echo "- Backend: \`$BACKEND_IMAGE\`"
+            echo "- Frontend: \`$FRONTEND_IMAGE\`"
+            echo ""
+            echo "The Debian polling service will apply this release once provisioned."
+          } >> "$GITHUB_STEP_SUMMARY"

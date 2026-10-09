@@ -38,6 +38,11 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 ---
 
+## Infraestrutura — CI/CD
+
+- [x] **Pipeline de imagens e promoção** — Publicação de imagens imutáveis GHCR após CI da `master`, aprovação manual via ambiente GitHub `production`, agente outbound-only com backup, rollout seletivo e rollback da aplicação.
+- [ ] **`[HUMAN]` Ativação da produção** — Configurar no GitHub o ambiente protegido com required reviewer e variável `PRODUCTION_GATE_CONFIGURED=true`; autorizar GHCR; inventariar Compose efetivo do Debian e instalar o serviço systemd do agente. Sem esses passos, não há deploy automático.
+
 ## P1 — Frontend
 
 - [x] ~~**Renovar o frontend**~~ — Polish visual (pedido explícito): hero/panels, dashboard, despesas, entradas, perfil, layout e auth. Cores de cartão estáveis (`lib/card-tone.ts`) compartilhadas entre perfil e gráfico radial.

@@ -1,0 +1,11 @@
+{
+  "compose_files": [
+    "/REPLACE_WITH_EXACT_VERIFIED_ACTIVE_PRODUCTION_COMPOSE_PATH"
+  ],
+  "env_file": "/REPLACE_WITH_VERIFIED_EXISTING_PRODUCTION_ENV_FILE",
+  "project_name": "demanage",
+  "backup_root": "/opt/demanage/backups",
+  "state_file": "/opt/demanage/cd/state.json",
+  "lock_file": "/opt/demanage/cd/release.lock",
+  "public_health_url": "https://demanage.biel.dev.br/api/health"
+}
