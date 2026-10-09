@@ -2,6 +2,7 @@ import { isAxiosError } from 'axios';
 import { create } from 'zustand';
 
 import { api } from '@/lib/api';
+import { useFinanceStore } from '@/stores/finance-store';
 import type { AuthUser } from '@/types/auth';
 
 type UpdateProfileInput = {
@@ -20,6 +21,7 @@ type AuthState = {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  sessionRevision: number;
   setUser: (user: AuthUser | null) => void;
   fetchMe: () => Promise<AuthUser | null>;
   login: (email: string, password: string) => Promise<AuthUser>;
@@ -33,111 +35,121 @@ type AuthState = {
   logout: () => Promise<void>;
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: null,
-  isAuthenticated: false,
-  isLoading: true,
+// An earlier /auth/me response must never restore a previous user's session
+// after login, registration or logout has changed the cookie.
+let meRequestVersion = 0;
 
-  setUser: (user) =>
-    set({
+export const useAuthStore = create<AuthState>((set, get) => {
+  function setSessionUser(user: AuthUser | null, forceNewSession = false) {
+    const sessionChanged = forceNewSession || get().user?.id !== user?.id;
+
+    if (sessionChanged) {
+      // Zustand finance data is separate from the TanStack Query cache.
+      useFinanceStore.getState().clearAll();
+    }
+
+    set((state) => ({
       user,
       isAuthenticated: Boolean(user),
       isLoading: false,
-    }),
-
-  fetchMe: async () => {
-    try {
-      const { data } = await api.get<{ user: AuthUser }>('/auth/me');
-      set({
-        user: data.user,
-        isAuthenticated: true,
-        isLoading: false,
-      });
-      return data.user;
-    } catch {
-      set({
-        user: null,
-        isAuthenticated: false,
-        isLoading: false,
-      });
-      return null;
-    }
-  },
-
-  login: async (email, password) => {
-    const { data } = await api.post<{ user: AuthUser }>('/auth/login', {
-      email,
-      password,
-    });
-    set({
-      user: data.user,
-      isAuthenticated: true,
-      isLoading: false,
-    });
-    return data.user;
-  },
-
-  register: async (name, email, password) => {
-    const { data } = await api.post<RegisterResult>('/auth/register', {
-      name,
-      email,
-      password,
-    });
-    set({
-      user: data.user,
-      isAuthenticated: true,
-      isLoading: false,
-    });
-    return data;
-  },
-
-  updateProfile: async (input) => {
-    const { data } = await api.patch<{ user: AuthUser }>('/auth/me', {
-      name: input.name,
-      salary: input.salary,
-      salaryReceiveDay: input.salaryReceiveDay,
-      notes: input.notes,
-    });
-    set({
-      user: data.user,
-      isAuthenticated: true,
-      isLoading: false,
-    });
-    return data.user;
-  },
-
-  generateRecoveryCode: async (currentPassword) => {
-    const { data } = await api.post<{ recoveryCode: string }>(
-      '/auth/recovery-code',
-      { currentPassword },
-    );
-    set((state) => ({
-      user: state.user ? { ...state.user, hasRecoveryCode: true } : null,
+      sessionRevision: state.sessionRevision + (sessionChanged ? 1 : 0),
     }));
-    return data.recoveryCode;
-  },
+  }
 
-  logout: async () => {
-    let clearLocalSession = false;
-    try {
-      await api.post('/auth/logout');
-      clearLocalSession = true;
-    } catch (error) {
-      clearLocalSession =
-        isAxiosError(error) &&
-        (error.response?.data as { code?: unknown } | undefined)?.code ===
-          'LOGOUT_REVOCATION_FAILED';
-      throw error;
-    } finally {
-      if (clearLocalSession) {
-        const { useFinanceStore } = await import('@/stores/finance-store');
-        useFinanceStore.getState().clearAll();
-        set({
-          user: null,
-          isAuthenticated: false,
-          isLoading: false,
-        });
+  return {
+    user: null,
+    isAuthenticated: false,
+    isLoading: true,
+    sessionRevision: 0,
+
+    setUser: (user) => {
+      ++meRequestVersion;
+      setSessionUser(user);
+    },
+
+    fetchMe: async () => {
+      const requestVersion = ++meRequestVersion;
+      try {
+        const { data } = await api.get<{ user: AuthUser }>('/auth/me');
+        if (requestVersion !== meRequestVersion) return get().user;
+        setSessionUser(data.user);
+        return data.user;
+      } catch {
+        if (requestVersion !== meRequestVersion) return get().user;
+        setSessionUser(null);
+        return null;
       }
-    }
-  },
-}));
+    },
+
+    login: async (email, password) => {
+      ++meRequestVersion;
+      const { data } = await api.post<{ user: AuthUser }>('/auth/login', {
+        email,
+        password,
+      });
+      ++meRequestVersion;
+      setSessionUser(data.user, true);
+      return data.user;
+    },
+
+    register: async (name, email, password) => {
+      ++meRequestVersion;
+      const { data } = await api.post<RegisterResult>('/auth/register', {
+        name,
+        email,
+        password,
+      });
+      ++meRequestVersion;
+      setSessionUser(data.user, true);
+      return data;
+    },
+
+    updateProfile: async (input) => {
+      const revision = get().sessionRevision;
+      const { data } = await api.patch<{ user: AuthUser }>('/auth/me', {
+        name: input.name,
+        salary: input.salary,
+        salaryReceiveDay: input.salaryReceiveDay,
+        notes: input.notes,
+      });
+      if (revision === get().sessionRevision) {
+        setSessionUser(data.user);
+      }
+      return data.user;
+    },
+
+    generateRecoveryCode: async (currentPassword) => {
+      const revision = get().sessionRevision;
+      const { data } = await api.post<{ recoveryCode: string }>(
+        '/auth/recovery-code',
+        { currentPassword },
+      );
+      if (revision === get().sessionRevision) {
+        set((state) => ({
+          user: state.user ? { ...state.user, hasRecoveryCode: true } : null,
+        }));
+      }
+      return data.recoveryCode;
+    },
+
+    logout: async () => {
+      ++meRequestVersion;
+      let clearLocalSession = false;
+      try {
+        await api.post('/auth/logout');
+        clearLocalSession = true;
+      } catch (error) {
+        clearLocalSession =
+          isAxiosError(error) &&
+          (error.response?.data as { code?: unknown } | undefined)?.code ===
+            'LOGOUT_REVOCATION_FAILED';
+        throw error;
+      } finally {
+        if (clearLocalSession) {
+          ++meRequestVersion;
+          setSessionUser(null, true);
+        }
+      }
+    },
+  };
+});
