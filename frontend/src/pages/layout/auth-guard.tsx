@@ -8,6 +8,7 @@ export function AuthGuard() {
   const location = useLocation();
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isLoading = useAuthStore((state) => state.isLoading);
+  const sessionRevision = useAuthStore((state) => state.sessionRevision);
   const fetchMe = useAuthStore((state) => state.fetchMe);
 
   useEffect(() => {
@@ -26,5 +27,7 @@ export function AuthGuard() {
     return <Navigate to='/login' replace state={{ from: location }} />;
   }
 
-  return <Outlet />;
+  // Discard page-local state (selected cofre, open dialogs, etc.) on account changes.
+  // Do not remount public auth routes: registration must retain its recovery code.
+  return <Outlet key={sessionRevision} />;
 }
