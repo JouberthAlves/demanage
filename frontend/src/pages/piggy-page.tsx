@@ -1,5 +1,5 @@
 import { isAxiosError } from 'axios';
-import { Archive, PiggyBank as PiggyIcon, Plus, ShieldAlert, Trash2 } from 'lucide-react';
+import { AlertCircle, Archive, PiggyBank as PiggyIcon, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
@@ -27,6 +27,23 @@ function errorMessage(error: unknown, fallback: string) {
     : fallback;
 }
 
+function loadErrorMessage(error: unknown) {
+  const status = isAxiosError(error) ? error.response?.status : undefined;
+  if (status === 429) {
+    return 'Muitas consultas em pouco tempo. Aguarde alguns minutos antes de tentar novamente.';
+  }
+  if (status === 401) {
+    return 'Sua sessão não está mais válida. Entre novamente para consultar seus cofres.';
+  }
+  if (status === 403) {
+    return 'O acesso à consulta foi bloqueado. Tente novamente e, se persistir, verifique a proteção do site.';
+  }
+  if (status && status >= 500) {
+    return 'O servidor encontrou um problema ao consultar seus cofres. Nenhum saldo foi zerado.';
+  }
+  return 'Não foi possível consultar seus cofres. Verifique a conexão e tente novamente.';
+}
+
 function transactionLabel(transaction: PiggyTransaction) {
   if (transaction.type === 'interest') return 'Rendimento CDI';
   if (transaction.type === 'deposit') {
@@ -36,7 +53,17 @@ function transactionLabel(transaction: PiggyTransaction) {
 }
 
 export function PiggyPage() {
-  const { data: banks = [], isLoading, isError } = usePiggyBanks();
+  const {
+    data: bankData,
+    isPending,
+    isError,
+    isFetching,
+    error,
+    refetch: refetchBanks,
+  } = usePiggyBanks();
+  const banks = bankData ?? [];
+  const hasBanksData = bankData !== undefined;
+  const loadFailed = isError && !hasBanksData;
   const archiveBank = useArchivePiggyBank();
   const deleteBank = useDeletePiggyBank();
   const [formOpen, setFormOpen] = useState(false);
@@ -45,8 +72,12 @@ export function PiggyPage() {
   const [moneyMode, setMoneyMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [activeBank, setActiveBank] = useState<PiggyBank | null>(null);
   const [historyBankId, setHistoryBankId] = useState<string | null>(null);
-  const { data: history = [], isLoading: historyLoading } =
-    usePiggyTransactions(historyBankId);
+  const {
+    data: history = [],
+    isPending: historyLoading,
+    isError: historyError,
+    refetch: refetchHistory,
+  } = usePiggyTransactions(historyBankId);
 
   const totalBalance = useMemo(
     () => banks.reduce((sum, bank) => sum + bank.balance, 0),
@@ -101,7 +132,7 @@ export function PiggyPage() {
         title='Cofrinho'
         description='Reservas internas do patrimônio. Meta, data e rendimento são opcionais.'
         actions={
-          <Button onClick={openCreate} className='rounded-lg'>
+          <Button onClick={openCreate} disabled={!hasBanksData} className='rounded-lg'>
             <Plus data-icon='inline-start' />
             Novo cofre
           </Button>
@@ -110,23 +141,53 @@ export function PiggyPage() {
 
       <PageHero
         eyebrow='Reservas'
-        title={`${banks.length} cofre${banks.length === 1 ? '' : 's'}`}
+        title={
+          hasBanksData
+            ? `${banks.length} cofre${banks.length === 1 ? '' : 's'}`
+            : isPending
+              ? 'Carregando cofres…'
+              : 'Cofres indisponíveis'
+        }
         description='Guardar move dinheiro do saldo em reais para o Cofrinho sem reduzir o patrimônio. Se houver rendimento, o CDI é capitalizado diariamente.'
       >
         <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
           <p className='text-xs text-muted-foreground'>Total nos cofres</p>
           <p className='mt-2 text-2xl font-semibold tabular-nums text-violet-300'>
-            {formatCurrency(totalBalance)}
+            {hasBanksData ? formatCurrency(totalBalance) : '—'}
           </p>
         </div>
       </PageHero>
 
-      {isLoading ? (
-        <div className='flex h-40 items-center justify-center'>
+      {isError && hasBanksData ? (
+        <div role='alert' className='flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4'>
+          <p className='text-sm text-destructive'>
+            A atualização falhou. Exibindo os últimos dados carregados; os saldos podem estar desatualizados.
+          </p>
+          <Button size='sm' variant='outline' disabled={isFetching} onClick={() => void refetchBanks()}>
+            <RefreshCw data-icon='inline-start' />
+            Tentar novamente
+          </Button>
+        </div>
+      ) : null}
+
+      {isPending ? (
+        <div className='flex h-40 items-center justify-center' role='status' aria-label='Carregando cofres'>
           <Spinner className='size-5' />
         </div>
-      ) : isError ? (
-        <p className='text-sm text-destructive'>Não foi possível carregar os cofres.</p>
+      ) : loadFailed ? (
+        <SectionPanel>
+          <div role='alert' className='flex flex-col items-center gap-3 py-10 text-center'>
+            <AlertCircle className='size-8 text-destructive' aria-hidden='true' />
+            <p className='font-medium'>Falha ao carregar os cofres</p>
+            <p className='max-w-md text-sm text-muted-foreground'>
+              {loadErrorMessage(error)}
+            </p>
+            <Button variant='outline' disabled={isFetching} onClick={() => void refetchBanks()}>
+              <RefreshCw data-icon='inline-start' />
+              Tentar novamente
+            </Button>
+          </div>
+        </SectionPanel>
       ) : banks.length === 0 ? (
         <SectionPanel>
           <div className='flex flex-col items-center gap-3 py-12 text-center'>
@@ -233,6 +294,13 @@ export function PiggyPage() {
                       <p className='mb-2 text-sm font-medium'>Histórico auditável</p>
                       {historyLoading ? (
                         <Spinner className='size-4' />
+                      ) : historyError ? (
+                        <div role='alert' className='flex items-center gap-3 text-sm text-destructive'>
+                          <span>Não foi possível carregar o histórico.</span>
+                          <Button size='sm' variant='outline' onClick={() => void refetchHistory()}>
+                            Tentar novamente
+                          </Button>
+                        </div>
                       ) : history.length === 0 ? (
                         <p className='text-sm text-muted-foreground'>Sem movimentações.</p>
                       ) : (

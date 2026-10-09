@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import { toast } from 'sonner';
 
 import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
@@ -15,14 +15,19 @@ import { useFinanceStore } from '@/stores/finance-store';
 
 export const CARDS_QUERY_KEY = ['cards'] as const;
 
-export function useCards() {
+// The QueryClient is session-scoped. Running billing maintenance for each
+// useCards consumer can create overlapping writes to the same account.
+const billingStartedForSession = new WeakSet<ReturnType<typeof useQueryClient>>();
+
+export function useCards(enabled = true) {
   const setCards = useFinanceStore((state) => state.setCards);
   const queryClient = useQueryClient();
-  const maintenanceStarted = useRef(false);
 
   const query = useQuery({
     queryKey: CARDS_QUERY_KEY,
     queryFn: listCards,
+    enabled,
+    staleTime: 60_000,
   });
 
   useEffect(() => {
@@ -32,8 +37,8 @@ export function useCards() {
   }, [query.data, setCards]);
 
   useEffect(() => {
-    if (!query.isSuccess || maintenanceStarted.current) return;
-    maintenanceStarted.current = true;
+    if (!enabled || !query.isSuccess || billingStartedForSession.has(queryClient)) return;
+    billingStartedForSession.add(queryClient);
 
     void processCardBilling()
       .then((billing) => {
@@ -45,7 +50,7 @@ export function useCards() {
       .catch(() => {
         toast.error('Não foi possível atualizar as faturas agora.');
       });
-  }, [query.isSuccess, queryClient]);
+  }, [enabled, query.isSuccess, queryClient]);
 
   return query;
 }

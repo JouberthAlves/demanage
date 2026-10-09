@@ -41,6 +41,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 ## P1 — Frontend
 
 - [x] ~~**Renovar o frontend**~~ — Polish visual (pedido explícito): hero/panels, dashboard, despesas, entradas, perfil, layout e auth. Cores de cartão estáveis (`lib/card-tone.ts`) compartilhadas entre perfil e gráfico radial.
+- [x] **Cofrinho: erros e carregamento por página** — Corrigir falso saldo zero em falhas de API, exibir estado recuperável com nova tentativa, limitar retries e evitar consultas/manutenções financeiras duplicadas no layout.
 
 ---
 

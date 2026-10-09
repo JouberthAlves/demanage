@@ -19,12 +19,14 @@ function invalidateExpenseRelated(queryClient: ReturnType<typeof useQueryClient>
   void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
 }
 
-export function useExpenses() {
+export function useExpenses(enabled = true) {
   const setExpenses = useFinanceStore((state) => state.setExpenses);
 
   const query = useQuery({
     queryKey: EXPENSES_QUERY_KEY,
     queryFn: listExpenses,
+    enabled,
+    staleTime: 60_000,
   });
 
   useEffect(() => {

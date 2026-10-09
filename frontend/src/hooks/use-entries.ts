@@ -22,12 +22,14 @@ function invalidateEntryRelated(
   void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
 }
 
-export function useEntries() {
+export function useEntries(enabled = true) {
   const setIncomes = useFinanceStore((state) => state.setIncomes);
 
   const query = useQuery({
     queryKey: ENTRIES_QUERY_KEY,
     queryFn: listEntries,
+    enabled,
+    staleTime: 60_000,
   });
 
   useEffect(() => {
