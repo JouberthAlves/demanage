@@ -1,4 +1,6 @@
 import { Prisma } from '@/generated/prisma/client';
+import { dayKeyOfDate } from '@/lib/civil-date';
+import { toMoney } from '@/lib/money';
 
 export type DecimalLike = Prisma.Decimal | string | number;
 
@@ -9,8 +11,9 @@ export function decimal(value: DecimalLike) {
 export const ZERO = decimal(0);
 export const ONE_HUNDRED = decimal(100);
 
+/** Alias of money.toMoney (HALF_UP to cents). */
 export function money(value: DecimalLike) {
-  return decimal(value).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+  return toMoney(value);
 }
 
 export function decimalString(value: DecimalLike, places?: number) {
@@ -18,6 +21,10 @@ export function decimalString(value: DecimalLike, places?: number) {
   return places == null ? parsed.toString() : parsed.toFixed(places);
 }
 
+/**
+ * Normalises an instant (or ISO string) to its UTC calendar day at 12:00 UTC
+ * (the 'noon' storage convention, see civil-date.ts).
+ */
 export function dateOnlyUtc(value: Date | string) {
   const date = value instanceof Date ? value : new Date(value);
   return new Date(
@@ -26,5 +33,5 @@ export function dateOnlyUtc(value: Date | string) {
 }
 
 export function dateKey(value: Date | string) {
-  return dateOnlyUtc(value).toISOString().slice(0, 10);
+  return dayKeyOfDate(dateOnlyUtc(value));
 }

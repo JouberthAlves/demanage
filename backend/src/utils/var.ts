@@ -1,6 +1,6 @@
-import '@/config/env';
-
 import { resolveJwtSecret } from '@/lib/jwt-secret';
+
+import '@/config/env';
 
 function requireInProduction(name: string, value: string | undefined) {
   if (process.env.NODE_ENV === 'production' && !value?.trim()) {
