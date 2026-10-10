@@ -1,9 +1,11 @@
-import { isAxiosError } from 'axios';
-import { useEffect, useState } from 'react';
-import { toast } from 'sonner';
-
-import { CustomTagFormDialog } from '@/components/shared/custom-tag-form-dialog';
+import { CustomTagSelect } from '@/components/shared/schedule-form/custom-tag-select';
+import { FieldError } from '@/components/shared/schedule-form/field-error';
+import { fieldErrorProps } from '@/components/shared/schedule-form/field-error-props';
+import { FrequencySelect } from '@/components/shared/schedule-form/frequency-select';
+import { ScheduleFields } from '@/components/shared/schedule-form/schedule-fields';
 import { Button } from '@/components/ui/button';
+import { CurrencyInput } from '@/components/ui/currency-input';
+import { DatePicker } from '@/components/ui/date-picker';
 import {
   Dialog,
   DialogContent,
@@ -12,36 +14,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { CurrencyInput } from '@/components/ui/currency-input';
-import { DatePicker } from '@/components/ui/date-picker';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import {
-  BUILTIN_INCOME_TYPE_LABELS,
-  INCOME_FREQUENCY_LABELS,
-  MONTH_OPTIONS,
-} from '@/data/labels';
-import { useCreateEntry, useUpdateEntry } from '@/hooks/use-entries';
-import { useCustomTags } from '@/hooks/use-custom-tags';
-import {
-  buildScheduleStartsAt,
-  formatStartsAtPreview,
-} from '@/lib/expense-schedule';
-import {
-  formatBrlInputValue,
-  maskClosingDayInput,
-  normalizeClosingDayInput,
-  parseCurrencyInput,
-} from '@/lib/format';
-import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
+import { INCOME_FREQUENCY_LABELS } from '@/data/labels';
+import { INCOME_FIELD_IDS, incomeTypeOptions } from '@/lib/income-form';
+import type { Income } from '@/types/finance';
+
+import { type IncomeFormApi, useIncomeForm } from './use-income-form';
+
+const {
+  error: ERROR_ID,
+  name: NAME_ID,
+  amount: AMOUNT_ID,
+  date: DATE_ID,
+} = INCOME_FIELD_IDS;
 
 type IncomeFormDialogProps = {
   open: boolean;
@@ -49,45 +36,147 @@ type IncomeFormDialogProps = {
   income: Income | null;
 };
 
-type FormState = {
-  name: string;
-  amount: string;
-  typeKey: string;
-  frequency: IncomeFrequency;
-  receiveDay: string;
-  receiveMonth: string;
-  endsAt: string;
-  date: string;
-};
-
-const NEW_TYPE_VALUE = '__new_type__';
-
-function currentMonthValue() {
-  return String(new Date().getMonth() + 1);
+function IncomeOneOffDate({ f }: { f: IncomeFormApi }) {
+  const props = fieldErrorProps(f.error, DATE_ID, ERROR_ID);
+  return (
+    <div className='flex flex-col gap-2'>
+      <Label htmlFor={DATE_ID}>Data prevista</Label>
+      <DatePicker
+        id={DATE_ID}
+        value={f.form.date}
+        onValueChange={(date) => f.patch({ date })}
+        placeholder='Selecione a data'
+        allowClear
+        ariaInvalid={props['aria-invalid']}
+        ariaDescribedBy={props['aria-describedby']}
+      />
+      <FieldError error={f.error} fieldId={DATE_ID} errorId={ERROR_ID} />
+      <p className='text-xs text-muted-foreground'>
+        Depois que o valor entrar, confirme &quot;Já recebi&quot; para
+        incluí-lo no histórico.
+      </p>
+    </div>
+  );
 }
 
-function todayDateValue() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
+// Mounted fresh every time the dialog content opens (Radix unmounts closed
+// content), so the form state is initialised from props, not reset by effects.
+function IncomeFormBody({
+  income,
+  onClose,
+}: {
+  income: Income | null;
+  onClose: () => void;
+}) {
+  const f = useIncomeForm({ income, onDone: onClose });
+  const { form } = f;
 
-const emptyForm: FormState = {
-  name: '',
-  amount: '',
-  typeKey: 'freelance',
-  frequency: 'mensal',
-  receiveDay: '05',
-  receiveMonth: currentMonthValue(),
-  endsAt: '',
-  date: todayDateValue(),
-};
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{income ? 'Editar entrada' : 'Nova entrada'}</DialogTitle>
+        <DialogDescription>
+          Cadastre fontes de renda mensais, semanais ou únicas.
+        </DialogDescription>
+      </DialogHeader>
 
-function typeKeyFromIncome(income: Income) {
-  if (income.customTagId) return `tag:${income.customTagId}`;
-  return income.type;
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void f.submit();
+        }}
+        className='flex flex-col gap-4'
+      >
+        <div className='flex flex-col gap-2'>
+          <Label htmlFor={NAME_ID}>Nome</Label>
+          <Input
+            id={NAME_ID}
+            {...fieldErrorProps(f.error, NAME_ID, ERROR_ID)}
+            value={form.name}
+            onChange={(event) => f.patch({ name: event.target.value })}
+            placeholder='Ex: Freelance'
+            maxLength={100}
+            className='rounded-lg'
+          />
+          <FieldError error={f.error} fieldId={NAME_ID} errorId={ERROR_ID} />
+        </div>
+
+        <div className='flex flex-col gap-2'>
+          <Label htmlFor={AMOUNT_ID}>Valor</Label>
+          <CurrencyInput
+            id={AMOUNT_ID}
+            {...fieldErrorProps(f.error, AMOUNT_ID, ERROR_ID)}
+            value={form.amount}
+            onValueChange={(amount) => f.patch({ amount })}
+            className='rounded-lg'
+          />
+          <FieldError error={f.error} fieldId={AMOUNT_ID} errorId={ERROR_ID} />
+        </div>
+
+        <div className='grid grid-cols-2 gap-3'>
+          <CustomTagSelect
+            id='income-type'
+            label='Tipo'
+            scope='income'
+            value={form.typeKey}
+            options={incomeTypeOptions(form.typeKey)}
+            onChange={(typeKey) => f.patch({ typeKey })}
+          />
+          <FrequencySelect
+            id='income-frequency'
+            value={form.frequency}
+            labels={INCOME_FREQUENCY_LABELS}
+            onChange={f.setFrequency}
+          />
+        </div>
+
+        {form.frequency === 'unica' ? (
+          <IncomeOneOffDate f={f} />
+        ) : (
+          <ScheduleFields
+            ids={INCOME_FIELD_IDS.schedule}
+            errorId={ERROR_ID}
+            heading='Quando recebe'
+            firstLabel='Primeiro recebimento'
+            frequency={form.frequency}
+            values={{
+              day: form.receiveDay,
+              month: form.receiveMonth,
+              endsAt: form.endsAt,
+            }}
+            onChange={(changes) =>
+              f.patch({
+                ...(changes.day !== undefined && { receiveDay: changes.day }),
+                ...(changes.month !== undefined && {
+                  receiveMonth: changes.month,
+                }),
+                ...(changes.endsAt !== undefined && { endsAt: changes.endsAt }),
+              })
+            }
+            error={f.error}
+            now={f.now}
+            previousStartsAt={f.previousStartsAt}
+          />
+        )}
+
+        <DialogFooter>
+          <Button
+            type='button'
+            variant='outline'
+            className='rounded-lg'
+            onClick={onClose}
+            disabled={f.submitting}
+          >
+            Cancelar
+          </Button>
+          <Button type='submit' className='rounded-lg' disabled={f.submitting}>
+            {f.submitting ? <Spinner data-icon='inline-start' /> : null}
+            Salvar
+          </Button>
+        </DialogFooter>
+      </form>
+    </>
+  );
 }
 
 export function IncomeFormDialog({
@@ -95,416 +184,15 @@ export function IncomeFormDialog({
   onOpenChange,
   income,
 }: IncomeFormDialogProps) {
-  const { data: customTags = [] } = useCustomTags('income');
-  const createEntry = useCreateEntry();
-  const updateEntry = useUpdateEntry();
-  const [form, setForm] = useState<FormState>(emptyForm);
-  const [tagDialogOpen, setTagDialogOpen] = useState(false);
-  const [typeSelectKey, setTypeSelectKey] = useState(0);
-  const submitting = createEntry.isPending || updateEntry.isPending;
-  const isRecurring =
-    form.frequency === 'mensal' || form.frequency === 'semanal';
-
-  useEffect(() => {
-    if (!open) return;
-
-    if (income) {
-      if (income.type === 'salario') {
-        onOpenChange(false);
-        toast.error('O salário é gerenciado na aba Perfil');
-        return;
-      }
-
-      const startsMonth = income.startsAt
-        ? String(Number(income.startsAt.slice(5, 7)))
-        : currentMonthValue();
-
-      setForm({
-        name: income.name,
-        amount: formatBrlInputValue(income.amount),
-        typeKey: typeKeyFromIncome(income),
-        frequency: income.frequency,
-        receiveDay: income.receiveDay
-          ? String(income.receiveDay).padStart(2, '0')
-          : '05',
-        receiveMonth: startsMonth,
-        endsAt: income.endsAt ?? '',
-        date: income.date ?? todayDateValue(),
-      });
-      return;
-    }
-
-    setForm({
-      ...emptyForm,
-      receiveMonth: currentMonthValue(),
-      date: todayDateValue(),
-    });
-  }, [income, open, onOpenChange]);
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-
-    const amount = parseCurrencyInput(form.amount);
-    if (!form.name.trim() || amount <= 0) {
-      toast.error('Informe nome e um valor válido');
-      return;
-    }
-
-    const isCustom = form.typeKey.startsWith('tag:');
-    const customTagId = isCustom ? form.typeKey.slice(4) : null;
-    const type: IncomeType = isCustom ? 'outro' : (form.typeKey as IncomeType);
-
-    let receiveDay: number | null = null;
-    let startsAt: string | null = null;
-    if (isRecurring) {
-      const normalized = normalizeClosingDayInput(form.receiveDay);
-      receiveDay = normalized ? Number(normalized) : NaN;
-      const receiveMonth = Number(form.receiveMonth);
-      if (!Number.isInteger(receiveDay) || receiveDay < 1 || receiveDay > 31) {
-        toast.error('Informe o dia em que recebe (01-31)');
-        return;
-      }
-      if (
-        !Number.isInteger(receiveMonth) ||
-        receiveMonth < 1 ||
-        receiveMonth > 12
-      ) {
-        toast.error('Informe o mês em que recebe');
-        return;
-      }
-      startsAt = buildScheduleStartsAt(receiveDay, receiveMonth);
-      if (form.endsAt && form.endsAt < startsAt) {
-        toast.error('Data de término deve ser após o primeiro recebimento');
-        return;
-      }
-    }
-
-    if (form.frequency === 'unica' && !form.date) {
-      toast.error('Informe a data da entrada');
-      return;
-    }
-
-    const payload = {
-      name: form.name.trim().slice(0, 100),
-      amount,
-      type,
-      frequency: form.frequency,
-      receiveDay,
-      startsAt,
-      endsAt: isRecurring ? form.endsAt || null : null,
-      date: form.frequency === 'unica' ? form.date || null : null,
-      customTagId,
-    };
-
-    try {
-      if (income) {
-        await updateEntry.mutateAsync({ id: income.id, payload });
-        toast.success('Entrada atualizada');
-      } else {
-        await createEntry.mutateAsync(payload);
-        toast.success('Entrada cadastrada');
-      }
-      onOpenChange(false);
-    } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível salvar a entrada')
-        : 'Não foi possível salvar a entrada';
-      toast.error(message);
-    }
-  }
-
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className='max-h-[min(90dvh,720px)] overflow-y-auto rounded-xl sm:max-w-md'>
-          <DialogHeader>
-            <DialogTitle>
-              {income ? 'Editar entrada' : 'Nova entrada'}
-            </DialogTitle>
-            <DialogDescription>
-              Cadastre fontes de renda mensais, semanais ou únicas.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form
-            onSubmit={(event) => void handleSubmit(event)}
-            className='flex flex-col gap-4'
-          >
-            <div className='flex flex-col gap-2'>
-              <Label htmlFor='income-name'>Nome</Label>
-              <Input
-                id='income-name'
-                value={form.name}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    name: event.target.value,
-                  }))
-                }
-                placeholder='Ex: Freelance'
-                maxLength={100}
-                className='rounded-lg'
-              />
-            </div>
-
-            <div className='flex flex-col gap-2'>
-              <Label htmlFor='income-amount'>Valor</Label>
-              <CurrencyInput
-                id='income-amount'
-                value={form.amount}
-                onValueChange={(amount) =>
-                  setForm((current) => ({ ...current, amount }))
-                }
-                className='rounded-lg'
-              />
-            </div>
-
-            <div className='grid grid-cols-2 gap-3'>
-              <div className='flex flex-col gap-2'>
-                <Label>Tipo</Label>
-                <Select
-                  key={typeSelectKey}
-                  value={form.typeKey}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    if (value === NEW_TYPE_VALUE) {
-                      setTypeSelectKey((current) => current + 1);
-                      setTagDialogOpen(true);
-                      return;
-                    }
-                    setForm((current) => ({
-                      ...current,
-                      typeKey: value,
-                    }));
-                  }}
-                >
-                  <SelectTrigger className='rounded-lg'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(BUILTIN_INCOME_TYPE_LABELS).map(
-                      ([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ),
-                    )}
-                    {customTags.map((tag) => (
-                      <SelectItem key={tag.id} value={`tag:${tag.id}`}>
-                        <span className='inline-flex items-center gap-2'>
-                          <span
-                            className='size-2.5 rounded-full'
-                            style={{ backgroundColor: tag.color }}
-                          />
-                          {tag.name}
-                        </span>
-                      </SelectItem>
-                    ))}
-                    <SelectItem value={NEW_TYPE_VALUE}>Outro…</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className='flex flex-col gap-2'>
-                <Label>Frequência</Label>
-                <Select
-                  value={form.frequency}
-                  onValueChange={(value) => {
-                    if (!value) return;
-                    setForm((current) => ({
-                      ...current,
-                      frequency: value as IncomeFrequency,
-                      receiveDay:
-                        value === 'unica' ? '' : current.receiveDay || '05',
-                      receiveMonth:
-                        value === 'unica'
-                          ? current.receiveMonth
-                          : current.receiveMonth || currentMonthValue(),
-                      endsAt: value === 'unica' ? '' : current.endsAt,
-                      date:
-                        value === 'unica'
-                          ? current.date || todayDateValue()
-                          : current.date,
-                    }));
-                  }}
-                >
-                  <SelectTrigger className='rounded-lg'>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(INCOME_FREQUENCY_LABELS).map(
-                      ([value, label]) => (
-                        <SelectItem key={value} value={value}>
-                          {label}
-                        </SelectItem>
-                      ),
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {isRecurring ? (
-              <>
-                <div className='flex flex-col gap-2'>
-                  <Label>Quando recebe</Label>
-                  <div className='grid grid-cols-2 gap-3'>
-                    <div className='flex flex-col gap-1.5'>
-                      <span className='text-xs text-muted-foreground'>Dia</span>
-                      <Input
-                        id='income-receive-day'
-                        inputMode='numeric'
-                        maxLength={2}
-                        value={form.receiveDay}
-                        onChange={(event) =>
-                          setForm((current) => ({
-                            ...current,
-                            receiveDay: maskClosingDayInput(event.target.value),
-                          }))
-                        }
-                        onBlur={() =>
-                          setForm((current) => ({
-                            ...current,
-                            receiveDay: normalizeClosingDayInput(
-                              current.receiveDay,
-                            ),
-                          }))
-                        }
-                        placeholder='05'
-                        className='rounded-lg'
-                      />
-                    </div>
-                    <div className='flex flex-col gap-1.5'>
-                      <span className='text-xs text-muted-foreground'>Mês</span>
-                      <Select
-                        value={form.receiveMonth}
-                        onValueChange={(value) => {
-                          if (value) {
-                            setForm((current) => ({
-                              ...current,
-                              receiveMonth: value,
-                            }));
-                          }
-                        }}
-                      >
-                        <SelectTrigger className='rounded-lg'>
-                          <SelectValue placeholder='Mês' />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {MONTH_OPTIONS.map((month) => (
-                            <SelectItem
-                              key={month.value}
-                              value={String(month.value)}
-                            >
-                              {month.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                  {(() => {
-                    const day = Number(
-                      normalizeClosingDayInput(form.receiveDay) ||
-                        form.receiveDay,
-                    );
-                    const month = Number(form.receiveMonth);
-                    if (
-                      !Number.isInteger(day) ||
-                      day < 1 ||
-                      day > 31 ||
-                      !Number.isInteger(month)
-                    ) {
-                      return (
-                        <p className='text-xs text-muted-foreground'>
-                          Escolha o dia e o mês do primeiro recebimento.
-                        </p>
-                      );
-                    }
-                    const preview = formatStartsAtPreview(
-                      buildScheduleStartsAt(day, month),
-                    );
-                    return (
-                      <p className='text-xs text-muted-foreground'>
-                        Primeiro recebimento em{' '}
-                        <span className='text-foreground'>{preview}</span>
-                        {form.frequency === 'semanal'
-                          ? ' · semanal equivale a ~4× no mês.'
-                          : ', depois repete todo mês.'}
-                      </p>
-                    );
-                  })()}
-                </div>
-                <div className='flex flex-col gap-2'>
-                  <Label htmlFor='income-ends-at'>Data de término</Label>
-                  <DatePicker
-                    id='income-ends-at'
-                    value={form.endsAt}
-                    onValueChange={(endsAt) =>
-                      setForm((current) => ({ ...current, endsAt }))
-                    }
-                    placeholder='Sem data de término'
-                    allowClear
-                  />
-                  <p className='text-xs text-muted-foreground'>
-                    Opcional. Vazio = sem fim.
-                  </p>
-                </div>
-              </>
-            ) : null}
-
-            {form.frequency === 'unica' ? (
-              <div className='flex flex-col gap-2'>
-                <Label htmlFor='income-date'>Data prevista</Label>
-                <DatePicker
-                  id='income-date'
-                  value={form.date}
-                  onValueChange={(date) =>
-                    setForm((current) => ({ ...current, date }))
-                  }
-                  placeholder='Selecione a data'
-                  allowClear
-                />
-                <p className='text-xs text-muted-foreground'>
-                  Depois que o valor entrar, confirme &quot;Já recebi&quot; para
-                  incluí-lo no histórico.
-                </p>
-              </div>
-            ) : null}
-
-            <DialogFooter>
-              <Button
-                type='button'
-                variant='outline'
-                className='rounded-lg'
-                onClick={() => onOpenChange(false)}
-                disabled={submitting}
-              >
-                Cancelar
-              </Button>
-              <Button
-                type='submit'
-                className='rounded-lg'
-                disabled={submitting}
-              >
-                {submitting ? <Spinner data-icon='inline-start' /> : null}
-                Salvar
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
-      <CustomTagFormDialog
-        open={tagDialogOpen}
-        onOpenChange={setTagDialogOpen}
-        scope='income'
-        onCreated={(tag) => {
-          setForm((current) => ({
-            ...current,
-            typeKey: `tag:${tag.id}`,
-          }));
-        }}
-      />
-    </>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className='max-h-[min(90dvh,720px)] overflow-y-auto rounded-xl sm:max-w-md'>
+        <IncomeFormBody
+          key={income?.id ?? 'new'}
+          income={income}
+          onClose={() => onOpenChange(false)}
+        />
+      </DialogContent>
+    </Dialog>
   );
 }

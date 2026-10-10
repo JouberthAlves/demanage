@@ -1,3 +1,4 @@
+import { dayKeyOf, todayKey } from '@/lib/dates';
 import type { Card, RecurringExpense } from '@/types/finance';
 
 export function expenseCashAmount(expense: RecurringExpense) {
@@ -31,30 +32,19 @@ export function expenseCardCommittedAmount(
   return 0;
 }
 
-function dayKeyInSaoPaulo(date: Date) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'America/Sao_Paulo',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
 export function buildCommittedByCard(
   expenses: RecurringExpense[],
   cards: Card[],
   now = new Date(),
 ) {
   const map = new Map<string, number>();
-  const through = dayKeyInSaoPaulo(now);
+  const through = todayKey(now);
 
   for (const card of cards) {
     const periodStart = card.lastInvoicedOn
       ? card.lastInvoicedOn.slice(0, 10)
       : card.createdAt
-        ? dayKeyInSaoPaulo(new Date(card.createdAt))
+        ? (dayKeyOf(card.createdAt) ?? through)
         : through;
     const hasClosedPeriod = Boolean(card.lastInvoicedOn);
     const processedAt = card.lastBillingProcessedAt
@@ -70,7 +60,7 @@ export function buildCommittedByCard(
         const occurred =
           expense.registeredAt ??
           (expense.createdAt
-            ? dayKeyInSaoPaulo(new Date(expense.createdAt))
+            ? dayKeyOf(expense.createdAt)
             : null);
         if (
           occurred &&

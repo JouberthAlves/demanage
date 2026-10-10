@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import { dayKeyOf } from '@/lib/dates';
 import type {
   ExpenseCategory,
   ExpenseFrequency,
@@ -68,18 +69,8 @@ export type ExpensePayload = {
   splits?: ExpenseSplitPayload[] | null;
 };
 
-function toLocalDateOnly(iso: string) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso.slice(0, 10);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
 function mapDateOnly(value?: string | null) {
-  if (!value) return undefined;
-  return value.slice(0, 10);
+  return value ? value.slice(0, 10) : undefined;
 }
 
 function mapSplits(splits?: ApiExpenseSplit[]): ExpenseSplit[] | undefined {
@@ -109,7 +100,7 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     occurredAt: expense.occurredAt ?? undefined,
     billingPeriodStart: mapDateOnly(expense.billingPeriodStart),
     billingPeriodEnd: mapDateOnly(expense.billingPeriodEnd),
-    registeredAt: registeredAt ? toLocalDateOnly(registeredAt) : undefined,
+    registeredAt: registeredAt ? (dayKeyOf(registeredAt) ?? undefined) : undefined,
     paidForMonth: expense.paidForMonth ?? undefined,
     paidAt: expense.paidAt ?? undefined,
     createdAt: expense.createdAt,

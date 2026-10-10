@@ -9,7 +9,3 @@ const ABNT2_DISALLOWED =
 export function sanitizeAbnt2(value: string) {
   return value.replace(ABNT2_DISALLOWED, '');
 }
-
-export function isAbnt2Text(value: string) {
-  return value === sanitizeAbnt2(value);
-}

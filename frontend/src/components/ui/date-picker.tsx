@@ -1,7 +1,7 @@
+import { useState } from 'react';
 import { format, isValid } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { CalendarIcon, X } from 'lucide-react';
-import { useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Calendar } from '@/components/ui/calendar';

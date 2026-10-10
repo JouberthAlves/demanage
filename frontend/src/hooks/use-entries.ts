@@ -1,75 +1,57 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
 
 import {
   createEntry,
   deleteEntry,
+  type EntryPayload,
+  type EntryReceiptState,
   listEntries,
   setEntryReceiptState,
   updateEntry,
-  type EntryPayload,
-  type EntryReceiptState,
 } from '@/lib/entries-api';
-import { useFinanceStore } from '@/stores/finance-store';
+import { invalidateDomain, queryKeys } from '@/lib/query-keys';
+import type { Income } from '@/types/finance';
 
-export const ENTRIES_QUERY_KEY = ['entries'] as const;
-const PATRIMONY_QUERY_KEY = ['patrimony'] as const;
-
-function invalidateEntryRelated(
-  queryClient: ReturnType<typeof useQueryClient>,
-) {
-  void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
-}
+const NO_INCOMES: Income[] = [];
 
 export function useEntries(enabled = true) {
-  const setIncomes = useFinanceStore((state) => state.setIncomes);
-
-  const query = useQuery({
-    queryKey: ENTRIES_QUERY_KEY,
+  return useQuery({
+    queryKey: queryKeys.entries,
     queryFn: listEntries,
     enabled,
     staleTime: 60_000,
   });
+}
 
-  useEffect(() => {
-    if (query.data) {
-      setIncomes(query.data);
-    }
-  }, [query.data, setIncomes]);
+/** Loaded incomes, or a stable empty list while loading. */
+export function useIncomeList() {
+  return useEntries().data ?? NO_INCOMES;
+}
 
-  return query;
+function useEntryMutation<TVariables, TResult>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => invalidateDomain(queryClient, 'entries'),
+  });
 }
 
 export function useCreateEntry() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (payload: EntryPayload) => createEntry(payload),
-    onSuccess: () => invalidateEntryRelated(queryClient),
-  });
+  return useEntryMutation((payload: EntryPayload) => createEntry(payload));
 }
 
 export function useUpdateEntry() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      id,
-      payload,
-    }: {
-      id: string;
-      payload: Partial<EntryPayload>;
-    }) => updateEntry(id, payload),
-    onSuccess: () => invalidateEntryRelated(queryClient),
-  });
+  return useEntryMutation(
+    ({ id, payload }: { id: string; payload: Partial<EntryPayload> }) =>
+      updateEntry(id, payload),
+  );
 }
 
 export function useEntryReceiptState() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
+  return useEntryMutation(
+    ({
       id,
       month,
       state,
@@ -78,15 +60,9 @@ export function useEntryReceiptState() {
       month: string;
       state: EntryReceiptState;
     }) => setEntryReceiptState(id, month, state),
-    onSuccess: () => invalidateEntryRelated(queryClient),
-  });
+  );
 }
 
 export function useDeleteEntry() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => deleteEntry(id),
-    onSuccess: () => invalidateEntryRelated(queryClient),
-  });
+  return useEntryMutation((id: string) => deleteEntry(id));
 }

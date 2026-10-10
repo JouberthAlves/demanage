@@ -1,5 +1,4 @@
 import { CalendarClock } from 'lucide-react';
-import { useMemo } from 'react';
 import {
   Area,
   AreaChart,
@@ -12,21 +11,13 @@ import {
 } from 'recharts';
 
 import { formatCurrencyCompact, formatMonthLabel } from '@/lib/format';
-import { buildMonthlyHistory } from '@/lib/monthly-history';
-import { useFinanceStore } from '@/stores/finance-store';
+import type { MonthlySnapshot } from '@/types/finance';
 
-export function IncomeExpenseAreaChart() {
-  const expenses = useFinanceStore((state) => state.expenses);
-  const incomes = useFinanceStore((state) => state.incomes);
-  const calendarDayKey = useFinanceStore((state) => state.calendarDayKey);
-  const history = useMemo(() => {
-    const [year, month, day] = calendarDayKey.split('-').map(Number);
-    return buildMonthlyHistory(
-      expenses,
-      incomes,
-      new Date(year, month - 1, day),
-    );
-  }, [calendarDayKey, expenses, incomes]);
+export function IncomeExpenseAreaChart({
+  history,
+}: {
+  history: MonthlySnapshot[];
+}) {
   const currentMonth = history[history.length - 1];
   const currentIncome = currentMonth?.income ?? 0;
   const currentExpense = currentMonth?.expense ?? 0;

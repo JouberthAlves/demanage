@@ -1,5 +1,5 @@
-import { ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
 import { useMemo } from 'react';
+import { ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
 
 import { CardCommitmentChart } from '@/components/dashboard/card-commitment-chart';
 import { CategoryDonutChart } from '@/components/dashboard/category-donut-chart';
@@ -10,8 +10,8 @@ import { TopExpensesBarChart } from '@/components/dashboard/top-expenses-bar-cha
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
+import { useFinanceSummary } from '@/hooks/use-monthly-history';
 import { usePiggyBanks } from '@/hooks/use-piggy-banks';
-import { buildMonthlyHistory } from '@/lib/monthly-history';
 import {
   formatCurrencyCompact,
   formatPercent,
@@ -19,31 +19,11 @@ import {
   moneyValueClass,
 } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
-import {
-  selectAverageMonthlyExpense,
-  selectMonthlyExpenses,
-  selectMonthlyIncome,
-  selectRecurringShare,
-  useFinanceStore,
-} from '@/stores/finance-store';
 
 export function DashboardPage() {
   const userName = useAuthStore((state) => state.user?.name ?? '');
-  const expenseRecords = useFinanceStore((state) => state.expenses);
-  const incomeRecords = useFinanceStore((state) => state.incomes);
-  const calendarDayKey = useFinanceStore((state) => state.calendarDayKey);
-  const history = useMemo(() => {
-    const [year, month, day] = calendarDayKey.split('-').map(Number);
-    return buildMonthlyHistory(
-      expenseRecords,
-      incomeRecords,
-      new Date(year, month - 1, day),
-    );
-  }, [calendarDayKey, expenseRecords, incomeRecords]);
-  const income = useFinanceStore(selectMonthlyIncome);
-  const expenses = useFinanceStore(selectMonthlyExpenses);
-  const averageExpense = useFinanceStore(selectAverageMonthlyExpense);
-  const recurringShare = useFinanceStore(selectRecurringShare);
+  const { history, income, expenses, averageExpense, recurringShare } =
+    useFinanceSummary();
   const { data: piggyBanks = [] } = usePiggyBanks();
   const balance = income - expenses;
   const hasHistory = history.slice(0, -1).some((month) => month.hasActivity);
@@ -152,7 +132,7 @@ export function DashboardPage() {
           }
           className='lg:col-span-2'
         >
-          <IncomeExpenseAreaChart />
+          <IncomeExpenseAreaChart history={history} />
         </SectionPanel>
 
         <SectionPanel
@@ -179,7 +159,7 @@ export function DashboardPage() {
               : 'A comparação aparece quando houver registros em um mês anterior'
           }
         >
-          <MonthCompareBarChart />
+          <MonthCompareBarChart history={history} />
         </SectionPanel>
 
         <SectionPanel

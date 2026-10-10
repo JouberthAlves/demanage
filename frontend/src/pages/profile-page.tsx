@@ -1,186 +1,31 @@
-import { isAxiosError } from 'axios';
-import { useQueryClient } from '@tanstack/react-query';
-import { CreditCard, KeyRound, Plus, Wallet } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
-
-import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
 import { PageHeader } from '@/components/layout/page-header';
-import { CardFormDialog } from '@/components/profile/card-form-dialog';
-import { CreditCardTile } from '@/components/profile/credit-card-tile';
-import { Button } from '@/components/ui/button';
-import { CurrencyInput } from '@/components/ui/currency-input';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Spinner } from '@/components/ui/spinner';
-import { Textarea } from '@/components/ui/textarea';
-import { useCards, useDeleteCard } from '@/hooks/use-cards';
-import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
-import {
-  formatBrlInputValue,
-  formatCurrency,
-  maskClosingDayInput,
-  normalizeClosingDayInput,
-  parseCurrencyInput,
-} from '@/lib/format';
-import { buildCommittedByCard } from '@/lib/expense-splits';
+import { CardsSection } from '@/components/profile/cards-section';
+import { ProfileInfoForm } from '@/components/profile/profile-info-form';
+import { ProfileSummary } from '@/components/profile/profile-summary';
+import { RecoverySection } from '@/components/profile/recovery-section';
+import { useCardsOverview } from '@/components/profile/use-cards-overview';
 import { useAuthStore } from '@/stores/auth-store';
-import { useFinanceStore } from '@/stores/finance-store';
-import type { Card } from '@/types/finance';
 
 export function ProfilePage() {
-  const queryClient = useQueryClient();
-  const { isLoading: cardsLoading, isError: cardsError } = useCards();
   const user = useAuthStore((state) => state.user);
-  const updateProfile = useAuthStore((state) => state.updateProfile);
-  const generateRecoveryCode = useAuthStore(
-    (state) => state.generateRecoveryCode,
-  );
-  const cards = useFinanceStore((state) => state.profile.cards);
-  const expenses = useFinanceStore((state) => state.expenses);
-  const removeCard = useDeleteCard();
+  const {
+    cards,
+    committedByCard,
+    totalLimit,
+    totalCommitted,
+    isLoading,
+    isError,
+  } = useCardsOverview();
 
-  const [name, setName] = useState(user?.name ?? '');
-  const [salary, setSalary] = useState(
-    user?.salary ? formatBrlInputValue(user.salary) : '',
-  );
-  const [salaryReceiveDay, setSalaryReceiveDay] = useState(
-    user?.salaryReceiveDay
-      ? String(user.salaryReceiveDay).padStart(2, '0')
-      : '05',
-  );
-  const [notes, setNotes] = useState(user?.notes ?? '');
-  const [saving, setSaving] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
-  const [generatingRecoveryCode, setGeneratingRecoveryCode] = useState(false);
-  const [recoveryDialogOpen, setRecoveryDialogOpen] = useState(false);
-  const [recoveryPassword, setRecoveryPassword] = useState('');
-  const [editingCard, setEditingCard] = useState<Card | null>(null);
-
-  useEffect(() => {
-    setName(user?.name ?? '');
-    setSalary(user?.salary ? formatBrlInputValue(user.salary) : '');
-    setSalaryReceiveDay(
-      user?.salaryReceiveDay
-        ? String(user.salaryReceiveDay).padStart(2, '0')
-        : '05',
-    );
-    setNotes(user?.notes ?? '');
-  }, [user?.name, user?.salary, user?.salaryReceiveDay, user?.notes]);
-
-  const committedByCard = useMemo(
-    () => buildCommittedByCard(expenses, cards),
-    [expenses, cards],
-  );
-
-  const totalLimit = useMemo(
-    () => cards.reduce((sum, card) => sum + (card.limit ?? 0), 0),
-    [cards],
-  );
-
-  const totalCommitted = useMemo(
-    () =>
-      cards.reduce(
-        (sum, card) => sum + (committedByCard.get(card.id) ?? 0),
-        0,
-      ),
-    [cards, committedByCard],
-  );
-
-  async function handleSaveProfile(event: React.FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-
-    const nextSalary = parseCurrencyInput(salary);
-    const normalizedReceiveDay = normalizeClosingDayInput(salaryReceiveDay);
-    const nextReceiveDay = normalizedReceiveDay
-      ? Number(normalizedReceiveDay)
-      : NaN;
-
-    if (
-      nextSalary > 0 &&
-      (!Number.isInteger(nextReceiveDay) ||
-        nextReceiveDay < 1 ||
-        nextReceiveDay > 31)
-    ) {
-      toast.error('Informe o dia em que recebe o salário (01-31)');
-      setSaving(false);
-      return;
-    }
-
-    try {
-      await updateProfile({
-        name: name.trim().slice(0, 100) || 'Usuário',
-        salary: nextSalary,
-        salaryReceiveDay: nextSalary > 0 ? nextReceiveDay : null,
-        notes: notes.trim().slice(0, 500) || null,
-      });
-      await queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-      toast.success('Perfil atualizado');
-    } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível salvar o perfil')
-        : 'Não foi possível salvar o perfil';
-      toast.error(message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  function openCreateCard() {
-    setEditingCard(null);
-    setDialogOpen(true);
-  }
-
-  function openEditCard(card: Card) {
-    setEditingCard(card);
-    setDialogOpen(true);
-  }
-
-  async function handleDeleteCard(id: string, cardName: string) {
-    try {
-      await removeCard.mutateAsync(id);
-      toast.success(`Cartão "${cardName}" removido`);
-    } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível remover o cartão')
-        : 'Não foi possível remover o cartão';
-      toast.error(message);
-    }
-  }
-
-  async function handleGenerateRecoveryCode(event: React.FormEvent) {
-    event.preventDefault();
-    setGeneratingRecoveryCode(true);
-
-    try {
-      const code = await generateRecoveryCode(recoveryPassword);
-      setRecoveryCode(code);
-      setRecoveryDialogOpen(false);
-      setRecoveryPassword('');
-      toast.success(
-        user?.hasRecoveryCode
-          ? 'Novo código gerado. O anterior foi invalidado.'
-          : 'Código de recuperação gerado.',
-      );
-    } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível gerar o código')
-        : 'Não foi possível gerar o código';
-      toast.error(message);
-    } finally {
-      setGeneratingRecoveryCode(false);
-    }
-  }
+  // Remount the info form whenever the saved profile changes, so its fields
+  // restart from the stored values.
+  const profileKey = [
+    user?.id,
+    user?.name,
+    user?.salary,
+    user?.salaryReceiveDay,
+    user?.notes,
+  ].join('|');
 
   return (
     <div className='space-y-8'>
@@ -190,273 +35,24 @@ export function ProfilePage() {
         description='Salário, cartões e informações úteis para o mês.'
       />
 
-      <section className='relative overflow-hidden rounded-2xl border border-border bg-card/40'>
-        <div className='pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(255,184,0,0.12),transparent_45%),radial-gradient(ellipse_at_bottom_right,rgba(52,211,153,0.1),transparent_40%)]' />
-        <div className='relative grid gap-5 p-4 sm:grid-cols-[1.2fr_1fr] sm:items-end sm:gap-6 sm:p-6'>
-          <div className='space-y-2'>
-            <p className='text-sm text-muted-foreground'>Bem-vindo de volta</p>
-            <h2 className='text-2xl font-semibold tracking-tight sm:text-3xl'>
-              {user?.name || 'Usuário'}
-            </h2>
-            <p className='max-w-md text-sm text-muted-foreground'>
-              {user?.notes?.trim()
-                ? user.notes
-                : 'Configure salário e cartões para acompanhar o mês com mais clareza.'}
-            </p>
-          </div>
-
-          <div className='grid gap-3 sm:grid-cols-2'>
-            <div className='rounded-xl border border-border bg-black/25 p-4'>
-              <div className='flex items-center gap-2 text-muted-foreground'>
-                <Wallet className='size-4 text-neon-green' />
-                <span className='text-xs'>Salário mensal</span>
-              </div>
-              <p className='mt-2 text-xl font-semibold tracking-tight text-neon-green'>
-                {formatCurrency(user?.salary ?? 0)}
-              </p>
-            </div>
-            <div className='rounded-xl border border-border bg-black/25 p-4'>
-              <div className='flex items-center gap-2 text-muted-foreground'>
-                <CreditCard className='size-4 text-neon-amber' />
-                <span className='text-xs'>Limite dos cartões</span>
-              </div>
-              <p className='mt-2 text-xl font-semibold tracking-tight text-neon-amber'>
-                {totalLimit > 0 ? formatCurrency(totalLimit) : '—'}
-              </p>
-              <p className='mt-1 text-xs text-muted-foreground'>
-                {cards.length} cartão
-                {cards.length === 1 ? '' : 'ões'}
-                {totalLimit > 0
-                  ? ` · ${formatCurrency(totalCommitted)} em uso`
-                  : ''}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
+      <ProfileSummary
+        user={user}
+        cardCount={cards.length}
+        totalLimit={totalLimit}
+        totalCommitted={totalCommitted}
+      />
 
       <div className='grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]'>
-        <form
-          onSubmit={(event) => void handleSaveProfile(event)}
-          className='space-y-5 rounded-2xl border border-border bg-card/30 p-4 sm:p-6'
-        >
-          <div>
-            <h2 className='text-lg font-medium'>Informações gerais</h2>
-            <p className='text-sm text-muted-foreground'>
-              Esses dados alimentam o dashboard e os cálculos do mês.
-            </p>
-          </div>
-
-          <div className='grid gap-4 sm:grid-cols-2'>
-            <div className='space-y-2'>
-              <Label htmlFor='profile-name'>Nome</Label>
-              <Input
-                id='profile-name'
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                maxLength={100}
-                className='rounded-lg'
-              />
-            </div>
-            <div className='space-y-2'>
-              <Label htmlFor='profile-salary'>Salário mensal</Label>
-              <CurrencyInput
-                id='profile-salary'
-                value={salary}
-                onValueChange={setSalary}
-                className='rounded-lg'
-              />
-            </div>
-            <div className='space-y-2 sm:col-span-2 sm:max-w-xs'>
-              <Label htmlFor='profile-salary-day'>Quando recebe</Label>
-              <Input
-                id='profile-salary-day'
-                inputMode='numeric'
-                maxLength={2}
-                value={salaryReceiveDay}
-                onChange={(event) =>
-                  setSalaryReceiveDay(maskClosingDayInput(event.target.value))
-                }
-                onBlur={() =>
-                  setSalaryReceiveDay(
-                    normalizeClosingDayInput(salaryReceiveDay),
-                  )
-                }
-                placeholder='05'
-                className='rounded-lg'
-              />
-              <p className='text-xs text-muted-foreground'>
-                Dia do mês em que o salário entra no saldo.
-              </p>
-            </div>
-          </div>
-
-          <div className='space-y-2'>
-            <Label htmlFor='profile-notes'>Observações</Label>
-            <Textarea
-              id='profile-notes'
-              value={notes}
-              onChange={(event) => setNotes(event.target.value)}
-              placeholder='Metas, lembretes, anotações...'
-              maxLength={500}
-              className='max-h-40 min-h-28 field-sizing-fixed overflow-y-auto rounded-lg'
-            />
-            <p className='text-xs text-muted-foreground'>{notes.length}/500</p>
-          </div>
-
-          <Button type='submit' className='rounded-lg' disabled={saving}>
-            {saving ? <Spinner data-icon='inline-start' /> : null}
-            Salvar perfil
-          </Button>
-        </form>
-
-        <section className='space-y-4 rounded-2xl border border-border bg-card/20 p-6'>
-          <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-            <div>
-              <h2 className='text-lg font-medium'>Cartões</h2>
-              <p className='text-sm text-muted-foreground'>
-                Vincule despesas recorrentes e acompanhe o limite.
-              </p>
-            </div>
-            <Button onClick={openCreateCard} className='rounded-lg'>
-              <Plus className='size-4' />
-              Adicionar
-            </Button>
-          </div>
-
-          {cardsLoading ? (
-            <div className='flex h-40 items-center justify-center'>
-              <Spinner className='size-5' />
-            </div>
-          ) : cardsError ? (
-            <div className='flex h-40 items-center justify-center rounded-xl border border-dashed border-rose-500/30 bg-rose-500/5 px-4 text-center text-sm text-rose-300'>
-              Não foi possível carregar os cartões.
-            </div>
-          ) : cards.length === 0 ? (
-            <div className='flex h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-black/20 px-6 text-center'>
-              <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-amber/10'>
-                <CreditCard className='size-6 text-neon-amber' />
-              </div>
-              <div className='space-y-1'>
-                <p className='font-medium'>Nenhum cartão ainda</p>
-                <p className='text-sm text-muted-foreground'>
-                  Cadastre o primeiro para organizar parcelas e assinaturas.
-                </p>
-              </div>
-              <Button
-                variant='secondary'
-                onClick={openCreateCard}
-                className='rounded-lg'
-              >
-                <Plus className='size-4' />
-                Adicionar cartão
-              </Button>
-            </div>
-          ) : (
-            <div className='grid gap-4'>
-              {cards.map((card) => (
-                <CreditCardTile
-                  key={card.id}
-                  card={card}
-                  committed={committedByCard.get(card.id) ?? 0}
-                  deleting={removeCard.isPending}
-                  onEdit={() => openEditCard(card)}
-                  onDelete={() => void handleDeleteCard(card.id, card.name)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
+        <ProfileInfoForm key={profileKey} user={user} />
+        <CardsSection
+          cards={cards}
+          committedByCard={committedByCard}
+          isLoading={isLoading}
+          isError={isError}
+        />
       </div>
 
-      <section className='space-y-4 rounded-2xl border border-border bg-card/20 p-4 sm:p-6'>
-        <div className='flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'>
-          <div className='flex gap-3'>
-            <div className='flex size-10 shrink-0 items-center justify-center rounded-xl bg-neon-green/10'>
-              <KeyRound className='size-5 text-neon-green' />
-            </div>
-            <div>
-              <h2 className='text-lg font-medium'>Recuperação de senha</h2>
-              <p className='text-sm text-muted-foreground'>
-                {user?.hasRecoveryCode
-                  ? 'Você já possui um código offline. Gere outro apenas se perdeu o atual.'
-                  : 'Gere um código offline para recuperar sua conta sem e-mail ou SMS.'}
-              </p>
-            </div>
-          </div>
-
-          <Button
-            type='button'
-            variant='secondary'
-            className='rounded-lg'
-            disabled={generatingRecoveryCode}
-            onClick={() => {
-              setRecoveryPassword('');
-              setRecoveryDialogOpen(true);
-            }}
-          >
-            {generatingRecoveryCode ? (
-              <Spinner data-icon='inline-start' />
-            ) : null}
-            {user?.hasRecoveryCode ? 'Gerar novo código' : 'Gerar código'}
-          </Button>
-        </div>
-
-        {recoveryCode ? (
-          <RecoveryCodePanel recoveryCode={recoveryCode} compact />
-        ) : null}
-      </section>
-
-      <CardFormDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        card={editingCard}
-      />
-      <Dialog
-        open={recoveryDialogOpen}
-        onOpenChange={(open) => {
-          setRecoveryDialogOpen(open);
-          if (!open) setRecoveryPassword('');
-        }}
-      >
-        <DialogContent className='rounded-xl sm:max-w-sm'>
-          <DialogHeader>
-            <DialogTitle>Confirme sua senha</DialogTitle>
-            <DialogDescription>
-              Digite sua senha atual para gerar um novo código de recuperação.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleGenerateRecoveryCode} className='space-y-4'>
-            <div className='space-y-2'>
-              <Label htmlFor='recovery-current-password'>Senha atual</Label>
-              <Input
-                id='recovery-current-password'
-                type='password'
-                autoComplete='current-password'
-                value={recoveryPassword}
-                onChange={(event) => setRecoveryPassword(event.target.value)}
-                required
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => setRecoveryDialogOpen(false)}
-                disabled={generatingRecoveryCode}
-              >
-                Cancelar
-              </Button>
-              <Button type='submit' disabled={generatingRecoveryCode}>
-                {generatingRecoveryCode ? (
-                  <Spinner data-icon='inline-start' />
-                ) : null}
-                Gerar código
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <RecoverySection hasRecoveryCode={Boolean(user?.hasRecoveryCode)} />
     </div>
   );
 }

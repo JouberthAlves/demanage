@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   Cell,
   PolarAngleAxis,
@@ -7,37 +8,31 @@ import {
   Tooltip,
 } from 'recharts';
 
+import { useCardList } from '@/hooks/use-cards';
+import { useExpenseList } from '@/hooks/use-expenses';
+import { useFinancialNow } from '@/hooks/use-financial-now';
+import { selectCardCommitments } from '@/lib/card-commitment';
 import { getCardTone } from '@/lib/card-tone';
-import { expenseCardCommittedAmount } from '@/lib/expense-splits';
 import { formatCurrencyCompact, formatPercent } from '@/lib/format';
-import { useFinanceStore } from '@/stores/finance-store';
 
 export function CardCommitmentChart() {
-  const cards = useFinanceStore((state) => state.profile.cards);
-  const expenses = useFinanceStore((state) => state.expenses);
+  const cards = useCardList();
+  const expenses = useExpenseList();
+  const now = useFinancialNow();
 
-  const data = cards
-    .filter((card) => card.limit != null && card.limit > 0)
-    .map((card) => {
-      const committed = expenses.reduce(
-        (sum, expense) =>
-          sum + expenseCardCommittedAmount(expense, card.id),
-        0,
-      );
-      const percent = (committed / (card.limit as number)) * 100;
-      const tone = getCardTone(card);
-
-      return {
-        id: card.id,
-        name: card.name,
-        expired: Boolean(card.expired),
-        percent: Number(percent.toFixed(1)),
-        display: Math.min(Math.max(percent, 0), 100),
-        committed,
-        limit: card.limit as number,
-        fill: tone.fill,
-      };
-    });
+  const data = useMemo(
+    () =>
+      selectCardCommitments(expenses, cards, now).map((item) => {
+        const card = cards.find((candidate) => candidate.id === item.id);
+        return {
+          ...item,
+          percent: Number(item.percent.toFixed(1)),
+          display: Math.min(Math.max(item.percent, 0), 100),
+          fill: card ? getCardTone(card).fill : '#FFB800',
+        };
+      }),
+    [cards, expenses, now],
+  );
 
   if (data.length === 0) {
     return (

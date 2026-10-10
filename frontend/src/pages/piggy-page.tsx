@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
-import { AlertCircle, Archive, PiggyBank as PiggyIcon, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { AlertCircle, Archive, PiggyBank as PiggyIcon, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/layout/page-header';
@@ -8,6 +7,7 @@ import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { PiggyFormDialog } from '@/components/piggy/piggy-form-dialog';
 import { PiggyMoneyDialog } from '@/components/piggy/piggy-money-dialog';
+import { ConfirmDeleteDialog } from '@/components/shared/confirm-delete-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -17,18 +17,15 @@ import {
   usePiggyBanks,
   usePiggyTransactions,
 } from '@/hooks/use-piggy-banks';
+import { getApiErrorMessage, getApiErrorStatus } from '@/lib/api-error';
 import { formatCurrency, formatPercent } from '@/lib/format';
 import { piggyHasGoal } from '@/lib/piggy-math';
 import type { PiggyBank, PiggyTransaction } from '@/types/finance';
 
-function errorMessage(error: unknown, fallback: string) {
-  return isAxiosError(error)
-    ? (error.response?.data?.error ?? fallback)
-    : fallback;
-}
+const NO_BANKS: PiggyBank[] = [];
 
 function loadErrorMessage(error: unknown) {
-  const status = isAxiosError(error) ? error.response?.status : undefined;
+  const status = getApiErrorStatus(error);
   if (status === 429) {
     return 'Muitas consultas em pouco tempo. Aguarde alguns minutos antes de tentar novamente.';
   }
@@ -61,7 +58,7 @@ export function PiggyPage() {
     error,
     refetch: refetchBanks,
   } = usePiggyBanks();
-  const banks = bankData ?? [];
+  const banks = bankData ?? NO_BANKS;
   const hasBanksData = bankData !== undefined;
   const loadFailed = isError && !hasBanksData;
   const archiveBank = useArchivePiggyBank();
@@ -71,6 +68,7 @@ export function PiggyPage() {
   const [moneyOpen, setMoneyOpen] = useState(false);
   const [moneyMode, setMoneyMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [activeBank, setActiveBank] = useState<PiggyBank | null>(null);
+  const [deleting, setDeleting] = useState<PiggyBank | null>(null);
   const [historyBankId, setHistoryBankId] = useState<string | null>(null);
   const {
     data: history = [],
@@ -106,22 +104,20 @@ export function PiggyPage() {
       toast.success(`"${bank.name}" arquivado`);
       if (historyBankId === bank.id) setHistoryBankId(null);
     } catch (error) {
-      toast.error(errorMessage(error, 'Não foi possível arquivar'));
+      toast.error(getApiErrorMessage(error, 'Não foi possível arquivar'));
     }
   }
 
-  async function handleDelete(bank: PiggyBank) {
-    const warning =
-      bank.balance > 0
-        ? `O cofre possui ${formatCurrency(bank.balance)}. Excluir mesmo assim?`
-        : `Excluir o cofre "${bank.name}"?`;
-    if (!window.confirm(warning)) return;
+  async function handleDelete() {
+    if (!deleting) return;
+    const bank = deleting;
     try {
       await deleteBank.mutateAsync(bank.id);
       toast.success('Cofre removido');
       if (historyBankId === bank.id) setHistoryBankId(null);
+      setDeleting(null);
     } catch (error) {
-      toast.error(errorMessage(error, 'Não foi possível excluir'));
+      toast.error(getApiErrorMessage(error, 'Não foi possível excluir'));
     }
   }
 
@@ -230,8 +226,14 @@ export function PiggyPage() {
                         ) : null}
                       </div>
                     </div>
-                    <Button variant='ghost' size='icon-sm' onClick={() => void handleDelete(bank)}>
-                      <Trash2 />
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      aria-label={`Excluir cofre ${bank.name}`}
+                      title='Excluir cofre'
+                      onClick={() => setDeleting(bank)}
+                    >
+                      <Trash2 aria-hidden='true' />
                     </Button>
                   </div>
 
@@ -339,6 +341,22 @@ export function PiggyPage() {
 
       <PiggyFormDialog open={formOpen} onOpenChange={setFormOpen} bank={editing} />
       <PiggyMoneyDialog open={moneyOpen} onOpenChange={setMoneyOpen} bank={activeBank} mode={moneyMode} />
+      <ConfirmDeleteDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+        title='Excluir cofre?'
+        description={
+          deleting
+            ? deleting.balance > 0
+              ? `O cofre "${deleting.name}" possui ${formatCurrency(deleting.balance)}. Excluir mesmo assim?`
+              : `Excluir o cofre "${deleting.name}"? Esta ação não pode ser desfeita.`
+            : ''
+        }
+        pending={deleteBank.isPending}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

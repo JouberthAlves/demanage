@@ -1,3 +1,10 @@
+import {
+  addMonths,
+  currentMonthKey,
+  dayKeyOf,
+  parseDayKey,
+  todayKey,
+} from '@/lib/dates';
 import { expenseCashAmount } from '@/lib/expense-splits';
 import type {
   Income,
@@ -5,53 +12,16 @@ import type {
   RecurringExpense,
 } from '@/types/finance';
 
-const FINANCIAL_TIMEZONE = 'America/Sao_Paulo';
-
-function datePartsInSaoPaulo(date: Date) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: FINANCIAL_TIMEZONE,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  return Object.fromEntries(parts.map((part) => [part.type, part.value]));
-}
-
-function monthKeyInSaoPaulo(date: Date) {
-  const parts = datePartsInSaoPaulo(date);
-  return `${parts.year}-${parts.month}`;
-}
-
-function dayKeyInSaoPaulo(date: Date) {
-  const parts = datePartsInSaoPaulo(date);
-  return `${parts.year}-${parts.month}-${parts.day}`;
-}
-
+/** Month of a past timestamp; timestamps after today are ignored. */
 function monthFromTimestamp(value: string, now: Date) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime()) || date > now) return null;
-  return monthKeyInSaoPaulo(date);
+  const day = dayKeyOf(value);
+  if (!day || day > todayKey(now)) return null;
+  return day.slice(0, 7);
 }
 
+/** Month of a past date-only value; future or invalid dates are ignored. */
 function monthFromDateOnly(value: string | undefined, now: Date) {
-  if (!value) return null;
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  if (!match) return null;
-
-  const year = Number(match[1]);
-  const month = Number(match[2]);
-  const day = Number(match[3]);
-  const date = new Date(Date.UTC(year, month - 1, day, 12));
-  const currentDay = dayKeyInSaoPaulo(now);
-  if (
-    Number.isNaN(date.getTime()) ||
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day ||
-    value > currentDay
-  ) {
-    return null;
-  }
+  if (!value || !parseDayKey(value) || value > todayKey(now)) return null;
   return value.slice(0, 7);
 }
 
@@ -113,13 +83,9 @@ export function buildMonthlyHistory(
   if (monthCount <= 0) return [];
 
   const history: MonthlySnapshot[] = [];
-  const currentMonth = monthKeyInSaoPaulo(now);
-  const [year, month] = currentMonth.split('-').map(Number);
+  const currentMonth = currentMonthKey(now);
   for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
-    const date = new Date(Date.UTC(year, month - 1 - offset, 1));
-    const keyYear = date.getUTCFullYear();
-    const keyMonth = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const monthKey = `${keyYear}-${keyMonth}`;
+    const monthKey = addMonths(currentMonth, -offset);
     const income = sumReceivedIncome(incomes, monthKey, now);
     const expense = sumPaidExpenses(expenses, monthKey, now);
 

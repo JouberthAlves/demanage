@@ -1,13 +1,14 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Cell, Pie, PieChart, ResponsiveContainer } from 'recharts';
 
 import {
   EXPENSE_CATEGORY_COLORS,
   EXPENSE_CATEGORY_LABELS,
 } from '@/data/labels';
+import { useExpenseList } from '@/hooks/use-expenses';
+import { useFinancialNow } from '@/hooks/use-financial-now';
 import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { formatCurrencyCompact } from '@/lib/format';
-import { useFinanceStore } from '@/stores/finance-store';
 
 type DonutItem = {
   key: string;
@@ -17,40 +18,46 @@ type DonutItem = {
 };
 
 export function CategoryDonutChart() {
-  const expenses = useFinanceStore((state) => state.expenses);
+  const expenses = useExpenseList();
+  const now = useFinancialNow();
   const [active, setActive] = useState<DonutItem | null>(null);
 
-  const grouped = expenses.reduce<
-    Record<string, { name: string; color: string; value: number }>
-  >((acc, expense) => {
-    const value = expenseContributionThisMonth(expense);
-    if (value <= 0) return acc;
+  const { data, total } = useMemo(() => {
+    const grouped = expenses.reduce<
+      Record<string, { name: string; color: string; value: number }>
+    >((acc, expense) => {
+      const value = expenseContributionThisMonth(expense, now);
+      if (value <= 0) return acc;
 
-    const key = expense.customTag
-      ? `tag:${expense.customTag.id}`
-      : expense.category;
-    const name = expense.customTag
-      ? expense.customTag.name
-      : EXPENSE_CATEGORY_LABELS[expense.category];
-    const color = expense.customTag
-      ? expense.customTag.color
-      : EXPENSE_CATEGORY_COLORS[expense.category];
+      const key = expense.customTag
+        ? `tag:${expense.customTag.id}`
+        : expense.category;
+      const name = expense.customTag
+        ? expense.customTag.name
+        : EXPENSE_CATEGORY_LABELS[expense.category];
+      const color = expense.customTag
+        ? expense.customTag.color
+        : EXPENSE_CATEGORY_COLORS[expense.category];
 
-    const current = acc[key];
-    acc[key] = {
-      name,
-      color,
-      value: (current?.value ?? 0) + value,
+      const current = acc[key];
+      acc[key] = {
+        name,
+        color,
+        value: (current?.value ?? 0) + value,
+      };
+      return acc;
+    }, {});
+
+    const items: DonutItem[] = Object.entries(grouped).map(([key, item]) => ({
+      key,
+      ...item,
+    }));
+
+    return {
+      data: items,
+      total: items.reduce((sum, item) => sum + item.value, 0),
     };
-    return acc;
-  }, {});
-
-  const data: DonutItem[] = Object.entries(grouped).map(([key, item]) => ({
-    key,
-    ...item,
-  }));
-
-  const total = data.reduce((sum, item) => sum + item.value, 0);
+  }, [expenses, now]);
   const totalLabel = formatCurrencyCompact(total);
 
   return (
