@@ -37,7 +37,7 @@ export default [
         '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
         '@typescript-eslint/no-empty-object-type': 'off',
         'simple-import-sort/imports': [
-          'warn',
+          'error',
           {
             groups: [
               ['^node:', '^@?\\w'],
@@ -46,7 +46,7 @@ export default [
             ],
           },
         ],
-        'simple-import-sort/exports': 'warn',
+        'simple-import-sort/exports': 'error',
       },
     },
   ),

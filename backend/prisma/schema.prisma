@@ -5,6 +5,14 @@ generator client {
   importFileExtension = "js"
 }
 
+// Database-level rules that Prisma cannot express are added by raw SQL in
+// prisma/migrations (keep this file and those migrations in sync):
+//   - ExpenseSplit: partial unique index for rows without a card (pix),
+//     because @@unique([expenseId, kind, cardId]) ignores NULL cardId.
+//   - Card.closingDay / Card.pendingClosingDay, Entry.receiveDay,
+//     PiggyBank.autoDebitDay: CHECK constraints restricting values to 1..31.
+// `prisma migrate diff` (CI drift gate) compares migrations against this
+// file; those objects are created by migrations and must not be removed here.
 datasource db {
   provider = "postgresql"
 }
@@ -92,6 +100,7 @@ model User {
   entries               Entry[]
   customTags            CustomTag[]
   piggyBanks            PiggyBank[]
+  piggyTransactions     PiggyTransaction[]
   assetTransactions     AssetTransaction[]
   patrimonySettings     PatrimonySettings?
 }
@@ -130,8 +139,8 @@ model CustomTag {
   expenses  Expense[]
   entries   Entry[]
 
+  // The unique below also serves (userId, scope) lookups.
   @@unique([userId, scope, name])
-  @@index([userId, scope])
 }
 
 model Expense {
@@ -163,8 +172,9 @@ model Expense {
   splits             ExpenseSplit[]
   assetTransaction   AssetTransaction?
   payments           ExpensePayment[]
+  piggyTransactions  PiggyTransaction[]
 
-  @@index([userId])
+  // Leading-userId composites below also serve userId-only lookups.
   @@index([cardId])
   @@index([customTagId])
   @@index([userId, occurredAt])
@@ -183,8 +193,9 @@ model ExpenseSplit {
   expense   Expense          @relation(fields: [expenseId], references: [id], onDelete: Cascade)
   card      Card?            @relation(fields: [cardId], references: [id], onDelete: Restrict)
 
+  // @@unique ignores NULL cardId (pix rows), so the migration adds a partial
+  // unique index: UNIQUE (expenseId, kind) WHERE cardId IS NULL.
   @@unique([expenseId, kind, cardId])
-  @@index([expenseId])
   @@index([cardId])
 }
 
@@ -223,8 +234,9 @@ model Entry {
   customTag           CustomTag?        @relation(fields: [customTagId], references: [id], onDelete: SetNull)
   assetTransaction    AssetTransaction?
   receipts            EntryReceipt[]
+  piggyTransactions   PiggyTransaction[]
 
-  @@index([userId])
+  // Leading-userId composite below also serves userId-only lookups.
   @@index([customTagId])
   @@index([userId, archivedAt])
 }
@@ -261,7 +273,7 @@ model PiggyBank {
   user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
   transactions           PiggyTransaction[]
 
-  @@index([userId])
+  // Leading-userId composite below also serves userId-only lookups.
   @@index([userId, archivedAt])
 }
 
@@ -283,9 +295,14 @@ model PiggyTransaction {
   interestKey      String?                @unique
   createdAt        DateTime               @default(now())
   piggyBank        PiggyBank              @relation(fields: [piggyBankId], references: [id], onDelete: Cascade)
+  user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expense          Expense?               @relation(fields: [expenseId], references: [id], onDelete: SetNull)
+  entry            Entry?                 @relation(fields: [entryId], references: [id], onDelete: SetNull)
 
-  @@index([piggyBankId])
+  // Leading-piggyBankId composite below also serves piggyBankId-only lookups.
   @@index([userId])
+  @@index([expenseId])
+  @@index([entryId])
   @@index([piggyBankId, type, source, date])
 }
 
@@ -331,5 +348,4 @@ model MarketDataCache {
   fetchedAt DateTime @default(now())
 
   @@unique([provider, key, at])
-  @@index([provider, key, at])
 }

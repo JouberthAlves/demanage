@@ -2,14 +2,21 @@
   "name": "demanage-backend",
   "version": "1.0.0",
   "description": "deManage API",
-  "main": "server.js",
+  "private": true,
+  "main": "dist/server.js",
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node dist/server.js",
     "dev": "tsx watch -r tsconfig-paths/register src/server.ts",
-    "build": "tsc",
-    "lint": "eslint . --ext .ts",
-    "lint:fix": "eslint . --ext .ts --fix",
-    "test": "tsx --test src/**/*.test.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --fix",
+    "test:unit": "tsx --test \"src/**/*.test.ts\"",
+    "test:integration": "tsx --test --test-concurrency=1 \"src/**/*.itest.ts\"",
+    "test": "pnpm run test:unit && pnpm run test:integration",
     "format": "prettier --write \"src/**/*.{ts,js}\""
   },
   "keywords": [],
@@ -30,7 +37,7 @@
     "jsonwebtoken": "^9.0.3",
     "module-alias": "^2.3.4",
     "pg": "^8.23.1",
-    "typescript": "^6.0.3"
+    "prisma": "7.10.0"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
@@ -48,9 +55,9 @@
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.9",
-    "prisma": "7.10.0",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.23.15",
+    "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.1"
   },
   "pnpm": {

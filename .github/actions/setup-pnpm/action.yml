@@ -1,0 +1,23 @@
+name: Setup Node and pnpm
+description: Install the pinned pnpm and Node.js versions, then install the locked dependencies of one package.
+
+inputs:
+  package-dir:
+    description: Package directory that contains package.json and pnpm-lock.yaml (backend or frontend).
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v6
+      with:
+        version: 10.17.1
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 26.8.2
+        cache: pnpm
+        cache-dependency-path: ${{ inputs.package-dir }}/pnpm-lock.yaml
+    - name: Install locked dependencies
+      shell: bash
+      working-directory: ${{ inputs.package-dir }}
+      run: pnpm install --frozen-lockfile
