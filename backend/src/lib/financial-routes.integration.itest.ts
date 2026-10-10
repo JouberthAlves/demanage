@@ -6,7 +6,9 @@ import test from 'node:test';
 
 import { createApp } from '@/app';
 import { AUTH_COOKIE_NAME, signAuthToken } from '@/lib/auth';
+import { nextClosingOnOrAfter } from '@/lib/billing/calendar';
 import { todayInSaoPaulo } from '@/lib/card-billing';
+import { addDaysToKey, dayKeyOfDate, weekdayOfKey } from '@/lib/civil-date';
 import {
   ExpenseSplitError,
   getCommittedByCard,
@@ -290,9 +292,6 @@ test('write lock prevents concurrent card purchases from exceeding the limit', a
     },
   });
   const today = todayInSaoPaulo();
-  const startsAt = new Date(
-    Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1, 12),
-  );
 
   try {
     const results = await Promise.allSettled(
@@ -305,15 +304,16 @@ test('write lock prevents concurrent card purchases from exceeding the limit', a
             cardId: undefined,
             tx,
           });
+          // A purchase dated today always lands in the card's open cycle,
+          // whatever day of the month the test runs on.
           const created = await tx.expense.create({
             data: {
               userId: user.id,
-              name: 'Monthly purchase',
+              name: 'Card purchase',
               amount: 60,
               category: 'outro',
-              frequency: 'mensal',
-              dueDay: 1,
-              startsAt,
+              frequency: 'unica',
+              occurredAt: today,
               cardId: card.id,
             },
           });
@@ -347,7 +347,7 @@ test('write lock prevents concurrent card purchases from exceeding the limit', a
   }
 });
 
-test('card commitment releases closed one-offs and ended schedules while reserving weekly x4', async () => {
+test('card commitment releases closed one-offs and ended schedules and reserves each weekly occurrence left in the cycle', async () => {
   const user = await createUser('Card commitment test');
   const today = todayInSaoPaulo();
   const yesterday = new Date(today);
@@ -413,8 +413,23 @@ test('card commitment releases closed one-offs and ended schedules while reservi
       ],
     });
 
+    // Expected weekly reservation, counted independently: every day after the
+    // last closing (exclusive) up to the next one that falls on the weekday
+    // of startsAt.
+    const todayKey = dayKeyOfDate(today);
+    const closingKey = nextClosingOnOrAfter(31, todayKey, todayKey);
+    const startsWeekday = weekdayOfKey(dayKeyOfDate(startsAt));
+    let weeklyCount = 0;
+    for (
+      let key = addDaysToKey(todayKey, 1);
+      key <= closingKey;
+      key = addDaysToKey(key, 1)
+    ) {
+      if (weekdayOfKey(key) === startsWeekday) weeklyCount += 1;
+    }
+
     const committed = await getCommittedByCard({ userId: user.id });
-    assert.equal(committed.get(card.id), 100);
+    assert.equal(committed.get(card.id), 25 * weeklyCount);
   } finally {
     await cleanupUser(user.id);
   }
