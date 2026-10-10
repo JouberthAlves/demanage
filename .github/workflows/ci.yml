@@ -53,12 +53,12 @@ jobs:
           package-dir: backend
       - name: Audit dependencies
         run: pnpm audit --audit-level moderate
-      - name: Typecheck
-        run: pnpm typecheck
       - name: Validate Prisma schema
         run: pnpm exec prisma validate
       - name: Generate Prisma client
         run: pnpm exec prisma generate
+      - name: Typecheck
+        run: pnpm typecheck
       - name: Create shadow database
         env:
           PGPASSWORD: demanage
