@@ -11,6 +11,10 @@ on:
         description: 'First release only: verified SHA currently running on the Debian host'
         required: false
         type: string
+      reviewed_pr47_backup_sha256:
+        description: 'One-time PR47 migration exception only: SHA256 of verified production dump after successful restore/rehearsal'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -34,6 +38,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       TARGET_SHA: ${{ inputs.commit_sha }}
       INITIAL_LIVE_SHA: ${{ inputs.initial_live_sha }}
+      REVIEWED_PR47_BACKUP_SHA256: ${{ inputs.reviewed_pr47_backup_sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -89,8 +94,17 @@ jobs:
           git merge-base --is-ancestor "$PREVIOUS_SHA" origin/master
           if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
             backend/prisma backend/prisma.config.ts backend/entrypoint.sh docker-compose.prod.yml; then
-            echo "::error::Migrations, entrypoint or base Compose changed; automatic promotion is blocked. Use a separate reviewed database/runbook migration."
-            exit 1
+            # Strictly scoped, single-release exception: this exact SHA was
+            # rehearsed against a restored production dump and the live DB must
+            # be migrated separately before the deploy agent changes images.
+            if [[ "$PREVIOUS_SHA" == '83488ef75d426688fda06feb2333af58c87ad569' &&
+                  "$TARGET_SHA" == '1d6377b94d539003a3f0a7c543d91503980a2ba9' &&
+                  "$REVIEWED_PR47_BACKUP_SHA256" == '7db1db9c53de1f3aa982cdc514771046db5d9348287af2dad4934f62d5da979b' ]]; then
+              echo "::notice::Explicit PR47-only DB migration approval attested by reviewed backup SHA; deployment still requires protected production environment approval."
+            else
+              echo "::error::Migrations, entrypoint or base Compose changed; production promotion blocked. A separate reviewed migration is required."
+              exit 1
+            fi
           fi
           echo "PREVIOUS_SHA=$PREVIOUS_SHA" >> "$GITHUB_ENV"
       - name: Resolve both images by immutable registry digest
