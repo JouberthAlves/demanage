@@ -78,7 +78,9 @@ jobs:
 
           if git ls-remote --exit-code --heads origin production > /dev/null; then
             gh api "repos/$GITHUB_REPOSITORY/contents/production.json?ref=production" > "$RUNNER_TEMP/previous.json"
-            PREVIOUS_SHA="$(jq -er '.content | @base64d | fromjson | select(.version == 1) | .source_commit' "$RUNNER_TEMP/previous.json")"
+            # GitHub's REST content field includes base64 line breaks; jq's
+            # @base64d rejects those on newer runners. GNU base64 accepts them.
+            PREVIOUS_SHA="$(jq -r '.content' "$RUNNER_TEMP/previous.json" | base64 --decode | jq -er 'select(.version == 1) | .source_commit')"
             if [[ -n "$INITIAL_LIVE_SHA" ]]; then
               echo "::error::initial_live_sha must be empty after initialization"
               exit 1
