@@ -1,5 +1,6 @@
 import { api } from '@/lib/api';
 import { isCardExpired } from '@/lib/format';
+import { fromCents, toCents } from '@/lib/money';
 import type { Card } from '@/types/finance';
 
 export type ApiCard = {
@@ -13,6 +14,9 @@ export type ApiCard = {
   lastBillingProcessedAt?: string | null;
   createdAt: string;
   expired?: boolean;
+  /** Absent on older backends. */
+  committed?: string | number | null;
+  available?: string | number | null;
 };
 
 export type CardPayload = {
@@ -24,10 +28,21 @@ export type CardPayload = {
 
 export function mapCardToLocal(card: ApiCard): Card {
   const expiresAt = card.expiresAt ?? undefined;
+  const limit = card.limit == null ? undefined : Number(card.limit);
+  const committed = card.committed == null ? 0 : Number(card.committed);
+  // Older backends do not send `available`: derive it from limit - committed.
+  const available =
+    limit == null
+      ? null
+      : card.available == null
+        ? fromCents(toCents(limit) - toCents(committed))
+        : Number(card.available);
   return {
     id: card.id,
     name: card.name,
-    limit: card.limit == null ? undefined : Number(card.limit),
+    limit,
+    committed,
+    available,
     closingDay: card.closingDay ?? undefined,
     pendingClosingDay: card.pendingClosingDay ?? null,
     expiresAt,

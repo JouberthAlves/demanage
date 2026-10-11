@@ -16,6 +16,10 @@ import {
   piggyGoalAmount,
   withdrawFromPiggyBank,
 } from '@/lib/piggy';
+import {
+  interestAccruedThroughOnActivation,
+  nextAutoDebitEnabledAt,
+} from '@/lib/piggy/activation';
 import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
@@ -211,6 +215,7 @@ export function createPiggyBank(userId: string, input: CreatePiggyInput) {
       monthlyGoal,
       autoDebit: input.autoDebit,
       autoDebitDay,
+      autoDebitEnabledAt: input.autoDebit ? new Date() : null,
       isEmergency: input.isEmergency,
       yieldEnabled: input.yieldEnabled,
       cdiPercent: input.yieldEnabled ? input.cdiPercent : 0,
@@ -273,9 +278,29 @@ export async function updatePiggyBank(
         ? (input.cdiPercent ?? Number(existing.cdiPercent))
         : 0;
 
+      // Auto-debit: remember WHEN it was switched on so months before it are
+      // never back-filled. Re-enabling resets it; disabling clears it.
+      const autoDebitEnabledAt = nextAutoDebitEnabledAt(existing, autoDebit);
+
+      // Yield: accrual must begin the day it becomes effective. Without this a
+      // null/old interestAccruedThrough would credit retroactive interest.
+      // (withFreshInterest already settled the OLD settings before this runs.)
+      const wasYielding =
+        existing.yieldEnabled && existing.cdiPercent.greaterThan(0);
+      const willYield = yieldEnabled && cdiPercent > 0;
+      const activatedThrough = interestAccruedThroughOnActivation(
+        wasYielding,
+        willYield,
+      );
+      const accrualReset = activatedThrough
+        ? { interestAccruedThrough: activatedThrough }
+        : {};
+
       return tx.piggyBank.update({
         where: { id },
         data: {
+          ...accrualReset,
+          autoDebitEnabledAt,
           ...(input.name !== undefined ? { name: input.name } : {}),
           goalAmount,
           targetDate,

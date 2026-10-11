@@ -55,7 +55,12 @@ async function processCycle(
 export async function runPiggyAutoDebits(userId: string, now = new Date()) {
   const candidateBanks = await prisma.piggyBank.findMany({
     where: { userId, autoDebit: true, archivedAt: null, completedAt: null },
-    select: { id: true, createdAt: true, autoDebitDay: true },
+    select: {
+      id: true,
+      createdAt: true,
+      autoDebitDay: true,
+      autoDebitEnabledAt: true,
+    },
   });
   let createdCount = 0;
   const failedBankIds: string[] = [];
@@ -66,6 +71,7 @@ export async function runPiggyAutoDebits(userId: string, now = new Date()) {
         now,
         bank.createdAt,
         bank.autoDebitDay,
+        bank.autoDebitEnabledAt,
       );
       for (const cycle of cycles) {
         const outcome = await processCycle(userId, bank.id, cycle);

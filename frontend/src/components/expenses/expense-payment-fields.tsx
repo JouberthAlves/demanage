@@ -9,7 +9,6 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { EXPENSE_FIELD_IDS, type PayMode } from '@/lib/expense-form';
-import { availableCardLimit } from '@/lib/expense-splits';
 import { formatCurrency } from '@/lib/format';
 
 import { ExpenseSplitCardFields } from './expense-split-card-fields';
@@ -72,20 +71,14 @@ function SingleCardField({ f }: { f: ExpenseFormApi }) {
           <SelectValue placeholder='Selecione' />
         </SelectTrigger>
         <SelectContent>
-          {f.validCards.map((card) => {
-            const available = availableCardLimit({
-              limit: card.limit,
-              committed: f.committedByCard.get(card.id) ?? 0,
-            });
-            return (
-              <SelectItem key={card.id} value={card.id}>
-                {card.name}
-                {available != null
-                  ? ` · disp. ${formatCurrency(available)}`
-                  : ' · sem limite'}
-              </SelectItem>
-            );
-          })}
+          {f.validCards.map((card) => (
+            <SelectItem key={card.id} value={card.id}>
+              {card.name}
+              {card.available != null
+                ? ` · disp. ${formatCurrency(card.available)}`
+                : ' · sem limite'}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
       <FieldError error={f.error} fieldId={CARD_ID} errorId={ERROR_ID} />

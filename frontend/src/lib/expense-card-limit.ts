@@ -1,10 +1,14 @@
-import { availableCardLimit } from '@/lib/expense-splits';
-import type { Card } from '@/types/finance';
+import { maxChargesPerCycle } from '@/lib/billing';
+import {
+  allocateCentsByPercent,
+  fromCents,
+  toCents,
+} from '@/lib/money';
+import type { Card, ExpenseFrequency } from '@/types/finance';
 
 export type PayMode = 'none' | 'one_card' | 'two_cards' | 'card_pix';
 
 export const NO_CARD = 'none';
-export const LIMIT_TOLERANCE = 0.001;
 
 /** DOM ids of the card controls, used to focus the field that failed. */
 export const CARD_FIELD_IDS = {
@@ -20,10 +24,6 @@ export type CardSelection = {
   cardId: string;
   cardId2: string;
 };
-
-export function roundMoney(value: number) {
-  return Math.round(value * 100) / 100;
-}
 
 /** Integer percentage 1-99, or null for '' / '0' / anything out of range. */
 export function parseCardPercent(raw: string) {
@@ -46,12 +46,17 @@ export function computeSplitShares(
 ): SplitShares {
   const percent1 = parseCardPercent(rawPercent);
   const display1 = percent1 ?? 0;
-  const share1 = roundMoney((amount * display1) / 100);
+  // Same allocation as the backend: part 1 is HALF_UP to cents, part 2 is the
+  // remainder (R$ 0,29 at 50/50 -> 0,15 + 0,14).
+  const [cents1 = 0, cents2 = 0] = allocateCentsByPercent(toCents(amount), [
+    display1,
+    100 - display1,
+  ]);
   return {
     percent1,
-    percent2: roundMoney(100 - display1),
-    share1,
-    share2: roundMoney(amount - share1),
+    percent2: 100 - display1,
+    share1: fromCents(cents1),
+    share2: fromCents(cents2),
   };
 }
 
@@ -103,21 +108,35 @@ export type CardLimitCheck = {
   exceeded: boolean;
 };
 
-/** Whether `amount` fits in the card's remaining limit. */
+export type CardLimitContext = {
+  frequency: ExpenseFrequency;
+  /** True when editing an existing expense (see checkCardLimit). */
+  editing: boolean;
+};
+
+/**
+ * Mirrors the backend limit rule for a NEW expense: the card share times the
+ * most charges the frequency can make in one cycle must fit in
+ * `card.available` (computed by the backend).
+ *
+ * When EDITING, the backend excludes the expense's own commitment from
+ * `committed`, which the frontend cannot know exactly, so we never block in
+ * the UI (`exceeded` is always false): the available amount is only shown as
+ * information and the backend error is surfaced through getApiErrorMessage.
+ */
 export function checkCardLimit(
   card: Card | undefined,
-  amount: number,
-  committedByCard: Map<string, number>,
+  shareAmount: number,
+  { frequency, editing }: CardLimitContext,
 ): CardLimitCheck | null {
   if (!card) return null;
-  const available = availableCardLimit({
-    limit: card.limit,
-    committed: committedByCard.get(card.id) ?? 0,
-  });
+  const available = card.available;
+  const candidateCents = toCents(shareAmount) * maxChargesPerCycle(frequency);
   return {
     card,
     available,
-    exceeded: available != null && amount > available + LIMIT_TOLERANCE,
+    exceeded:
+      !editing && available != null && candidateCents > toCents(available),
   };
 }
 
@@ -127,13 +146,13 @@ export function exceedsCardLimit(
   amount: number,
   shares: SplitShares,
   cards: Card[],
-  committedByCard: Map<string, number>,
+  context: CardLimitContext,
 ): (CardLimitCheck & { fieldId: string }) | null {
   for (const share of cardSharesFor(form, amount, shares)) {
     const check = checkCardLimit(
       cards.find((card) => card.id === share.cardId),
       share.amount,
-      committedByCard,
+      context,
     );
     if (check?.exceeded) return { ...check, fieldId: share.fieldId };
   }

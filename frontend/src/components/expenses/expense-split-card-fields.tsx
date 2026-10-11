@@ -86,7 +86,7 @@ function CardLimitHint({
   const check = checkCardLimit(
     f.cards.find((card) => card.id === cardId),
     share,
-    f.committedByCard,
+    f.limitContext,
   );
   if (!check) return null;
   if (check.available == null) {
@@ -106,6 +106,9 @@ function CardLimitHint({
     >
       {check.card.name}: disponível {formatCurrency(check.available)}
       {check.exceeded ? ' — insuficiente para esta parte' : ''}
+      {f.limitContext.editing
+        ? ' (a própria despesa é desconsiderada ao salvar)'
+        : ''}
     </p>
   );
 }

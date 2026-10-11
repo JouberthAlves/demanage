@@ -152,3 +152,42 @@ test('auto-debit back-fills every missed month once and stays idempotent', async
     await prisma.user.delete({ where: { id: user.id } });
   }
 });
+
+test('auto-debit enabled in October does not back-fill the months since creation', async () => {
+  const user = await prisma.user.create({
+    data: {
+      name: 'Piggy auto-debit enabled test',
+      email: `piggy-auto-debit-enabled-${randomUUID()}@example.invalid`,
+      passwordHash: 'test-only-not-a-login-hash',
+    },
+  });
+
+  try {
+    const bank = await prisma.piggyBank.create({
+      data: {
+        userId: user.id,
+        name: 'Enabled late',
+        monthlyGoal: 50,
+        autoDebit: true,
+        autoDebitDay: 5,
+        autoDebitEnabledAt: new Date('2026-10-02T15:00:00.000Z'),
+        createdAt: new Date('2026-01-10T12:00:00.000Z'),
+      },
+    });
+
+    const now = new Date('2026-10-20T16:00:00.000Z');
+    assert.deepEqual(await processPiggyAutoDebits(user.id, now), {
+      createdCount: 1,
+      failedCount: 0,
+    });
+    const transactions = await prisma.piggyTransaction.findMany({
+      where: { piggyBankId: bank.id },
+    });
+    assert.deepEqual(
+      transactions.map((row) => row.date.toISOString()),
+      ['2026-10-05T12:00:00.000Z'],
+    );
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});

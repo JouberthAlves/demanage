@@ -9,20 +9,16 @@ import {
 } from 'recharts';
 
 import { useCardList } from '@/hooks/use-cards';
-import { useExpenseList } from '@/hooks/use-expenses';
-import { useFinancialNow } from '@/hooks/use-financial-now';
 import { selectCardCommitments } from '@/lib/card-commitment';
 import { getCardTone } from '@/lib/card-tone';
 import { formatCurrencyCompact, formatPercent } from '@/lib/format';
 
 export function CardCommitmentChart() {
   const cards = useCardList();
-  const expenses = useExpenseList();
-  const now = useFinancialNow();
 
   const data = useMemo(
     () =>
-      selectCardCommitments(expenses, cards, now).map((item) => {
+      selectCardCommitments(cards).map((item) => {
         const card = cards.find((candidate) => candidate.id === item.id);
         return {
           ...item,
@@ -31,7 +27,7 @@ export function CardCommitmentChart() {
           fill: card ? getCardTone(card).fill : '#FFB800',
         };
       }),
-    [cards, expenses, now],
+    [cards],
   );
 
   if (data.length === 0) {

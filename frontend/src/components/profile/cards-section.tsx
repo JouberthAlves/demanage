@@ -12,14 +12,12 @@ import type { Card } from '@/types/finance';
 
 type CardsSectionProps = {
   cards: Card[];
-  committedByCard: Map<string, number>;
   isLoading: boolean;
   isError: boolean;
 };
 
 export function CardsSection({
   cards,
-  committedByCard,
   isLoading,
   isError,
 }: CardsSectionProps) {
@@ -95,7 +93,7 @@ export function CardsSection({
             <CreditCardTile
               key={card.id}
               card={card}
-              committed={committedByCard.get(card.id) ?? 0}
+              committed={card.committed}
               deleting={removeCard.isPending}
               onEdit={() => openEditCard(card)}
               onDelete={() => void handleDeleteCard(card.id, card.name)}

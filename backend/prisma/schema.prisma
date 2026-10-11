@@ -262,6 +262,9 @@ model PiggyBank {
   monthlyGoal            Decimal            @default(0) @db.Decimal(12, 2)
   autoDebit              Boolean            @default(false)
   autoDebitDay           Int                @default(1)
+  // Instant auto-debit was last switched on (null while off). Cycles before it
+  // are never back-filled.
+  autoDebitEnabledAt     DateTime?
   isEmergency            Boolean            @default(false)
   yieldEnabled           Boolean            @default(false)
   cdiPercent             Decimal            @default(0) @db.Decimal(8, 4)

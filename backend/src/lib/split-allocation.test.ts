@@ -69,6 +69,7 @@ test('card limit check is exact to the cent', () => {
       cards,
       resolved: resolved(0.3),
       committedByCard: new Map([['c1', 99.7]]),
+      frequency: 'unica',
     }),
   );
   assert.throws(
@@ -77,7 +78,68 @@ test('card limit check is exact to the cent', () => {
         cards,
         resolved: resolved(0.31),
         committedByCard: new Map([['c1', 99.7]]),
+        frequency: 'unica',
       }),
     /Limite insuficiente no cartão Nubank \(disponível R\$ 0,30\)/,
+  );
+});
+
+test('card limit reserves a full billing cycle of charges for the frequency', () => {
+  const cards = new Map([
+    ['c1', { id: 'c1', name: 'Nubank', limit: '100.00' } as unknown as Card],
+  ]);
+  const check = (amount: number, frequency: string, committed = 0) =>
+    assertCardLimits({
+      cards,
+      resolved: [{ kind: 'card' as const, cardId: 'c1', percent: 100, amount }],
+      committedByCard: new Map([['c1', committed]]),
+      frequency,
+    });
+
+  // weekly R$30 x 5 = R$150 > R$100
+  assert.throws(
+    () => check(30, 'semanal'),
+    /Limite insuficiente no cartão Nubank \(disponível R\$ 100,00\)/,
+  );
+  // weekly R$20 x 5 = R$100 fits exactly
+  assert.doesNotThrow(() => check(20, 'semanal'));
+  assert.throws(() => check(20.01, 'semanal'), /Limite insuficiente/);
+  // monthly / one-off: a single charge
+  assert.doesNotThrow(() => check(100, 'mensal'));
+  assert.doesNotThrow(() => check(100, 'unica'));
+  assert.throws(() => check(100.01, 'mensal'), /Limite insuficiente/);
+  // committed counts against the same budget
+  assert.throws(() => check(10, 'semanal', 60), /disponível R\$ 40,00/);
+  assert.doesNotThrow(() => check(8, 'semanal', 60));
+});
+
+test('editing an expense does not count its own commitment twice', () => {
+  const cards = new Map([
+    ['c1', { id: 'c1', name: 'Nubank', limit: '100.00' } as unknown as Card],
+  ]);
+  const resolved = [
+    { kind: 'card' as const, cardId: 'c1', percent: 100, amount: 20 },
+  ];
+  // The service passes committed WITHOUT the edited expense (excludeExpenseId):
+  // a weekly R$20 already on the card (committed 100 incl. itself) is fine to
+  // re-save once its own 100 is excluded...
+  assert.doesNotThrow(() =>
+    assertCardLimits({
+      cards,
+      resolved,
+      committedByCard: new Map([['c1', 0]]),
+      frequency: 'semanal',
+    }),
+  );
+  // ...but would be rejected if its own commitment were (wrongly) included.
+  assert.throws(
+    () =>
+      assertCardLimits({
+        cards,
+        resolved,
+        committedByCard: new Map([['c1', 100]]),
+        frequency: 'semanal',
+      }),
+    /Limite insuficiente/,
   );
 });

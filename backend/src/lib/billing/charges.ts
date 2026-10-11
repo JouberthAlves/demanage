@@ -79,6 +79,24 @@ export function splitShareFor(
   return new Prisma.Decimal(expense.amount);
 }
 
+/**
+ * Most times one expense can charge a card inside a single billing cycle.
+ * A weekly expense hits a cycle 4 or 5 times (a cycle is a month), so the limit
+ * check reserves the worst case. Product rule: a new/edited expense must fit
+ * the card for a full cycle (card share x this number).
+ */
+export const MAX_CHARGES_PER_CYCLE = {
+  unica: 1,
+  mensal: 1,
+  semanal: 5,
+} as const;
+
+export function maxChargesPerCycle(frequency: string): number {
+  return (
+    (MAX_CHARGES_PER_CYCLE as Record<string, number>)[frequency] ?? 1
+  );
+}
+
 export type CycleWindow = {
   /** Last invoiced day (exclusive lower bound unless includePeriodStart). */
   periodStartKey: DayKey;

@@ -216,7 +216,8 @@ export function applyPayMode(
 
 export type ExpenseValidationContext = {
   cards: Card[];
-  committedByCard: Map<string, number>;
+  /** Editing an existing expense: the limit is not pre-checked (backend decides). */
+  editing: boolean;
   now: Date;
   /** startsAt of the expense being edited. */
   previousStartsAt?: string | null;
@@ -225,7 +226,7 @@ export type ExpenseValidationContext = {
 /** Returns the first problem found, or null when the form can be saved. */
 export function validateExpenseForm(
   form: ExpenseFormState,
-  { cards, committedByCard, now, previousStartsAt }: ExpenseValidationContext,
+  { cards, editing, now, previousStartsAt }: ExpenseValidationContext,
 ): FormFieldError | null {
   const fail = (fieldId: string, message: string) => ({ fieldId, message });
   const amount = parseCurrencyInput(form.amount);
@@ -280,7 +281,10 @@ export function validateExpenseForm(
     }
   }
 
-  const exceeded = exceedsCardLimit(form, amount, shares, cards, committedByCard);
+  const exceeded = exceedsCardLimit(form, amount, shares, cards, {
+    frequency: form.frequency,
+    editing,
+  });
   if (exceeded) {
     return fail(
       exceeded.fieldId,

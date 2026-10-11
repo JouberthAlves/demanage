@@ -15,10 +15,21 @@ import {
 import type { Card, RecurringExpense } from '@/types/finance';
 
 const now = new Date('2026-10-10T15:00:00.000Z');
-const cards: Card[] = [
-  { id: 'c1', name: 'Nubank', limit: 1000 },
-  { id: 'c2', name: 'Itaú', limit: 100 },
-];
+const c1: Card = {
+  id: 'c1',
+  name: 'Nubank',
+  limit: 1000,
+  committed: 0,
+  available: 1000,
+};
+const c2: Card = {
+  id: 'c2',
+  name: 'Itaú',
+  limit: 100,
+  committed: 0,
+  available: 100,
+};
+const cards: Card[] = [c1, c2];
 
 function form(overrides: Partial<ExpenseFormState> = {}): ExpenseFormState {
   return {
@@ -31,14 +42,13 @@ function form(overrides: Partial<ExpenseFormState> = {}): ExpenseFormState {
 
 function validate(
   state: ExpenseFormState,
-  committed: Array<[string, number]> = [],
-  previousStartsAt?: string,
+  options: { cards?: Card[]; editing?: boolean; previousStartsAt?: string } = {},
 ) {
   return validateExpenseForm(state, {
-    cards,
-    committedByCard: new Map(committed),
+    cards: options.cards ?? cards,
+    editing: options.editing ?? false,
     now,
-    previousStartsAt,
+    previousStartsAt: options.previousStartsAt,
   });
 }
 
@@ -65,7 +75,9 @@ test('name and amount are required', () => {
 test('recurring schedule needs a valid day and end date after the start', () => {
   assert.equal(validate(form({ dueDay: '' }))?.fieldId, 'expense-due');
   assert.equal(validate(form({ dueMonth: '' }))?.fieldId, 'expense-due-month');
-  const error = validate(form({ dueDay: '05', dueMonth: '12', endsAt: '2026-01-01' }));
+  const error = validate(
+    form({ dueDay: '05', dueMonth: '12', endsAt: '2026-01-01' }),
+  );
   assert.equal(error?.fieldId, 'expense-ends-at');
 });
 
@@ -153,17 +165,59 @@ test('card limit check covers every pay mode', () => {
   });
   assert.equal(validate(pix)?.fieldId, 'expense-card-1');
 
-  // already committed amount counts against the limit
+  // the backend-computed available amount is what counts
   const nearlyFull = form({ amount: '50,00', payMode: 'one_card', cardId: 'c2' });
   assert.equal(validate(nearlyFull), null);
-  assert.equal(validate(nearlyFull, [['c2', 60]])?.fieldId, 'expense-card');
-
-  const shares = computeSplitShares(150, '70');
-  assert.ok(exceedsCardLimit(split, 150, shares, cards, new Map()));
+  const tight: Card[] = [c1, { ...c2, committed: 60, available: 40 }];
+  const blocked = validate(nearlyFull, { cards: tight });
+  assert.equal(blocked?.fieldId, 'expense-card');
   assert.equal(
-    exceedsCardLimit(form({ payMode: 'none' }), 150, shares, cards, new Map()),
+    blocked?.message.replace(/\s/g, ' '),
+    'Limite insuficiente no cartão Itaú (disponível R$ 40,00)',
+  );
+
+  const context = { frequency: 'mensal', editing: false } as const;
+  const shares = computeSplitShares(150, '70');
+  assert.ok(exceedsCardLimit(split, 150, shares, cards, context));
+  assert.equal(
+    exceedsCardLimit(form({ payMode: 'none' }), 150, shares, cards, context),
     null,
   );
+});
+
+test('weekly expenses reserve five charges against the available limit', () => {
+  const tight: Card[] = [c1, c2];
+  // 20,00 x 5 = 100,00 fits exactly; 20,01 x 5 does not.
+  const fits = form({
+    amount: '20,00',
+    frequency: 'semanal',
+    payMode: 'one_card',
+    cardId: 'c2',
+  });
+  assert.equal(validate(fits, { cards: tight }), null);
+  const over = form({
+    amount: '20,01',
+    frequency: 'semanal',
+    payMode: 'one_card',
+    cardId: 'c2',
+  });
+  assert.equal(validate(over, { cards: tight })?.fieldId, 'expense-card');
+  // The same amount monthly is a single charge and fits.
+  assert.equal(validate({ ...over, frequency: 'mensal' }, { cards: tight }), null);
+});
+
+test('cards without a limit are never blocked', () => {
+  const unlimited: Card[] = [
+    { id: 'c3', name: 'Livre', committed: 5000, available: null },
+  ];
+  const state = form({ amount: '999.999,00', payMode: 'one_card', cardId: 'c3' });
+  assert.equal(validate(state, { cards: unlimited }), null);
+});
+
+test('editing does not pre-block on the limit (backend decides)', () => {
+  const state = form({ amount: '150,00', payMode: 'one_card', cardId: 'c2' });
+  assert.ok(validate(state));
+  assert.equal(validate(state, { editing: true }), null);
 });
 
 test('payload parses pt-BR money and builds splits', () => {

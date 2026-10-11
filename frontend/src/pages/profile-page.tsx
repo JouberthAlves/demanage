@@ -8,14 +8,8 @@ import { useAuthStore } from '@/stores/auth-store';
 
 export function ProfilePage() {
   const user = useAuthStore((state) => state.user);
-  const {
-    cards,
-    committedByCard,
-    totalLimit,
-    totalCommitted,
-    isLoading,
-    isError,
-  } = useCardsOverview();
+  const { cards, totalLimit, totalCommitted, isLoading, isError } =
+    useCardsOverview();
 
   // Remount the info form whenever the saved profile changes, so its fields
   // restart from the stored values.
@@ -46,7 +40,6 @@ export function ProfilePage() {
         <ProfileInfoForm key={profileKey} user={user} />
         <CardsSection
           cards={cards}
-          committedByCard={committedByCard}
           isLoading={isLoading}
           isError={isError}
         />

@@ -26,6 +26,7 @@ function cycleForMonth(
   todayKey: string,
   createdKey: string,
   autoDebitDay: number,
+  enabledKey: string | null = null,
 ): AutoDebitCycle | null {
   const bounds = monthBounds(year, monthIndex);
   const dueKey = formatDayKey(
@@ -34,6 +35,9 @@ function cycleForMonth(
     clampDayToMonth(year, monthIndex, autoDebitDay || 1),
   );
   if (todayKey < dueKey || createdKey >= dueKey) return null;
+  // Auto-debit switched on AFTER this month's due day: it starts next month.
+  // Enabled ON the due day still debits that day (today >= dueKey above).
+  if (enabledKey && enabledKey > dueKey) return null;
   return {
     dueOn: dayKeyToDate(dueKey),
     monthStart: bounds.start,
@@ -46,6 +50,7 @@ export function currentAutoDebitCycle(
   now: Date,
   createdAt: Date,
   autoDebitDay: number,
+  autoDebitEnabledAt: Date | null = null,
 ) {
   const todayKey = todayKeyInSaoPaulo(now);
   const today = parseDayKey(todayKey)!;
@@ -55,29 +60,44 @@ export function currentAutoDebitCycle(
     todayKey,
     dayKeyInSaoPaulo(createdAt),
     autoDebitDay,
+    autoDebitEnabledAt ? dayKeyInSaoPaulo(autoDebitEnabledAt) : null,
   );
 }
 
 /**
- * Every due cycle from the bank's creation month through the current month,
- * oldest first (missed months included). Idempotency per cycle is enforced by
- * the caller via hasAutoDebitInCycle.
+ * Every due cycle from max(creation, auto-debit enabled) through the current
+ * month, oldest first (missed months since then included). Months before the
+ * feature was switched on are never back-filled; a cycle whose due day is
+ * before the enabled day is skipped. Idempotency per cycle is enforced by the
+ * caller via hasAutoDebitInCycle.
  */
 export function listDueAutoDebitCycles(
   now: Date,
   createdAt: Date,
   autoDebitDay: number,
+  autoDebitEnabledAt: Date | null = null,
 ): AutoDebitCycle[] {
   const todayKey = todayKeyInSaoPaulo(now);
   const createdKey = dayKeyInSaoPaulo(createdAt);
+  const enabledKey = autoDebitEnabledAt
+    ? dayKeyInSaoPaulo(autoDebitEnabledAt)
+    : null;
+  const startKey = enabledKey && enabledKey > createdKey ? enabledKey : createdKey;
   const today = parseDayKey(todayKey)!;
-  const created = parseDayKey(createdKey)!;
+  const created = parseDayKey(startKey)!;
   const cycles: AutoDebitCycle[] = [];
 
   let year = created.year;
   let month = created.monthIndex;
   while (year < today.year || (year === today.year && month <= today.monthIndex)) {
-    const cycle = cycleForMonth(year, month, todayKey, createdKey, autoDebitDay);
+    const cycle = cycleForMonth(
+      year,
+      month,
+      todayKey,
+      createdKey,
+      autoDebitDay,
+      enabledKey,
+    );
     if (cycle) cycles.push(cycle);
     month += 1;
     if (month > 11) {

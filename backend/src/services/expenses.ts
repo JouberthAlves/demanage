@@ -114,6 +114,7 @@ export async function createExpense(userId: string, input: CreateExpenseInput) {
       totalAmount: input.amount,
       splits: input.splits,
       cardId: input.cardId,
+      frequency: input.frequency,
       tx,
     });
 
@@ -239,6 +240,7 @@ export async function updateExpense(
       existing,
       input,
       nextAmount,
+      nextFrequency,
     });
 
     // updatedAt como guarda otimista contra escritores fora do lock do usuário.
@@ -326,8 +328,9 @@ async function resolveNextSplits(args: {
   existing: ExpenseWithRelations;
   input: UpdateExpenseInput;
   nextAmount: number;
+  nextFrequency: string;
 }): Promise<ResolvedSplit[] | null> {
-  const { userId, id, tx, existing, input, nextAmount } = args;
+  const { userId, id, tx, existing, input, nextAmount, nextFrequency } = args;
   const splitsProvided =
     input.splits !== undefined || input.cardId !== undefined;
 
@@ -337,6 +340,7 @@ async function resolveNextSplits(args: {
       totalAmount: nextAmount,
       splits: input.splits,
       cardId: input.cardId,
+      frequency: nextFrequency,
       excludeExpenseId: id,
       tx,
     });
@@ -355,6 +359,7 @@ async function resolveNextSplits(args: {
     totalAmount: nextAmount,
     splits: inputs,
     cardId: undefined,
+    frequency: nextFrequency,
     excludeExpenseId: id,
     tx,
   });

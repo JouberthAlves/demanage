@@ -213,6 +213,8 @@ export async function resolveAndValidateSplits(args: {
   totalAmount: number;
   splits: unknown;
   cardId: unknown;
+  /** unica | semanal | mensal: drives how many charges a cycle must fit. */
+  frequency: string;
   excludeExpenseId?: string;
   tx?: Prisma.TransactionClient;
   validateLimits?: boolean;
@@ -250,7 +252,12 @@ export async function resolveAndValidateSplits(args: {
       tx: args.tx,
     });
 
-    assertCardLimits({ cards, resolved, committedByCard });
+    assertCardLimits({
+      cards,
+      resolved,
+      committedByCard,
+      frequency: args.frequency,
+    });
   }
   return resolved;
 }

@@ -1,5 +1,4 @@
-import { buildCommittedByCard } from '@/lib/expense-splits';
-import type { Card, RecurringExpense } from '@/types/finance';
+import type { Card } from '@/types/finance';
 
 export type CardCommitment = {
   id: string;
@@ -12,20 +11,14 @@ export type CardCommitment = {
 };
 
 /**
- * Per-card limit usage for cards with a limit. Uses the same billing-period
- * aware commitment as the profile page (weekly x4, closed invoices excluded).
+ * Per-card limit usage for cards with a limit. `committed` is computed by the
+ * backend for the current billing cycle; nothing is recomputed here.
  */
-export function selectCardCommitments(
-  expenses: RecurringExpense[],
-  cards: Card[],
-  now: Date,
-): CardCommitment[] {
-  const committedByCard = buildCommittedByCard(expenses, cards, now);
-
+export function selectCardCommitments(cards: Card[]): CardCommitment[] {
   return cards.flatMap((card) => {
     const limit = card.limit;
     if (limit == null || !(limit > 0)) return [];
-    const committed = committedByCard.get(card.id) ?? 0;
+    const committed = card.committed;
     return [
       {
         id: card.id,

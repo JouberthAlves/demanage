@@ -158,3 +158,67 @@ test('serialization exposes cents even though interest rows store 8 decimals', (
   assert.equal(serialized.resultingBalance, 10.01);
   assert.equal(serialized.date, '2026-09-08');
 });
+
+test('auto-debit enabled in October never back-fills the months since creation', () => {
+  const due = (cycles: ReturnType<typeof listDueAutoDebitCycles>) =>
+    cycles.map((cycle) => cycle.dueOn.toISOString().slice(0, 10));
+  const now = new Date('2026-12-20T16:00:00.000Z');
+  const created = new Date('2026-01-05T12:00:00.000Z');
+
+  // Control: without the enabled date the old back-fill behaviour is unchanged.
+  assert.equal(listDueAutoDebitCycles(now, created, 10).length, 12);
+  // Enabled on 2026-10-02: October, November and December only.
+  assert.deepEqual(
+    due(
+      listDueAutoDebitCycles(now, created, 10, new Date('2026-10-02T15:00:00.000Z')),
+    ),
+    ['2026-10-10', '2026-11-10', '2026-12-10'],
+  );
+});
+
+test('auto-debit enabled after this month\'s due day starts next month', () => {
+  const created = new Date('2026-01-05T12:00:00.000Z');
+  const enabledAt = new Date('2026-10-20T15:00:00.000Z'); // after day 10
+  // Still October: the 10th already passed before enabling -> nothing due.
+  assert.deepEqual(
+    listDueAutoDebitCycles(new Date('2026-10-25T16:00:00.000Z'), created, 10, enabledAt),
+    [],
+  );
+  assert.equal(
+    currentAutoDebitCycle(new Date('2026-10-25T16:00:00.000Z'), created, 10, enabledAt),
+    null,
+  );
+  // November: due on the 10th.
+  assert.deepEqual(
+    listDueAutoDebitCycles(
+      new Date('2026-11-12T16:00:00.000Z'),
+      created,
+      10,
+      enabledAt,
+    ).map((cycle) => cycle.dueOn.toISOString().slice(0, 10)),
+    ['2026-11-10'],
+  );
+});
+
+test('auto-debit enabled on or before the due day debits that month', () => {
+  const created = new Date('2026-01-05T12:00:00.000Z');
+  const now = new Date('2026-10-25T16:00:00.000Z');
+  for (const enabledAt of ['2026-10-10T15:00:00.000Z', '2026-10-01T03:00:00.000Z']) {
+    assert.deepEqual(
+      listDueAutoDebitCycles(now, created, 10, new Date(enabledAt)).map((cycle) =>
+        cycle.dueOn.toISOString().slice(0, 10),
+      ),
+      ['2026-10-10'],
+    );
+  }
+});
+
+test('catch-up cap still applies when enabled long ago', () => {
+  const cycles = listDueAutoDebitCycles(
+    new Date('2036-12-20T16:00:00.000Z'),
+    new Date('2020-01-01T12:00:00.000Z'),
+    10,
+    new Date('2020-01-01T12:00:00.000Z'),
+  );
+  assert.equal(cycles.length, 60);
+});

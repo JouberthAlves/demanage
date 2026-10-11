@@ -9,6 +9,10 @@ export type Card = {
   lastBillingProcessedAt?: string | null;
   createdAt?: string;
   expired?: boolean;
+  /** Limit already committed in the current billing cycle (from the backend). */
+  committed: number;
+  /** Limit minus committed; null when the card has no limit. */
+  available: number | null;
 };
 
 export type Profile = {

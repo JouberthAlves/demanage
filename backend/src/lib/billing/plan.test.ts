@@ -153,3 +153,35 @@ test('card API serialization exposes the last billing processing timestamp', () 
   } as Card);
   assert.equal(serialized.lastBillingProcessedAt, processedAt);
 });
+
+test('card API serialization exposes committed and available (null without a limit)', () => {
+  const base = {
+    id: 'card-1',
+    name: 'Test card',
+    limit: '100.00' as unknown as Card['limit'],
+    closingDay: 5,
+    pendingClosingDay: null,
+    archivedAt: null,
+    expiresAt: null,
+    lastInvoicedOn: null,
+    lastBillingProcessedAt: null,
+    createdAt: at('2026-01-01'),
+    updatedAt: at('2026-01-01'),
+  } as Card;
+
+  const used = serializeCard(base, 33.335);
+  assert.equal(used.committed, 33.34);
+  assert.equal(used.available, 66.66);
+  assert.equal(used.limit, 100);
+
+  const unlimited = serializeCard({ ...base, limit: null }, 20);
+  assert.equal(unlimited.committed, 20);
+  assert.equal(unlimited.available, null);
+
+  assert.equal(serializeCard(base).committed, 0);
+  assert.equal(serializeCard(base).available, 100);
+  assert.equal(
+    serializeCard({ ...base, archivedAt: at('2026-02-01') }, 50).committed,
+    0,
+  );
+});

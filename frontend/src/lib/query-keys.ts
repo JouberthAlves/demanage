@@ -36,12 +36,14 @@ export const queryKeys = {
  * rows, card changes can generate invoices, and asset trades touch all of it.
  */
 const DEPENDENTS = {
-  expenses: [queryKeys.expenses, queryKeys.patrimony.all],
+  // Cards carry `committed`/`available`, which every expense change moves.
+  expenses: [queryKeys.expenses, queryKeys.cards, queryKeys.patrimony.all],
   entries: [queryKeys.entries, queryKeys.patrimony.all],
   cards: [queryKeys.cards, queryKeys.expenses, queryKeys.patrimony.all],
   piggyBanks: [
     queryKeys.piggyBanks.all,
     queryKeys.expenses,
+    queryKeys.cards,
     queryKeys.entries,
     queryKeys.patrimony.all,
   ],
@@ -49,6 +51,7 @@ const DEPENDENTS = {
     queryKeys.assets.all,
     queryKeys.patrimony.all,
     queryKeys.expenses,
+    queryKeys.cards,
     queryKeys.entries,
     queryKeys.piggyBanks.all,
   ],

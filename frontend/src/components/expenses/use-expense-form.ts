@@ -3,11 +3,7 @@ import { toast } from 'sonner';
 
 import type { FormFieldError } from '@/components/shared/schedule-form/validate-schedule';
 import { useCardList } from '@/hooks/use-cards';
-import {
-  useCreateExpense,
-  useExpenseList,
-  useUpdateExpense,
-} from '@/hooks/use-expenses';
+import { useCreateExpense, useUpdateExpense } from '@/hooks/use-expenses';
 import { useFinancialNow } from '@/hooks/use-financial-now';
 import { getApiErrorMessage } from '@/lib/api-error';
 import {
@@ -22,7 +18,6 @@ import {
   type PayMode,
   validateExpenseForm,
 } from '@/lib/expense-form';
-import { buildCommittedByCard } from '@/lib/expense-splits';
 import { parseCurrencyInput } from '@/lib/format';
 import type { ExpenseFrequency, RecurringExpense } from '@/types/finance';
 
@@ -35,7 +30,6 @@ type UseExpenseFormArgs = {
 export function useExpenseForm({ expense, onDone }: UseExpenseFormArgs) {
   const now = useFinancialNow();
   const cards = useCardList();
-  const expenses = useExpenseList();
   const createExpense = useCreateExpense();
   const updateExpense = useUpdateExpense();
 
@@ -44,26 +38,18 @@ export function useExpenseForm({ expense, onDone }: UseExpenseFormArgs) {
   );
   const [error, setError] = useState<FormFieldError | null>(null);
 
-  const editingId = expense?.id;
   const previousStartsAt = expense?.startsAt ?? null;
   const validCards = useMemo(
     () => cards.filter((card) => !card.expired),
     [cards],
   );
-  const committedByCard = useMemo(
-    () =>
-      buildCommittedByCard(
-        expenses.filter((item) => item.id !== editingId),
-        cards,
-        now,
-      ),
-    [expenses, editingId, cards, now],
-  );
+  const editing = expense != null;
+  const limitContext = { frequency: form.frequency, editing };
 
   const amount = parseCurrencyInput(form.amount);
   const shares = computeSplitShares(amount, form.cardPercent);
   const limitBlocked =
-    exceedsCardLimit(form, amount, shares, cards, committedByCard) != null;
+    exceedsCardLimit(form, amount, shares, cards, limitContext) != null;
   const submitting = createExpense.isPending || updateExpense.isPending;
 
   function patch(changes: Partial<ExpenseFormState>) {
@@ -85,7 +71,7 @@ export function useExpenseForm({ expense, onDone }: UseExpenseFormArgs) {
     setError(null);
     const problem = validateExpenseForm(form, {
       cards,
-      committedByCard,
+      editing,
       now,
       previousStartsAt,
     });
@@ -120,7 +106,7 @@ export function useExpenseForm({ expense, onDone }: UseExpenseFormArgs) {
     now,
     cards,
     validCards,
-    committedByCard,
+    limitContext,
     amount,
     shares,
     limitBlocked,

@@ -302,6 +302,7 @@ test('write lock prevents concurrent card purchases from exceeding the limit', a
             totalAmount: 60,
             splits: [{ kind: 'card', cardId: card.id, percent: 100 }],
             cardId: undefined,
+            frequency: 'unica',
             tx,
           });
           // A purchase dated today always lands in the card's open cycle,
@@ -469,6 +470,51 @@ test('late one-offs reserve card limit for the next cycle', async () => {
 
     const committed = await getCommittedByCard({ userId: user.id });
     assert.equal(committed.get(card.id), 80);
+
+    // GET /cards exposes the same commitment (single source of truth).
+    const api = await startApi(user.id);
+    try {
+      const listed = await api.request('/cards', 'GET');
+      assert.equal(listed.response.status, 200);
+      const apiCard = (
+        listed.data as Array<{
+          id: string;
+          committed: number;
+          available: number | null;
+        }>
+      ).find((item) => item.id === card.id);
+      assert.equal(apiCard?.committed, 80);
+      assert.equal(apiCard?.available, 20);
+    } finally {
+      await api.close();
+    }
+
+    // A weekly R$30 would charge up to R$150 per cycle: rejected even though a
+    // single R$30 occurrence is above the R$20 left anyway; R$4 x 5 = 20 fits.
+    await assert.rejects(
+      () =>
+        withUserWriteLockTransaction(user.id, (tx) =>
+          resolveAndValidateSplits({
+            userId: user.id,
+            totalAmount: 4.01,
+            splits: [{ kind: 'card', cardId: card.id, percent: 100 }],
+            cardId: undefined,
+            frequency: 'semanal',
+            tx,
+          }),
+        ),
+      ExpenseSplitError,
+    );
+    await withUserWriteLockTransaction(user.id, (tx) =>
+      resolveAndValidateSplits({
+        userId: user.id,
+        totalAmount: 4,
+        splits: [{ kind: 'card', cardId: card.id, percent: 100 }],
+        cardId: undefined,
+        frequency: 'semanal',
+        tx,
+      }),
+    );
     await assert.rejects(
       () =>
         withUserWriteLockTransaction(user.id, (tx) =>
@@ -477,6 +523,7 @@ test('late one-offs reserve card limit for the next cycle', async () => {
             totalAmount: 80,
             splits: [{ kind: 'card', cardId: card.id, percent: 100 }],
             cardId: undefined,
+            frequency: 'unica',
             tx,
           }),
         ),
