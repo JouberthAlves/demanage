@@ -1,7 +1,5 @@
 import { NavLink } from 'react-router';
 
-import logo from '../../../public/favicon.svg';
-
 import { APP_NAV_ITEMS } from '@/components/layout/nav-items';
 import {
   Tooltip,
@@ -9,6 +7,8 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+
+import logo from '../../../public/favicon.svg';
 
 export function AppSidebar() {
   return (

@@ -49,7 +49,16 @@ notepad .env
 
 Preencha `POSTGRES_PASSWORD` e `JWT_SECRET` com valores aleatórios fortes. Para `POSTGRES_PASSWORD`, prefira hexadecimal porque o valor também faz parte da `DATABASE_URL`.
 
-O frontend usa `/api` na mesma origem por padrão. Se a API estiver em uma origem própria, defina `VITE_API_URL` no `.env` antes do build; a política CSP permite somente a origem HTTP(S) configurada.
+O frontend usa `/api` na mesma origem por padrão. `VITE_API_URL` é gravado na imagem no build e também é lido pelo nginx para a CSP; por isso o build e o runtime usam sempre o mesmo valor. As imagens publicadas no GHCR usam `/api`. Se a API estiver em uma origem própria, use o modo de build local (seção 4) com `VITE_API_URL` definido; a política CSP permite somente a origem HTTP(S) configurada.
+
+Defina também as imagens a executar. Em produção, use os digests do GHCR informados no resumo do workflow de publicação ou em `production.json`:
+
+```env
+DEMANAGE_BACKEND_IMAGE=ghcr.io/bielxdh3/demanage-backend@sha256:<digest>
+DEMANAGE_FRONTEND_IMAGE=ghcr.io/bielxdh3/demanage-frontend@sha256:<digest>
+```
+
+No modo de build local, qualquer tag local serve (`demanage-backend:local`, `demanage-frontend:local`).
 
 Exemplo de gerador compatível com PowerShell:
 
@@ -76,10 +85,16 @@ Valide o Compose sem imprimir os segredos:
 docker compose -f docker-compose.prod.yml config --quiet
 ```
 
-Suba tudo:
+Suba tudo com as imagens do GHCR (padrão):
 
 ```powershell
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Para construir a partir do código deste checkout (sem GHCR), use o override de build. Defina `DEMANAGE_BACKEND_IMAGE=demanage-backend:local` e `DEMANAGE_FRONTEND_IMAGE=demanage-frontend:local` no `.env` antes:
+
+```powershell
+docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
 ```
 
 Confira:
@@ -113,7 +128,7 @@ docker compose -f docker-compose.prod.yml down
 docker volume rm demanage_pgdata
 ```
 
-Só faça isso se o volume ainda não contiver dados reais. Depois rode novamente `up -d --build`.
+Só faça isso se o volume ainda não contiver dados reais. Depois rode novamente `up -d` (ou o comando com `docker-compose.build.yml` no modo de build local).
 
 ## 5. Cloudflare Tunnel
 
@@ -292,10 +307,12 @@ Antes de atualizar, faça um backup. Depois:
 
 ```powershell
 git pull
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose -f docker-compose.prod.yml up -d                     # imagens do GHCR (digests no .env)
+# ou, em modo de build local:
+docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
 ```
 
-O volume PostgreSQL persiste entre rebuilds dos containers.
+Ao trocar `DEMANAGE_*_IMAGE` no `.env`, o Compose recria apenas os containers que mudaram. O volume PostgreSQL persiste entre rebuilds dos containers.
 
 ## 9. Parar ou reiniciar
 

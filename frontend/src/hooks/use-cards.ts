@@ -1,53 +1,48 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
-import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
 import {
+  type CardPayload,
   createCard,
   deleteCard,
   listCards,
   processCardBilling,
   updateCard,
-  type CardPayload,
 } from '@/lib/cards-api';
-import { useFinanceStore } from '@/stores/finance-store';
+import { invalidateDomain, queryKeys } from '@/lib/query-keys';
+import type { Card } from '@/types/finance';
 
-export const CARDS_QUERY_KEY = ['cards'] as const;
+const NO_CARDS: Card[] = [];
 
 // The QueryClient is session-scoped. Running billing maintenance for each
 // useCards consumer can create overlapping writes to the same account.
 const billingStartedForSession = new WeakSet<ReturnType<typeof useQueryClient>>();
 
 export function useCards(enabled = true) {
-  const setCards = useFinanceStore((state) => state.setCards);
   const queryClient = useQueryClient();
 
   const query = useQuery({
-    queryKey: CARDS_QUERY_KEY,
+    queryKey: queryKeys.cards,
     queryFn: listCards,
     enabled,
     staleTime: 60_000,
   });
 
   useEffect(() => {
-    if (query.data) {
-      setCards(query.data);
-    }
-  }, [query.data, setCards]);
-
-  useEffect(() => {
     if (!enabled || !query.isSuccess || billingStartedForSession.has(queryClient)) return;
     billingStartedForSession.add(queryClient);
 
-    void processCardBilling()
+    processCardBilling()
       .then((billing) => {
         if (billing.createdCount > 0) {
-          void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
+          return invalidateDomain(queryClient, 'cards').then(() => undefined);
         }
-        void queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY });
+        return queryClient.invalidateQueries({ queryKey: queryKeys.cards });
       })
       .catch(() => {
+        // Allow a later mount to retry the maintenance run.
+        billingStartedForSession.delete(queryClient);
         toast.error('Não foi possível atualizar as faturas agora.');
       });
   }, [enabled, query.isSuccess, queryClient]);
@@ -55,42 +50,32 @@ export function useCards(enabled = true) {
   return query;
 }
 
-export function useCreateCard() {
-  const queryClient = useQueryClient();
+/** Loaded cards, or a stable empty list while loading. */
+export function useCardList() {
+  return useCards().data ?? NO_CARDS;
+}
 
+function useCardMutation<TVariables, TResult>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
+) {
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: CardPayload) => createCard(payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY });
-    },
+    mutationFn,
+    onSuccess: () => invalidateDomain(queryClient, 'cards'),
   });
+}
+
+export function useCreateCard() {
+  return useCardMutation((payload: CardPayload) => createCard(payload));
 }
 
 export function useUpdateCard() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      id,
-      payload,
-    }: {
-      id: string;
-      payload: Partial<CardPayload>;
-    }) => updateCard(id, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY });
-    },
-  });
+  return useCardMutation(
+    ({ id, payload }: { id: string; payload: Partial<CardPayload> }) =>
+      updateCard(id, payload),
+  );
 }
 
 export function useDeleteCard() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => deleteCard(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: CARDS_QUERY_KEY });
-      void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-    },
-  });
+  return useCardMutation((id: string) => deleteCard(id));
 }

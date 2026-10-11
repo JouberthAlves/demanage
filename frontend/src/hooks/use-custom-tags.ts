@@ -2,18 +2,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   createCustomTag,
-  listCustomTags,
   type CustomTagPayload,
+  listCustomTags,
 } from '@/lib/custom-tags-api';
+import { queryKeys } from '@/lib/query-keys';
 import type { CustomTagScope } from '@/types/finance';
-
-export function customTagsQueryKey(scope: CustomTagScope) {
-  return ['custom-tags', scope] as const;
-}
 
 export function useCustomTags(scope: CustomTagScope) {
   return useQuery({
-    queryKey: customTagsQueryKey(scope),
+    queryKey: queryKeys.customTags(scope),
     queryFn: () => listCustomTags(scope),
   });
 }
@@ -23,10 +20,9 @@ export function useCreateCustomTag() {
 
   return useMutation({
     mutationFn: (payload: CustomTagPayload) => createCustomTag(payload),
-    onSuccess: (tag) => {
-      void queryClient.invalidateQueries({
-        queryKey: customTagsQueryKey(tag.scope),
-      });
-    },
+    onSuccess: (tag) =>
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.customTags(tag.scope),
+      }),
   });
 }

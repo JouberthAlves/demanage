@@ -1,82 +1,61 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect } from 'react';
 
 import {
   createExpense,
   deleteExpense,
+  type ExpensePayload,
   listExpenses,
   markExpensePaid,
   updateExpense,
-  type ExpensePayload,
 } from '@/lib/expenses-api';
-import { useFinanceStore } from '@/stores/finance-store';
+import { invalidateDomain, queryKeys } from '@/lib/query-keys';
+import type { RecurringExpense } from '@/types/finance';
 
-export const EXPENSES_QUERY_KEY = ['expenses'] as const;
-const PATRIMONY_QUERY_KEY = ['patrimony'] as const;
-
-function invalidateExpenseRelated(queryClient: ReturnType<typeof useQueryClient>) {
-  void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
-}
+const NO_EXPENSES: RecurringExpense[] = [];
 
 export function useExpenses(enabled = true) {
-  const setExpenses = useFinanceStore((state) => state.setExpenses);
-
-  const query = useQuery({
-    queryKey: EXPENSES_QUERY_KEY,
+  return useQuery({
+    queryKey: queryKeys.expenses,
     queryFn: listExpenses,
     enabled,
     staleTime: 60_000,
   });
+}
 
-  useEffect(() => {
-    if (query.data) {
-      setExpenses(query.data);
-    }
-  }, [query.data, setExpenses]);
+/** Loaded expenses, or a stable empty list while loading. */
+export function useExpenseList() {
+  return useExpenses().data ?? NO_EXPENSES;
+}
 
-  return query;
+function useExpenseMutation<TVariables, TResult>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => invalidateDomain(queryClient, 'expenses'),
+  });
 }
 
 export function useCreateExpense() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (payload: ExpensePayload) => createExpense(payload),
-    onSuccess: () => invalidateExpenseRelated(queryClient),
-  });
+  return useExpenseMutation((payload: ExpensePayload) =>
+    createExpense(payload),
+  );
 }
 
 export function useUpdateExpense() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      id,
-      payload,
-    }: {
-      id: string;
-      payload: Partial<ExpensePayload>;
-    }) => updateExpense(id, payload),
-    onSuccess: () => invalidateExpenseRelated(queryClient),
-  });
+  return useExpenseMutation(
+    ({ id, payload }: { id: string; payload: Partial<ExpensePayload> }) =>
+      updateExpense(id, payload),
+  );
 }
 
 export function useMarkExpensePaid() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ id, month }: { id: string; month: string }) =>
-      markExpensePaid(id, month),
-    onSuccess: () => invalidateExpenseRelated(queryClient),
-  });
+  return useExpenseMutation(({ id, month }: { id: string; month: string }) =>
+    markExpensePaid(id, month),
+  );
 }
 
 export function useDeleteExpense() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => deleteExpense(id),
-    onSuccess: () => invalidateExpenseRelated(queryClient),
-  });
+  return useExpenseMutation((id: string) => deleteExpense(id));
 }

@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "vite --port 5180",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
-    "test": "tsx --test tests/*.test.ts",
+    "lint": "eslint . --max-warnings 0",
+    "typecheck": "tsc -b",
+    "test": "tsx --test \"tests/*.test.ts\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "preview": "vite preview"
   },

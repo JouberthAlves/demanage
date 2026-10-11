@@ -1,19 +1,12 @@
-import { isAxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
+import { AuthCard, AuthLoading } from '@/components/auth/auth-card';
+import { PasswordFields } from '@/components/auth/password-fields';
+import { validatePasswordPair } from '@/components/auth/password-validation';
 import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
-import { AuthShell } from '@/components/layout/auth-shell';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import {
   Field,
   FieldDescription,
@@ -23,7 +16,7 @@ import {
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { passwordPolicyError } from '@/lib/password-policy';
+import { getApiErrorMessage, getApiErrorStatus } from '@/lib/api-error';
 import { useAuthStore } from '@/stores/auth-store';
 
 export function RegisterPage() {
@@ -49,13 +42,7 @@ export function RegisterPage() {
     void fetchMe();
   }, [fetchMe]);
 
-  if (isLoading) {
-    return (
-      <div className='flex min-h-screen items-center justify-center bg-background'>
-        <Spinner className='size-6' />
-      </div>
-    );
-  }
+  if (isLoading) return <AuthLoading />;
 
   if (isAuthenticated && !recoveryCode) {
     return <Navigate to='/' replace />;
@@ -67,19 +54,15 @@ export function RegisterPage() {
     setEmailError(null);
     setConfirmPasswordError(null);
 
-    if (password !== confirmPassword) {
-      const message = 'As senhas não coincidem';
-      setConfirmPasswordError(message);
-      toast.error(message);
-      document.getElementById('register-confirm-password')?.focus();
-      return;
-    }
-
-    const policyError = passwordPolicyError(password);
-    if (policyError) {
-      setError(policyError);
-      toast.error(policyError);
-      document.getElementById('register-password')?.focus();
+    const issue = validatePasswordPair(password, confirmPassword);
+    if (issue) {
+      if (issue.field === 'confirm-password') {
+        setConfirmPasswordError(issue.message);
+      } else {
+        setError(issue.message);
+      }
+      toast.error(issue.message);
+      document.getElementById(`register-${issue.field}`)?.focus();
       return;
     }
 
@@ -90,10 +73,8 @@ export function RegisterPage() {
       setRecoveryCode(result.recoveryCode);
       toast.success('Conta criada');
     } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível criar a conta')
-        : 'Não foi possível criar a conta';
-      if (isAxiosError(err) && err.response?.status === 409) {
+      const message = getApiErrorMessage(err, 'Não foi possível criar a conta');
+      if (getApiErrorStatus(err) === 409) {
         setEmailError(message);
       } else {
         setError(message);
@@ -106,176 +87,98 @@ export function RegisterPage() {
 
   if (recoveryCode) {
     return (
-      <AuthShell>
-        <div className='mb-8 flex flex-col items-center gap-3 text-center'>
-          <img
-            src='/favicon.svg'
-            alt='deManage'
-            className='size-16 drop-shadow-[0_0_24px_rgba(52,211,153,0.35)]'
-          />
-          <div>
-            <p className='text-2xl font-semibold tracking-tight'>
-              Conta criada
-            </p>
-            <p className='mt-1 text-sm text-muted-foreground'>
-              Salve seu código antes de continuar
-            </p>
-          </div>
-        </div>
-
-        <Card
-          className='w-full border-white/10 bg-card/55 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl'
-          size='sm'
-        >
-          <CardHeader>
-            <CardTitle>Seu código offline</CardTitle>
-            <CardDescription>
-              Ele permite redefinir sua senha sem e-mail ou SMS.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <RecoveryCodePanel recoveryCode={recoveryCode} />
-          </CardContent>
-          <CardFooter>
-            <Button
-              type='button'
-              className='w-full'
-              onClick={() => navigate('/', { replace: true })}
-            >
-              Já guardei, continuar
-            </Button>
-          </CardFooter>
-        </Card>
-      </AuthShell>
+      <AuthCard
+        brandTitle='Conta criada'
+        brandSubtitle='Salve seu código antes de continuar'
+        title='Seu código offline'
+        description='Ele permite redefinir sua senha sem e-mail ou SMS.'
+        footer={
+          <Button
+            type='button'
+            className='w-full'
+            onClick={() => navigate('/', { replace: true })}
+          >
+            Já guardei, continuar
+          </Button>
+        }
+      >
+        <RecoveryCodePanel recoveryCode={recoveryCode} />
+      </AuthCard>
     );
   }
 
   return (
-    <AuthShell>
-      <div className='mb-8 flex flex-col items-center gap-3 text-center'>
-        <img
-          src='/favicon.svg'
-          alt='deManage'
-          className='size-16 drop-shadow-[0_0_24px_rgba(52,211,153,0.35)]'
-        />
-        <div>
-          <p className='text-2xl font-semibold tracking-tight'>deManage</p>
-          <p className='mt-1 text-sm text-muted-foreground'>
-            Comece a organizar seu mês
-          </p>
-        </div>
-      </div>
-      <Card
-        className='w-full border-white/10 bg-card/55 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl'
-        size='sm'
-      >
-        <CardHeader>
-          <CardTitle>Criar conta</CardTitle>
-          <CardDescription>
-            Cadastre-se para começar a usar o deManage.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit}>
-            <FieldGroup>
-              {error ? (
-                <p role='alert' className='text-sm text-destructive'>
-                  {error}
-                </p>
-              ) : null}
-              <Field>
-                <FieldLabel htmlFor='register-name'>Nome</FieldLabel>
-                <Input
-                  id='register-name'
-                  type='text'
-                  autoComplete='name'
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  required
-                />
-              </Field>
-              <Field data-invalid={emailError ? true : undefined}>
-                <FieldLabel htmlFor='register-email'>E-mail</FieldLabel>
-                <Input
-                  id='register-email'
-                  type='email'
-                  autoComplete='email'
-                  value={email}
-                  onChange={(event) => {
-                    setEmail(event.target.value);
-                    setEmailError(null);
-                  }}
-                  aria-invalid={Boolean(emailError)}
-                  aria-describedby={
-                    emailError ? 'register-email-error' : undefined
-                  }
-                  required
-                />
-                {emailError ? (
-                  <FieldError id='register-email-error'>
-                    {emailError}
-                  </FieldError>
-                ) : null}
-              </Field>
-              <Field>
-                <FieldLabel htmlFor='register-password'>Senha</FieldLabel>
-                <Input
-                  id='register-password'
-                  type='password'
-                  autoComplete='new-password'
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  minLength={12}
-                  required
-                />
-                <FieldDescription>
-                  Mínimo de 12 caracteres e máximo de 72 bytes em UTF-8.
-                </FieldDescription>
-              </Field>
-              <Field data-invalid={confirmPasswordError ? true : undefined}>
-                <FieldLabel htmlFor='register-confirm-password'>
-                  Confirmar senha
-                </FieldLabel>
-                <Input
-                  id='register-confirm-password'
-                  type='password'
-                  autoComplete='new-password'
-                  value={confirmPassword}
-                  onChange={(event) => {
-                    setConfirmPassword(event.target.value);
-                    setConfirmPasswordError(null);
-                  }}
-                  aria-invalid={Boolean(confirmPasswordError)}
-                  aria-describedby={
-                    confirmPasswordError
-                      ? 'register-confirm-password-error'
-                      : undefined
-                  }
-                  minLength={12}
-                  required
-                />
-                {confirmPasswordError ? (
-                  <FieldError id='register-confirm-password-error'>
-                    {confirmPasswordError}
-                  </FieldError>
-                ) : null}
-              </Field>
-              <Button type='submit' className='w-full' disabled={submitting}>
-                {submitting ? <Spinner data-icon='inline-start' /> : null}
-                Criar conta
-              </Button>
-            </FieldGroup>
-          </form>
-        </CardContent>
-        <CardFooter>
-          <FieldDescription>
-            Já tem conta?{' '}
-            <Link to='/login' className='underline underline-offset-4'>
-              Entrar
-            </Link>
-          </FieldDescription>
-        </CardFooter>
-      </Card>
-    </AuthShell>
+    <AuthCard
+      brandTitle='deManage'
+      brandSubtitle='Comece a organizar seu mês'
+      title='Criar conta'
+      description='Cadastre-se para começar a usar o deManage.'
+      footer={
+        <FieldDescription>
+          Já tem conta?{' '}
+          <Link to='/login' className='underline underline-offset-4'>
+            Entrar
+          </Link>
+        </FieldDescription>
+      }
+    >
+      <form onSubmit={handleSubmit}>
+        <FieldGroup>
+          {error ? (
+            <p role='alert' className='text-sm text-destructive'>
+              {error}
+            </p>
+          ) : null}
+          <Field>
+            <FieldLabel htmlFor='register-name'>Nome</FieldLabel>
+            <Input
+              id='register-name'
+              type='text'
+              autoComplete='name'
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+            />
+          </Field>
+          <Field data-invalid={emailError ? true : undefined}>
+            <FieldLabel htmlFor='register-email'>E-mail</FieldLabel>
+            <Input
+              id='register-email'
+              type='email'
+              autoComplete='email'
+              value={email}
+              onChange={(event) => {
+                setEmail(event.target.value);
+                setEmailError(null);
+              }}
+              aria-invalid={Boolean(emailError)}
+              aria-describedby={emailError ? 'register-email-error' : undefined}
+              required
+            />
+            {emailError ? (
+              <FieldError id='register-email-error'>{emailError}</FieldError>
+            ) : null}
+          </Field>
+          <PasswordFields
+            idPrefix='register'
+            password={password}
+            confirmPassword={confirmPassword}
+            confirmError={confirmPasswordError}
+            onPasswordChange={(value) => {
+              setPassword(value);
+              setConfirmPasswordError(null);
+            }}
+            onConfirmPasswordChange={(value) => {
+              setConfirmPassword(value);
+              setConfirmPasswordError(null);
+            }}
+          />
+          <Button type='submit' className='w-full' disabled={submitting}>
+            {submitting ? <Spinner data-icon='inline-start' /> : null}
+            Criar conta
+          </Button>
+        </FieldGroup>
+      </form>
+    </AuthCard>
   );
 }

@@ -1,0 +1,21 @@
+{
+  "name": "demanage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Convenience scripts for the deManage monorepo. Each package keeps its own pnpm lockfile.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "bootstrap": "pnpm --dir backend install --frozen-lockfile && pnpm --dir frontend install --frozen-lockfile",
+    "typecheck": "pnpm --dir backend typecheck && pnpm --dir frontend typecheck",
+    "lint": "pnpm --dir backend lint && pnpm --dir frontend lint",
+    "test": "pnpm --dir backend test:unit && pnpm --dir frontend test",
+    "test:integration": "pnpm --dir backend test:integration",
+    "build": "pnpm --dir backend build && pnpm --dir frontend build",
+    "dev:backend": "pnpm --dir backend dev",
+    "dev:frontend": "pnpm --dir frontend dev",
+    "db:up": "docker compose up -d db",
+    "deploy-agent:test": "python -m unittest discover -s ops/cd/tests -v"
+  }
+}

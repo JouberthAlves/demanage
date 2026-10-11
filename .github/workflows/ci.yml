@@ -9,9 +9,16 @@ on:
 permissions:
   contents: read
 
+# Cancel superseded PR runs only. Master pushes always finish, because the
+# production promotion gate needs a successful CI run for that exact SHA.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
@@ -33,60 +40,113 @@ jobs:
     env:
       TZ: UTC
       DATABASE_URL: postgresql://demanage:demanage@localhost:5432/demanage?schema=public
+      # Separate database: the drift check resets its shadow database.
+      SHADOW_DATABASE_URL: postgresql://demanage:demanage@localhost:5432/demanage_shadow?schema=public
       JWT_SECRET: ci-secret-not-for-production
       APP_URL: http://localhost:5180
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
         with:
-          version: 10.17.1
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
         with:
-          node-version: 26.8.2
-          cache: pnpm
-          cache-dependency-path: backend/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm audit --audit-level moderate
-      - run: pnpm exec prisma generate
-      - run: pnpm exec prisma migrate deploy
-      - run: pnpm lint
-      - run: pnpm test
-      - run: pnpm build
+          package-dir: backend
+      - name: Audit dependencies
+        run: pnpm audit --audit-level moderate
+      - name: Validate Prisma schema
+        run: pnpm exec prisma validate
+      - name: Generate Prisma client
+        run: pnpm exec prisma generate
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Create shadow database
+        env:
+          PGPASSWORD: demanage
+        run: psql -h localhost -U demanage -d demanage -v ON_ERROR_STOP=1 -c 'CREATE DATABASE demanage_shadow'
+      # Two migrations already applied in production share 20260821120000. Renaming
+      # applied migrations breaks _prisma_migrations, so that one prefix is allowed.
+      # See docs/database-migrations.md.
+      - name: Check migration timestamps are unique
+        run: |
+          duplicates=$(ls prisma/migrations | grep -E '^[0-9]{14}_' | cut -c1-14 | sort | uniq -d | grep -v '^20260821120000$' || true)
+          if [ -n "$duplicates" ]; then
+            echo "::error::Duplicate migration timestamps: $duplicates"
+            exit 1
+          fi
+      - name: Apply migrations
+        run: pnpm exec prisma migrate deploy
+      # Fails (exit 2) when prisma/migrations does not produce prisma/schema.prisma.
+      - name: Migration drift gate
+        run: pnpm exec prisma migrate diff --from-migrations prisma/migrations --to-schema prisma/schema.prisma --exit-code
+      - name: Lint
+        run: pnpm lint
+      - name: Unit tests
+        run: pnpm test:unit
+      - name: Integration tests
+        run: pnpm test:integration
+      - name: Build
+        run: pnpm build
 
   frontend:
     runs-on: ubuntu-latest
-    env:
-      TZ: UTC
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
+    env:
+      TZ: UTC
     steps:
       - uses: actions/checkout@v7
-      - uses: pnpm/action-setup@v6
         with:
-          version: 10.17.1
-      - uses: actions/setup-node@v7
+          persist-credentials: false
+      - uses: ./.github/actions/setup-pnpm
         with:
-          node-version: 26.8.2
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - id: install
-        run: pnpm install --frozen-lockfile
-      - run: pnpm audit --audit-level moderate
-      - run: pnpm lint
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-      - run: pnpm test
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
-      - run: pnpm build
-        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+          package-dir: frontend
+      - name: Audit dependencies
+        run: pnpm audit --audit-level moderate
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Lint
+        run: pnpm lint
+      - name: Test
+        run: pnpm test
+      - name: Build
+        run: pnpm build
+
+  docker-build:
+    # Build only (no push). Publishing happens in publish-ghcr.yml after CI succeeds on master.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.service }} image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          platforms: linux/amd64
+          push: false
+          build-args: ${{ matrix.service == 'frontend' && 'VITE_API_URL=/api' || '' }}
+          # Read-only cache: fork PRs cannot write to the Actions cache.
+          cache-from: type=gha,scope=demanage-${{ matrix.service }}
 
   deploy-safety:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      - name: Validate deploy agent syntax
-        run: python3 -m py_compile ops/cd/deploy_agent.py
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14.4'
+      - name: Compile deploy agent
+        run: python -m compileall -q ops/cd
       - name: Run fail-closed deployment tests
-        run: python3 -m unittest discover -s ops/cd/tests -v
+        run: python -m unittest discover -s ops/cd/tests -v

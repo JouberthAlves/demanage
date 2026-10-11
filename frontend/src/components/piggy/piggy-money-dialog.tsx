@@ -1,5 +1,4 @@
-import { isAxiosError } from 'axios';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -19,8 +18,10 @@ import {
   useDepositPiggyBank,
   useWithdrawPiggyBank,
 } from '@/hooks/use-piggy-banks';
+import { getApiErrorMessage } from '@/lib/api-error';
 import { celebrateGoal } from '@/lib/confetti';
 import { formatCurrency, parseCurrencyInput } from '@/lib/format';
+import type { depositPiggyBank } from '@/lib/piggy-api';
 import { piggyHasGoal } from '@/lib/piggy-math';
 import type { PiggyBank } from '@/types/finance';
 
@@ -37,18 +38,51 @@ export function PiggyMoneyDialog({
   bank,
   mode,
 }: PiggyMoneyDialogProps) {
+  const isDeposit = mode === 'deposit';
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className='max-h-[min(90dvh,720px)] overflow-y-auto rounded-xl sm:max-w-md'>
+        <DialogHeader>
+          <DialogTitle>
+            {isDeposit ? 'Guardar no cofre' : 'Sacar do cofre'}
+          </DialogTitle>
+          <DialogDescription>
+            {isDeposit
+              ? piggyHasGoal(bank?.goalAmount)
+                ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.`
+                : 'Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.'
+              : bank?.isEmergency
+                ? 'Atenção: este é um cofre de emergência. O valor volta ao saldo do mês.'
+                : 'O valor volta ao saldo do mês como entrada de resgate.'}
+          </DialogDescription>
+        </DialogHeader>
+        {/* Content unmounts when closed; the key resets state per bank/mode. */}
+        <PiggyMoneyForm
+          key={`${bank?.id ?? 'none'}:${mode}`}
+          bank={bank}
+          mode={mode}
+          onClose={() => onOpenChange(false)}
+        />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function PiggyMoneyForm({
+  bank,
+  mode,
+  onClose,
+}: {
+  bank: PiggyBank | null;
+  mode: 'deposit' | 'withdraw';
+  onClose: () => void;
+}) {
   const deposit = useDepositPiggyBank();
   const withdraw = useWithdrawPiggyBank();
   const [amount, setAmount] = useState('');
   const [confirmBalanceDeduction, setConfirmBalanceDeduction] = useState(false);
   const submitting = deposit.isPending || withdraw.isPending;
-
-  useEffect(() => {
-    if (open) {
-      setAmount('');
-      setConfirmBalanceDeduction(false);
-    }
-  }, [open, mode, bank?.id]);
 
   const monthlyHint = useMemo(() => {
     if (!bank || mode !== 'deposit' || !piggyHasGoal(bank.goalAmount)) {
@@ -78,10 +112,11 @@ export function PiggyMoneyDialog({
 
     try {
       if (mode === 'deposit') {
-        const result = await deposit.mutateAsync({
+        // The shared mutation hook types its result as unknown.
+        const result = (await deposit.mutateAsync({
           id: bank.id,
           amount: value,
-        });
+        })) as Awaited<ReturnType<typeof depositPiggyBank>>;
         toast.success(
           `Guardado ${formatCurrency(result.depositAmount)} em ${bank.name}`,
         );
@@ -95,117 +130,95 @@ export function PiggyMoneyDialog({
           `Resgatado ${formatCurrency(value)} — valor voltou ao saldo`,
         );
       }
-      onOpenChange(false);
+      onClose();
     } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Operação não concluída')
-        : 'Operação não concluída';
-      toast.error(message);
+      toast.error(getApiErrorMessage(err, 'Operação não concluída'));
     }
   }
 
   const isDeposit = mode === 'deposit';
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className='max-h-[min(90dvh,720px)] overflow-y-auto rounded-xl sm:max-w-md'>
-        <DialogHeader>
-          <DialogTitle>
-            {isDeposit ? 'Guardar no cofre' : 'Sacar do cofre'}
-          </DialogTitle>
-          <DialogDescription>
-            {isDeposit
-              ? piggyHasGoal(bank?.goalAmount)
-                ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.`
-                : 'Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.'
-              : bank?.isEmergency
-                ? 'Atenção: este é um cofre de emergência. O valor volta ao saldo do mês.'
-                : 'O valor volta ao saldo do mês como entrada de resgate.'}
-          </DialogDescription>
-        </DialogHeader>
+    <form
+      onSubmit={(event) => void handleSubmit(event)}
+      className='flex flex-col gap-4'
+    >
+      {isDeposit && monthlyHint ? (
+        <div className='rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm text-violet-100'>
+          <p className='font-medium'>
+            Meta por mês para bater o objetivo:{' '}
+            {formatCurrency(monthlyHint.monthly)}
+          </p>
+          <p className='mt-1 text-xs text-violet-200/80'>
+            Ainda faltam {formatCurrency(monthlyHint.remaining)}. Você
+            escolhe o valor — só guarda ao confirmar abaixo.
+          </p>
+        </div>
+      ) : null}
 
-        <form
-          onSubmit={(event) => void handleSubmit(event)}
-          className='flex flex-col gap-4'
-        >
-          {isDeposit && monthlyHint ? (
-            <div className='rounded-lg border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-sm text-violet-100'>
-              <p className='font-medium'>
-                Meta por mês para bater o objetivo:{' '}
-                {formatCurrency(monthlyHint.monthly)}
-              </p>
-              <p className='mt-1 text-xs text-violet-200/80'>
-                Ainda faltam {formatCurrency(monthlyHint.remaining)}. Você
-                escolhe o valor — só guarda ao confirmar abaixo.
-              </p>
-            </div>
-          ) : null}
+      <div className='flex flex-col gap-2'>
+        <Label htmlFor='piggy-amount'>Valor</Label>
+        <CurrencyInput
+          id='piggy-amount'
+          value={amount}
+          onValueChange={setAmount}
+          className='rounded-lg'
+        />
+      </div>
 
-          <div className='flex flex-col gap-2'>
-            <Label htmlFor='piggy-amount'>Valor</Label>
-            <CurrencyInput
-              id='piggy-amount'
-              value={amount}
-              onValueChange={setAmount}
-              className='rounded-lg'
+      {isDeposit ? (
+        <div className='rounded-lg border border-border bg-black/20 p-3'>
+          <div className='flex items-start gap-3'>
+            <Checkbox
+              id='piggy-confirm-balance-deduction'
+              checked={confirmBalanceDeduction}
+              onCheckedChange={(checked) =>
+                setConfirmBalanceDeduction(checked === true)
+              }
+              aria-describedby='piggy-confirm-balance-deduction-description'
             />
-          </div>
-
-          {isDeposit ? (
-            <div className='rounded-lg border border-border bg-black/20 p-3'>
-              <div className='flex items-start gap-3'>
-                <Checkbox
-                  id='piggy-confirm-balance-deduction'
-                  checked={confirmBalanceDeduction}
-                  onCheckedChange={(checked) =>
-                    setConfirmBalanceDeduction(checked === true)
-                  }
-                  aria-describedby='piggy-confirm-balance-deduction-description'
-                />
-                <div className='space-y-1'>
-                  <Label
-                    htmlFor='piggy-confirm-balance-deduction'
-                    className='cursor-pointer leading-snug'
-                  >
-                    Deseja que esse valor desconte do seu saldo?
-                  </Label>
-                  <p
-                    id='piggy-confirm-balance-deduction-description'
-                    className='text-xs text-muted-foreground'
-                  >
-                    Ao confirmar, será criada uma despesa “Cofrinho” com esse
-                    valor no mês atual.
-                  </p>
-                </div>
-              </div>
+            <div className='space-y-1'>
+              <Label
+                htmlFor='piggy-confirm-balance-deduction'
+                className='cursor-pointer leading-snug'
+              >
+                Deseja que esse valor desconte do seu saldo?
+              </Label>
+              <p
+                id='piggy-confirm-balance-deduction-description'
+                className='text-xs text-muted-foreground'
+              >
+                Ao confirmar, será criada uma despesa “Cofrinho” com esse
+                valor no mês atual.
+              </p>
             </div>
-          ) : null}
+          </div>
+        </div>
+      ) : null}
 
-          {!isDeposit && bank ? (
-            <p className='text-sm text-muted-foreground'>
-              Disponível no cofre: {formatCurrency(bank.balance)}
-            </p>
-          ) : null}
+      {!isDeposit && bank ? (
+        <p className='text-sm text-muted-foreground'>
+          Disponível no cofre: {formatCurrency(bank.balance)}
+        </p>
+      ) : null}
 
-          <DialogFooter>
-            <Button
-              type='button'
-              variant='ghost'
-              onClick={() => onOpenChange(false)}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type='submit'
-              variant={isDeposit ? 'default' : 'destructive'}
-              disabled={submitting || (isDeposit && !confirmBalanceDeduction)}
-            >
-              {submitting ? <Spinner data-icon='inline-start' /> : null}
-              {isDeposit ? 'Confirmar depósito' : 'Sacar'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
+      <DialogFooter>
+        <Button
+          type='button'
+          variant='ghost'
+          onClick={() => onClose()}
+        >
+          Cancelar
+        </Button>
+        <Button
+          type='submit'
+          variant={isDeposit ? 'default' : 'destructive'}
+          disabled={submitting || (isDeposit && !confirmBalanceDeduction)}
+        >
+          {submitting ? <Spinner data-icon='inline-start' /> : null}
+          {isDeposit ? 'Confirmar depósito' : 'Sacar'}
+        </Button>
+      </DialogFooter>
+    </form>
   );
 }
