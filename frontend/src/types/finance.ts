@@ -13,6 +13,8 @@ export type Card = {
   committed: number;
   /** Limit minus committed; null when the card has no limit. */
   available: number | null;
+  /** Worst-case charges per frequency in this card's current open cycle. */
+  maxChargesPerCycle?: Record<ExpenseFrequency, number>;
 };
 
 export type Profile = {

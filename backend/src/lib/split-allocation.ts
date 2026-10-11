@@ -1,6 +1,10 @@
 import type { Card } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
-import { maxChargesPerCycle } from '@/lib/billing/charges';
+import {
+  type CycleWindow,
+  maxChargesForWindow,
+  maxChargesPerCycle,
+} from '@/lib/billing/charges';
 import { DomainError } from '@/lib/errors';
 import { allocateByPercent, toMoney } from '@/lib/money';
 
@@ -154,7 +158,8 @@ export function validateSplitShape(inputs: SplitInput[]) {
 /**
  * Product rule: a new/edited expense must fit the card for a FULL billing
  * cycle. The candidate charge is the card's share times the most charges the
- * frequency can produce in one cycle (weekly = 5, monthly/one-off = 1), and
+ * frequency can produce in the card's current open window (at least a normal
+ * cycle: weekly 5, monthly/one-off 1; longer when a closing was skipped), and
  * `committedByCard` (current cycle, already excluding the expense being
  * edited) plus that charge may not exceed the limit.
  */
@@ -163,12 +168,20 @@ export function assertCardLimits(args: {
   resolved: ResolvedSplit[];
   committedByCard: Map<string, number>;
   frequency: string;
+  /** Each card's current open window; absent = a normal full cycle. */
+  windows?: Map<string, CycleWindow>;
 }) {
-  const charges = maxChargesPerCycle(args.frequency);
   for (const split of args.resolved) {
     if (split.kind !== 'card' || !split.cardId) continue;
     const card = args.cards.get(split.cardId);
     if (!card || card.limit == null) continue;
+
+    const window = args.windows?.get(split.cardId);
+    const charges = window
+      ? ((maxChargesForWindow(window) as Record<string, number>)[
+          args.frequency
+        ] ?? 1)
+      : maxChargesPerCycle(args.frequency);
 
     const committed = args.committedByCard.get(split.cardId) ?? 0;
     const available = toMoney(new Prisma.Decimal(card.limit).minus(committed));

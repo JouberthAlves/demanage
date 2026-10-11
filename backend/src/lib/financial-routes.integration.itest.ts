@@ -878,3 +878,56 @@ test('piggy bank patch keeps stored monthly goal and rejects non-boolean flags',
     await cleanupUser(user.id);
   }
 });
+
+test('card limit reserves every charge of an open cycle longer than a month', async () => {
+  const user = await createUser('Long cycle card limit');
+  const todayKey = dayKeyOfDate(todayInSaoPaulo());
+  // The closing lands 41 days from now: the open window is today..today+41
+  // (42 days), so a monthly expense bills twice whatever the run date is.
+  const closingKey = addDaysToKey(todayKey, 41);
+  const lastInvoiced = new Date(todayInSaoPaulo());
+  lastInvoiced.setUTCDate(lastInvoiced.getUTCDate() - 1);
+  const card = await prisma.card.create({
+    data: {
+      userId: user.id,
+      name: 'Long cycle card',
+      limit: 100,
+      closingDay: Number(closingKey.slice(8)),
+      lastInvoicedOn: lastInvoiced,
+      minimumNextClosingOn: new Date(`${addDaysToKey(todayKey, 40)}T12:00:00.000Z`),
+      createdAt: new Date('2026-01-01T12:00:00.000Z'),
+    },
+  });
+  const api = await startApi(user.id);
+
+  try {
+    const listed = await api.request('/cards', 'GET');
+    assert.equal(listed.response.status, 200);
+    const apiCard = (
+      listed.data as Array<{
+        id: string;
+        maxChargesPerCycle: { unica: number; mensal: number; semanal: number };
+      }>
+    ).find((item) => item.id === card.id);
+    assert.equal(apiCard?.maxChargesPerCycle.mensal, 2);
+    assert.equal(apiCard?.maxChargesPerCycle.semanal, 6);
+    assert.equal(apiCard?.maxChargesPerCycle.unica, 1);
+
+    const body = (amount: number) => ({
+      name: 'Assinatura',
+      amount,
+      category: 'outro',
+      frequency: 'mensal',
+      dueDay: 5,
+      startsAt: todayKey,
+      splits: [{ kind: 'card', cardId: card.id, percent: 100 }],
+    });
+    const rejected = await api.request('/expenses', 'POST', body(60));
+    assert.equal(rejected.response.status, 400);
+    const accepted = await api.request('/expenses', 'POST', body(50));
+    assert.equal(accepted.response.status, 201);
+  } finally {
+    await api.close();
+    await cleanupUser(user.id);
+  }
+});

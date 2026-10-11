@@ -1,7 +1,7 @@
 import { api } from '@/lib/api';
 import { isCardExpired } from '@/lib/format';
 import { fromCents, toCents } from '@/lib/money';
-import type { Card } from '@/types/finance';
+import type { Card, ExpenseFrequency } from '@/types/finance';
 
 export type ApiCard = {
   id: string;
@@ -17,6 +17,8 @@ export type ApiCard = {
   /** Absent on older backends. */
   committed?: string | number | null;
   available?: string | number | null;
+  /** Absent on older backends: falls back to a normal cycle. */
+  maxChargesPerCycle?: Partial<Record<ExpenseFrequency, number>> | null;
 };
 
 export type CardPayload = {
@@ -43,6 +45,11 @@ export function mapCardToLocal(card: ApiCard): Card {
     limit,
     committed,
     available,
+    maxChargesPerCycle: {
+      unica: card.maxChargesPerCycle?.unica ?? 1,
+      mensal: card.maxChargesPerCycle?.mensal ?? 1,
+      semanal: card.maxChargesPerCycle?.semanal ?? 5,
+    },
     closingDay: card.closingDay ?? undefined,
     pendingClosingDay: card.pendingClosingDay ?? null,
     expiresAt,

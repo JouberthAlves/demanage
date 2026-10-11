@@ -104,6 +104,12 @@ export type CycleWindow = {
   includePeriodStart: boolean;
 };
 
+export type MaxChargesPerCycle = {
+  unica: number;
+  mensal: number;
+  semanal: number;
+};
+
 function recurringStartKey(expense: BillableExpense): DayKey {
   return expense.startsAt
     ? dayKeyOfDate(expense.startsAt)
@@ -210,6 +216,64 @@ export function chargeOccurrences(
   return expense.frequency === 'semanal'
     ? countWeeklyOccurrences(startKey, lowerInclusive, hi)
     : countMonthlyOccurrences(startKey, lowerInclusive, hi);
+}
+
+/**
+ * Worst-case number of charges of `frequency` inside a concrete cycle window,
+ * over every possible anchor (weekday for weekly, day-of-month 1..31 for
+ * monthly, honouring month-end clamping). One-offs are always 1.
+ */
+export function worstCaseChargesInWindow(
+  frequency: string,
+  window: CycleWindow,
+): number {
+  if (frequency === 'unica') return 1;
+  const lo = window.includePeriodStart
+    ? window.periodStartKey
+    : addDaysToKey(window.periodStartKey, 1);
+  const hi = window.closingKey;
+  if (compareDayKeys(lo, hi) > 0) return 0;
+
+  let worst = 0;
+  if (frequency === 'semanal') {
+    // Anchor on/before `lo` so only the weekday matters.
+    for (let i = 0; i < 7; i += 1) {
+      const anchor = addDaysToKey(lo, -i);
+      worst = Math.max(worst, countWeeklyOccurrences(anchor, lo, hi));
+    }
+    return worst;
+  }
+  if (frequency === 'mensal') {
+    const loDate = parseDayKey(lo);
+    if (!loDate) return 0;
+    for (let day = 1; day <= 31; day += 1) {
+      // January (31 days) of the previous year: before the window, and the
+      // anchor keeps its real day-of-month so clamping happens per month.
+      const anchor = formatDayKey(loDate.year - 1, 0, day);
+      worst = Math.max(worst, countMonthlyOccurrences(anchor, lo, hi));
+    }
+    return worst;
+  }
+  return 1;
+}
+
+/**
+ * Charges per cycle used to validate card limits: the worst case inside the
+ * card's CURRENT open window, never below the constant of a normal cycle (a
+ * short remaining window must not lower the bar).
+ */
+export function maxChargesForWindow(window: CycleWindow): MaxChargesPerCycle {
+  return {
+    unica: 1,
+    mensal: Math.max(
+      MAX_CHARGES_PER_CYCLE.mensal,
+      worstCaseChargesInWindow('mensal', window),
+    ),
+    semanal: Math.max(
+      MAX_CHARGES_PER_CYCLE.semanal,
+      worstCaseChargesInWindow('semanal', window),
+    ),
+  };
 }
 
 export function chargeAmountDecimal(

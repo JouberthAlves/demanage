@@ -206,6 +206,24 @@ test('weekly expenses reserve five charges against the available limit', () => {
   assert.equal(validate({ ...over, frequency: 'mensal' }, { cards: tight }), null);
 });
 
+test('a cycle longer than a month uses the card maxChargesPerCycle', () => {
+  const longCycle: Card[] = [
+    {
+      ...c2,
+      maxChargesPerCycle: { unica: 1, mensal: 2, semanal: 9 },
+    },
+  ];
+  const monthly = (amount: string) =>
+    form({ amount, frequency: 'mensal', payMode: 'one_card', cardId: 'c2' });
+  // R$ 60 x 2 = 120 > 100; R$ 50 x 2 = 100 fits.
+  assert.equal(validate(monthly('60,00'), { cards: longCycle })?.fieldId, 'expense-card');
+  assert.equal(validate(monthly('50,00'), { cards: longCycle }), null);
+  // weekly R$ 15 x 9 = 135 > 100; R$ 11,11 x 9 = 99,99 fits.
+  const weekly = (amount: string) => ({ ...monthly(amount), frequency: 'semanal' as const });
+  assert.equal(validate(weekly('15,00'), { cards: longCycle })?.fieldId, 'expense-card');
+  assert.equal(validate(weekly('11,11'), { cards: longCycle }), null);
+});
+
 test('cards without a limit are never blocked', () => {
   const unlimited: Card[] = [
     { id: 'c3', name: 'Livre', committed: 5000, available: null },

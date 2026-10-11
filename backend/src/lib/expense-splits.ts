@@ -5,17 +5,13 @@ import type {
   ExpenseSplit,
   Prisma,
 } from '@/generated/prisma/client';
-import { nextClosingOnOrAfter } from '@/lib/billing/calendar';
 import {
   chargesTotalDecimal,
+  type CycleWindow,
   lateOneOffsDecimal,
 } from '@/lib/billing/charges';
-import {
-  dayKeyInSaoPaulo,
-  dayKeyOfDate,
-  dayKeyToDate,
-  todayKeyInSaoPaulo,
-} from '@/lib/civil-date';
+import { currentCycleWindow } from '@/lib/billing/cycle-window';
+import { dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 import {
   allocateSplitAmounts,
@@ -112,22 +108,9 @@ export async function getCommittedByCard(args: {
   const todayKey = todayKeyInSaoPaulo();
   const map = new Map<string, number>();
   for (const card of cards) {
-    const periodStartKey = card.lastInvoicedOn
-      ? dayKeyOfDate(card.lastInvoicedOn)
-      : dayKeyInSaoPaulo(card.createdAt);
-    const minimumKey = card.minimumNextClosingOn
-      ? dayKeyOfDate(card.minimumNextClosingOn)
-      : todayKey;
-    const closingKey = nextClosingOnOrAfter(
-      card.closingDay,
-      periodStartKey,
-      minimumKey > todayKey ? minimumKey : todayKey,
-    );
-    const cycleAmount = chargesTotalDecimal(expenses, card.id, {
-      periodStartKey,
-      closingKey,
-      includePeriodStart: card.lastInvoicedOn == null,
-    });
+    const window = currentCycleWindow(card, todayKey);
+    const periodStartKey = window.periodStartKey;
+    const cycleAmount = chargesTotalDecimal(expenses, card.id, window);
     const lateAdjustment =
       card.lastInvoicedOn && card.lastBillingProcessedAt
         ? lateOneOffsDecimal(
@@ -252,11 +235,20 @@ export async function resolveAndValidateSplits(args: {
       tx: args.tx,
     });
 
+    const todayKey = todayKeyInSaoPaulo();
+    const windows = new Map<string, CycleWindow>(
+      [...cards.values()].map((card) => [
+        card.id,
+        currentCycleWindow(card, todayKey),
+      ]),
+    );
+
     assertCardLimits({
       cards,
       resolved,
       committedByCard,
       frequency: args.frequency,
+      windows,
     });
   }
   return resolved;

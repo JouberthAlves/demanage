@@ -131,7 +131,7 @@ export function checkCardLimit(
 ): CardLimitCheck | null {
   if (!card) return null;
   const available = card.available;
-  const candidateCents = toCents(shareAmount) * maxChargesPerCycle(frequency);
+  const candidateCents = toCents(shareAmount) * maxChargesPerCycle(card, frequency);
   return {
     card,
     available,

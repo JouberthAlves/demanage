@@ -1,5 +1,8 @@
 import type { Card } from '@/generated/prisma/client';
 import { Prisma } from '@/generated/prisma/client';
+import { maxChargesForWindow } from '@/lib/billing/charges';
+import { currentCycleWindow } from '@/lib/billing/cycle-window';
+import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { toMoney } from '@/lib/money';
 
 /**
@@ -26,6 +29,10 @@ export function serializeCard(card: Card, committedAmount = 0) {
       card.limit == null
         ? null
         : toMoney(new Prisma.Decimal(card.limit).minus(committed)).toNumber(),
+    /** Worst-case charges per frequency in this card's current open cycle. */
+    maxChargesPerCycle: maxChargesForWindow(
+      currentCycleWindow(card, todayKeyInSaoPaulo()),
+    ),
     expired: card.expiresAt ? card.expiresAt.getTime() < Date.now() : false,
   };
 }

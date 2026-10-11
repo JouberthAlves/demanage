@@ -143,3 +143,34 @@ test('editing an expense does not count its own commitment twice', () => {
     /Limite insuficiente/,
   );
 });
+
+test('card limit uses the real charges of a cycle longer than a month', () => {
+  const cards = new Map([
+    ['c1', { id: 'c1', name: 'Nubank', limit: '100.00' } as unknown as Card],
+  ]);
+  // Oct 2 .. Nov 27: monthly bills 2x, weekly up to 9x.
+  const windows = new Map([
+    [
+      'c1',
+      {
+        periodStartKey: '2026-10-01',
+        closingKey: '2026-11-27',
+        includePeriodStart: false,
+      },
+    ],
+  ]);
+  const check = (amount: number, frequency: string) =>
+    assertCardLimits({
+      cards,
+      resolved: [{ kind: 'card' as const, cardId: 'c1', percent: 100, amount }],
+      committedByCard: new Map([['c1', 0]]),
+      frequency,
+      windows,
+    });
+
+  assert.throws(() => check(60, 'mensal'), /Limite insuficiente/);
+  assert.throws(() => check(15, 'semanal'), /Limite insuficiente/);
+  assert.doesNotThrow(() => check(50, 'mensal'));
+  assert.doesNotThrow(() => check(11.11, 'semanal'));
+  assert.doesNotThrow(() => check(100, 'unica'));
+});

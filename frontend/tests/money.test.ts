@@ -51,8 +51,14 @@ test('computeSplitShares matches the cents allocation for amounts', () => {
   }
 });
 
-test('maxChargesPerCycle: weekly 5, everything else 1', () => {
-  assert.equal(maxChargesPerCycle('semanal'), 5);
-  assert.equal(maxChargesPerCycle('mensal'), 1);
-  assert.equal(maxChargesPerCycle('unica'), 1);
+test('maxChargesPerCycle: uses the card value, falls back to a normal cycle', () => {
+  const plain = {};
+  assert.equal(maxChargesPerCycle(plain, 'semanal'), 5);
+  assert.equal(maxChargesPerCycle(plain, 'mensal'), 1);
+  assert.equal(maxChargesPerCycle(plain, 'unica'), 1);
+  const long = {
+    maxChargesPerCycle: { unica: 1, mensal: 2, semanal: 9 },
+  };
+  assert.equal(maxChargesPerCycle(long, 'mensal'), 2);
+  assert.equal(maxChargesPerCycle(long, 'semanal'), 9);
 });

@@ -8,7 +8,9 @@ import {
   countMonthlyOccurrences,
   countWeeklyOccurrences,
   lateOneOffsTotalForClosing,
+  maxChargesForWindow,
   splitShareFor,
+  worstCaseChargesInWindow,
 } from '@/lib/billing/charges';
 
 function expense(values: Partial<BillableExpense>): BillableExpense {
@@ -219,4 +221,56 @@ test('card amounts are summed in decimal, not floating point', () => {
     chargeAmountForClosing(expense({ amount: '0.1' }), 'card-1', at('2026-09-30'), at('2026-08-31')),
     0.1,
   );
+});
+
+const longWindow = {
+  periodStartKey: '2026-10-01',
+  closingKey: '2026-11-27',
+  includePeriodStart: false,
+} as const;
+const normalWindow = {
+  periodStartKey: '2026-10-05',
+  closingKey: '2026-11-05',
+  includePeriodStart: false,
+} as const;
+
+test('worst-case charges in a cycle that spans two months', () => {
+  // Oct 2 .. Nov 27 = 57 days: every day-of-month hits at most twice, some
+  // weekdays 9 times (8 full weeks + 1 day).
+  assert.equal(worstCaseChargesInWindow('mensal', longWindow), 2);
+  assert.equal(worstCaseChargesInWindow('semanal', longWindow), 9);
+  assert.equal(worstCaseChargesInWindow('unica', longWindow), 1);
+});
+
+test('worst-case charges in a normal 31-day cycle', () => {
+  assert.equal(worstCaseChargesInWindow('mensal', normalWindow), 1);
+  assert.equal(worstCaseChargesInWindow('semanal', normalWindow), 5);
+});
+
+test('worst-case monthly respects month-end clamping', () => {
+  // Jan 31 -> Feb 28 (clamped) -> Mar 1 window start excluded: Feb 1..Mar 1
+  const window = {
+    periodStartKey: '2026-01-31',
+    closingKey: '2026-03-01',
+    includePeriodStart: false,
+  } as const;
+  assert.equal(worstCaseChargesInWindow('mensal', window), 2);
+});
+
+test('maxChargesForWindow never drops below a normal cycle', () => {
+  const short = {
+    periodStartKey: '2026-10-05',
+    closingKey: '2026-10-09',
+    includePeriodStart: false,
+  } as const;
+  assert.deepEqual(maxChargesForWindow(short), {
+    unica: 1,
+    mensal: 1,
+    semanal: 5,
+  });
+  assert.deepEqual(maxChargesForWindow(longWindow), {
+    unica: 1,
+    mensal: 2,
+    semanal: 9,
+  });
 });
