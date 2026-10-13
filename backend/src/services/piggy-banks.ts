@@ -153,6 +153,10 @@ export function parseMoneyMovement(body: Record<string, unknown>) {
       message: 'Valor deve ser maior que zero',
     }),
     note: parseOptionalNote(body.note),
+    // Omit this field for withdrawals; legacy deposits keep their old behavior.
+    ...(body.deductFromBalance === undefined
+      ? {}
+      : { deductFromBalance: parseBoolean(body.deductFromBalance, 'deductFromBalance') }),
   };
 }
 
@@ -366,7 +370,7 @@ export async function deletePiggyBank(userId: string, id: string) {
 export function depositToBank(
   userId: string,
   id: string,
-  movement: { amount: number; note: string | null },
+  movement: { amount: number; note: string | null; deductFromBalance?: boolean },
 ) {
   return withFreshInterest(userId, () =>
     depositToPiggyBank({
@@ -375,6 +379,7 @@ export function depositToBank(
       amount: movement.amount,
       source: 'manual',
       note: movement.note,
+      deductFromBalance: movement.deductFromBalance ?? true,
     }),
   );
 }

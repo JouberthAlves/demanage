@@ -78,6 +78,8 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~**Cofrinho**~~ — Aba de metas de poupança com depósito/saque, impacto no saldo, histórico e dashboard.
 
+- [x] **Cofrinho: depósito sem descontar do saldo (opt-in)** — Ao guardar, o padrão segue sendo criar a despesa Cofrinho; a opção “Não descontar este valor do meu saldo” registra o depósito sem uma segunda despesa. Saques e débito automático mantêm o comportamento existente. Sem migração de banco.
+
   ### Regras de negócio
   - Vários cofres por usuário.
   - Campos: `name`, `goalAmount` (meta final), `targetDate`, `monthlyGoal` (calculada), `autoDebit`, `isEmergency`, `archivedAt?`.

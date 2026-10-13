@@ -85,4 +85,13 @@ test('money movements need a positive amount and a text note', () => {
     status(() => parseMoneyMovement({ amount: 1, note: 3 })),
     400,
   );
+  assert.deepEqual(parseMoneyMovement({ amount: 10, deductFromBalance: false }), {
+    amount: 10,
+    note: null,
+    deductFromBalance: false,
+  });
+  assert.equal(
+    status(() => parseMoneyMovement({ amount: 10, deductFromBalance: 'nope' })),
+    400,
+  );
 });
