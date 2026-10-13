@@ -2,11 +2,11 @@ import {
   BadgeDollarSign,
   Landmark,
   LayoutDashboard,
+  type LucideIcon,
   PiggyBank,
   Receipt,
   TrendingUp,
   UserRound,
-  type LucideIcon,
 } from 'lucide-react';
 
 export type AppNavItem = {

@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
-import { Archive, PiggyBank as PiggyIcon, Plus, ShieldAlert, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { AlertCircle, Archive, PiggyBank as PiggyIcon, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { PageHeader } from '@/components/layout/page-header';
@@ -8,6 +7,7 @@ import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { PiggyFormDialog } from '@/components/piggy/piggy-form-dialog';
 import { PiggyMoneyDialog } from '@/components/piggy/piggy-money-dialog';
+import { ConfirmDeleteDialog } from '@/components/shared/confirm-delete-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -17,26 +17,51 @@ import {
   usePiggyBanks,
   usePiggyTransactions,
 } from '@/hooks/use-piggy-banks';
+import { getApiErrorMessage, getApiErrorStatus } from '@/lib/api-error';
 import { formatCurrency, formatPercent } from '@/lib/format';
 import { piggyHasGoal } from '@/lib/piggy-math';
 import type { PiggyBank, PiggyTransaction } from '@/types/finance';
 
-function errorMessage(error: unknown, fallback: string) {
-  return isAxiosError(error)
-    ? (error.response?.data?.error ?? fallback)
-    : fallback;
+const NO_BANKS: PiggyBank[] = [];
+
+function loadErrorMessage(error: unknown) {
+  const status = getApiErrorStatus(error);
+  if (status === 429) {
+    return 'Muitas consultas em pouco tempo. Aguarde alguns minutos antes de tentar novamente.';
+  }
+  if (status === 401) {
+    return 'Sua sessão não está mais válida. Entre novamente para consultar seus cofres.';
+  }
+  if (status === 403) {
+    return 'O acesso à consulta foi bloqueado. Tente novamente e, se persistir, verifique a proteção do site.';
+  }
+  if (status && status >= 500) {
+    return 'O servidor encontrou um problema ao consultar seus cofres. Nenhum saldo foi zerado.';
+  }
+  return 'Não foi possível consultar seus cofres. Verifique a conexão e tente novamente.';
 }
 
 function transactionLabel(transaction: PiggyTransaction) {
   if (transaction.type === 'interest') return 'Rendimento CDI';
   if (transaction.type === 'deposit') {
-    return transaction.source === 'auto_debit' ? 'Depósito automático' : 'Depósito';
+    if (transaction.source === 'auto_debit') return 'Depósito automático';
+    return transaction.expenseId === null ? 'Depósito sem desconto' : 'Depósito';
   }
   return 'Saque';
 }
 
 export function PiggyPage() {
-  const { data: banks = [], isLoading, isError } = usePiggyBanks();
+  const {
+    data: bankData,
+    isPending,
+    isError,
+    isFetching,
+    error,
+    refetch: refetchBanks,
+  } = usePiggyBanks();
+  const banks = bankData ?? NO_BANKS;
+  const hasBanksData = bankData !== undefined;
+  const loadFailed = isError && !hasBanksData;
   const archiveBank = useArchivePiggyBank();
   const deleteBank = useDeletePiggyBank();
   const [formOpen, setFormOpen] = useState(false);
@@ -44,9 +69,14 @@ export function PiggyPage() {
   const [moneyOpen, setMoneyOpen] = useState(false);
   const [moneyMode, setMoneyMode] = useState<'deposit' | 'withdraw'>('deposit');
   const [activeBank, setActiveBank] = useState<PiggyBank | null>(null);
+  const [deleting, setDeleting] = useState<PiggyBank | null>(null);
   const [historyBankId, setHistoryBankId] = useState<string | null>(null);
-  const { data: history = [], isLoading: historyLoading } =
-    usePiggyTransactions(historyBankId);
+  const {
+    data: history = [],
+    isPending: historyLoading,
+    isError: historyError,
+    refetch: refetchHistory,
+  } = usePiggyTransactions(historyBankId);
 
   const totalBalance = useMemo(
     () => banks.reduce((sum, bank) => sum + bank.balance, 0),
@@ -75,22 +105,20 @@ export function PiggyPage() {
       toast.success(`"${bank.name}" arquivado`);
       if (historyBankId === bank.id) setHistoryBankId(null);
     } catch (error) {
-      toast.error(errorMessage(error, 'Não foi possível arquivar'));
+      toast.error(getApiErrorMessage(error, 'Não foi possível arquivar'));
     }
   }
 
-  async function handleDelete(bank: PiggyBank) {
-    const warning =
-      bank.balance > 0
-        ? `O cofre possui ${formatCurrency(bank.balance)}. Excluir mesmo assim?`
-        : `Excluir o cofre "${bank.name}"?`;
-    if (!window.confirm(warning)) return;
+  async function handleDelete() {
+    if (!deleting) return;
+    const bank = deleting;
     try {
       await deleteBank.mutateAsync(bank.id);
       toast.success('Cofre removido');
       if (historyBankId === bank.id) setHistoryBankId(null);
+      setDeleting(null);
     } catch (error) {
-      toast.error(errorMessage(error, 'Não foi possível excluir'));
+      toast.error(getApiErrorMessage(error, 'Não foi possível excluir'));
     }
   }
 
@@ -101,7 +129,7 @@ export function PiggyPage() {
         title='Cofrinho'
         description='Reservas internas do patrimônio. Meta, data e rendimento são opcionais.'
         actions={
-          <Button onClick={openCreate} className='rounded-lg'>
+          <Button onClick={openCreate} disabled={!hasBanksData} className='rounded-lg'>
             <Plus data-icon='inline-start' />
             Novo cofre
           </Button>
@@ -110,23 +138,53 @@ export function PiggyPage() {
 
       <PageHero
         eyebrow='Reservas'
-        title={`${banks.length} cofre${banks.length === 1 ? '' : 's'}`}
-        description='Guardar move dinheiro do saldo em reais para o Cofrinho sem reduzir o patrimônio. Se houver rendimento, o CDI é capitalizado diariamente.'
+        title={
+          hasBanksData
+            ? `${banks.length} cofre${banks.length === 1 ? '' : 's'}`
+            : isPending
+              ? 'Carregando cofres…'
+              : 'Cofres indisponíveis'
+        }
+        description='Guardar normalmente transfere valor do saldo para o Cofrinho; você também pode guardar sem descontar do saldo. Se houver rendimento, o CDI é capitalizado diariamente.'
       >
         <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
           <p className='text-xs text-muted-foreground'>Total nos cofres</p>
           <p className='mt-2 text-2xl font-semibold tabular-nums text-violet-300'>
-            {formatCurrency(totalBalance)}
+            {hasBanksData ? formatCurrency(totalBalance) : '—'}
           </p>
         </div>
       </PageHero>
 
-      {isLoading ? (
-        <div className='flex h-40 items-center justify-center'>
+      {isError && hasBanksData ? (
+        <div role='alert' className='flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/40 bg-destructive/5 p-4'>
+          <p className='text-sm text-destructive'>
+            A atualização falhou. Exibindo os últimos dados carregados; os saldos podem estar desatualizados.
+          </p>
+          <Button size='sm' variant='outline' disabled={isFetching} onClick={() => void refetchBanks()}>
+            <RefreshCw data-icon='inline-start' />
+            Tentar novamente
+          </Button>
+        </div>
+      ) : null}
+
+      {isPending ? (
+        <div className='flex h-40 items-center justify-center' role='status' aria-label='Carregando cofres'>
           <Spinner className='size-5' />
         </div>
-      ) : isError ? (
-        <p className='text-sm text-destructive'>Não foi possível carregar os cofres.</p>
+      ) : loadFailed ? (
+        <SectionPanel>
+          <div role='alert' className='flex flex-col items-center gap-3 py-10 text-center'>
+            <AlertCircle className='size-8 text-destructive' aria-hidden='true' />
+            <p className='font-medium'>Falha ao carregar os cofres</p>
+            <p className='max-w-md text-sm text-muted-foreground'>
+              {loadErrorMessage(error)}
+            </p>
+            <Button variant='outline' disabled={isFetching} onClick={() => void refetchBanks()}>
+              <RefreshCw data-icon='inline-start' />
+              Tentar novamente
+            </Button>
+          </div>
+        </SectionPanel>
       ) : banks.length === 0 ? (
         <SectionPanel>
           <div className='flex flex-col items-center gap-3 py-12 text-center'>
@@ -169,8 +227,14 @@ export function PiggyPage() {
                         ) : null}
                       </div>
                     </div>
-                    <Button variant='ghost' size='icon-sm' onClick={() => void handleDelete(bank)}>
-                      <Trash2 />
+                    <Button
+                      variant='ghost'
+                      size='icon-sm'
+                      aria-label={`Excluir cofre ${bank.name}`}
+                      title='Excluir cofre'
+                      onClick={() => setDeleting(bank)}
+                    >
+                      <Trash2 aria-hidden='true' />
                     </Button>
                   </div>
 
@@ -233,6 +297,13 @@ export function PiggyPage() {
                       <p className='mb-2 text-sm font-medium'>Histórico auditável</p>
                       {historyLoading ? (
                         <Spinner className='size-4' />
+                      ) : historyError ? (
+                        <div role='alert' className='flex items-center gap-3 text-sm text-destructive'>
+                          <span>Não foi possível carregar o histórico.</span>
+                          <Button size='sm' variant='outline' onClick={() => void refetchHistory()}>
+                            Tentar novamente
+                          </Button>
+                        </div>
                       ) : history.length === 0 ? (
                         <p className='text-sm text-muted-foreground'>Sem movimentações.</p>
                       ) : (
@@ -271,6 +342,22 @@ export function PiggyPage() {
 
       <PiggyFormDialog open={formOpen} onOpenChange={setFormOpen} bank={editing} />
       <PiggyMoneyDialog open={moneyOpen} onOpenChange={setMoneyOpen} bank={activeBank} mode={moneyMode} />
+      <ConfirmDeleteDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+        title='Excluir cofre?'
+        description={
+          deleting
+            ? deleting.balance > 0
+              ? `O cofre "${deleting.name}" possui ${formatCurrency(deleting.balance)}. Excluir mesmo assim?`
+              : `Excluir o cofre "${deleting.name}"? Esta ação não pode ser desfeita.`
+            : ''
+        }
+        pending={deleteBank.isPending}
+        onConfirm={handleDelete}
+      />
     </div>
   );
 }

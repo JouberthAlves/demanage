@@ -1,0 +1,13 @@
+{
+  // Production build: same compiler options as tsconfig.json (used by `tsc --noEmit`
+  // in `pnpm typecheck`), minus test files so they never reach dist/ or the image.
+  "extends": "./tsconfig.json",
+  "include": ["src"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/**/*.test.ts",
+    "src/**/*.itest.ts",
+    "src/test-support/**"
+  ]
+}

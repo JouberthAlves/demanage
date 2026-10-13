@@ -1,21 +1,21 @@
-import { Eye, EyeOff, Receipt } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import { Eye, EyeOff, Receipt } from 'lucide-react';
 import { Bar, BarChart, CartesianGrid, Cell, XAxis, YAxis } from 'recharts';
 
 import { Button } from '@/components/ui/button';
 import {
+  type ChartConfig,
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
-  type ChartConfig,
 } from '@/components/ui/chart';
 import {
   EXPENSE_CATEGORY_COLORS,
   EXPENSE_CATEGORY_LABELS,
   monthlyAmount,
 } from '@/data/labels';
+import { useExpenseList } from '@/hooks/use-expenses';
 import { formatCurrencyCompact } from '@/lib/format';
-import { useFinanceStore } from '@/stores/finance-store';
 
 const TOP_COUNT = 5;
 
@@ -115,7 +115,7 @@ function CategoryBarChart({
 }
 
 export function TopExpensesBarChart() {
-  const expenses = useFinanceStore((state) => state.expenses);
+  const expenses = useExpenseList();
   const [showItems, setShowItems] = useState(false);
 
   const categories = useMemo(() => {

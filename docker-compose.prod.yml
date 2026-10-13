@@ -1,3 +1,13 @@
+# Production stack. Runs immutable images published to GHCR by the
+# "Publish verified GHCR images" workflow, referenced by digest.
+#
+# Required variables (set them in the production .env, never in this file):
+#   DEMANAGE_BACKEND_IMAGE=ghcr.io/bielxdh3/demanage-backend@sha256:<digest>
+#   DEMANAGE_FRONTEND_IMAGE=ghcr.io/bielxdh3/demanage-frontend@sha256:<digest>
+#
+# To build from source instead (self-host without GHCR), add the build override:
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
+# The build override still needs both variables set (any local tag works).
 services:
   db:
     image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
@@ -20,8 +30,7 @@ services:
       - demanage
 
   backend:
-    build:
-      context: ./backend
+    image: ${DEMANAGE_BACKEND_IMAGE:?DEMANAGE_BACKEND_IMAGE is required (ghcr digest reference)}
     container_name: demanage-backend
     restart: unless-stopped
     read_only: true
@@ -56,11 +65,10 @@ services:
     networks:
       - demanage
 
+  # VITE_API_URL is compiled into the image at build time (CI uses /api). The
+  # same value is used by the runtime CSP, so no runtime override is set here.
   frontend:
-    build:
-      context: ./frontend
-      args:
-        VITE_API_URL: ${VITE_API_URL:-/api}
+    image: ${DEMANAGE_FRONTEND_IMAGE:?DEMANAGE_FRONTEND_IMAGE is required (ghcr digest reference)}
     container_name: demanage-frontend
     restart: unless-stopped
     environment:

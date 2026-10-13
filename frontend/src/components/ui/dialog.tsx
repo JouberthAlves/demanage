@@ -1,12 +1,12 @@
 'use client';
 
 import * as React from 'react';
+import { XIcon } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { shouldIgnoreDialogDismiss } from '@/lib/overlay-dismiss';
-import { XIcon } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 function Dialog({
   ...props

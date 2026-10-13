@@ -1,95 +1,75 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
-import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
-import { PIGGY_BANKS_QUERY_KEY } from '@/hooks/use-piggy-banks';
-import { PATRIMONY_QUERY_KEY } from '@/hooks/query-keys';
 import {
+  type AssetTransactionPayload,
   createAssetTransaction,
   deleteAssetTransaction,
   getAssetHistory,
-  getAssetTransactions,
   getAssetsSummary,
+  getAssetTransactions,
   getPatrimonyHistory,
   getPatrimonySettings,
   savePatrimonySettings,
-  type AssetTransactionPayload,
   updateAssetTransaction,
 } from '@/lib/patrimony-api';
+import { invalidateDomain, queryKeys } from '@/lib/query-keys';
 import type { Asset, PatrimonySettings } from '@/types/patrimony';
 
-export const ASSETS_QUERY_KEY = ['assets'] as const;
-
 export function useAssetsSummary() {
-  return useQuery({ queryKey: ASSETS_QUERY_KEY, queryFn: getAssetsSummary });
+  return useQuery({ queryKey: queryKeys.assets.all, queryFn: getAssetsSummary });
 }
 
 export function useAssetTransactions(asset: Asset) {
   return useQuery({
-    queryKey: [...ASSETS_QUERY_KEY, asset, 'transactions'],
+    queryKey: queryKeys.assets.transactions(asset),
     queryFn: () => getAssetTransactions(asset),
   });
 }
 
 export function useAssetHistory(asset: Asset, from: string, to: string) {
   return useQuery({
-    queryKey: [...ASSETS_QUERY_KEY, asset, 'history', from, to],
+    queryKey: queryKeys.assets.history(asset, from, to),
     queryFn: () => getAssetHistory(asset, from, to),
     enabled: Boolean(from && to),
   });
 }
 
-function invalidateAssetRelated(
-  queryClient: ReturnType<typeof useQueryClient>,
+function useAssetMutation<TVariables, TResult>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
 ) {
-  void queryClient.invalidateQueries({ queryKey: ASSETS_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => invalidateDomain(queryClient, 'assets'),
+  });
 }
 
 export function useCreateAssetTransaction() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      asset,
-      payload,
-    }: {
-      asset: Asset;
-      payload: AssetTransactionPayload;
-    }) => createAssetTransaction(asset, payload),
-    onSuccess: () => invalidateAssetRelated(queryClient),
-  });
+  return useAssetMutation(
+    ({ asset, payload }: { asset: Asset; payload: AssetTransactionPayload }) =>
+      createAssetTransaction(asset, payload),
+  );
 }
 
 export function useUpdateAssetTransaction() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      payload,
-    }: {
-      id: string;
-      payload: AssetTransactionPayload;
-    }) => updateAssetTransaction(id, payload),
-    onSuccess: () => invalidateAssetRelated(queryClient),
-  });
+  return useAssetMutation(
+    ({ id, payload }: { id: string; payload: AssetTransactionPayload }) =>
+      updateAssetTransaction(id, payload),
+  );
 }
 
 export function useDeleteAssetTransaction() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: deleteAssetTransaction,
-    onSuccess: () => invalidateAssetRelated(queryClient),
-  });
+  return useAssetMutation((id: string) => deleteAssetTransaction(id));
 }
 
+/**
+ * `data` is `null` once loaded for an account without settings, and
+ * `undefined` while loading, so callers can tell the two apart.
+ */
 export function usePatrimonySettings() {
   return useQuery({
-    queryKey: [...PATRIMONY_QUERY_KEY, 'settings'],
+    queryKey: queryKeys.patrimony.settings,
     queryFn: getPatrimonySettings,
-    initialData: null,
   });
 }
 
@@ -97,9 +77,7 @@ export function useSavePatrimonySettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (payload: PatrimonySettings) => savePatrimonySettings(payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
-    },
+    onSuccess: () => invalidateDomain(queryClient, 'patrimony'),
   });
 }
 
@@ -109,7 +87,7 @@ export function usePatrimonyHistory(
   enabled = true,
 ) {
   return useQuery({
-    queryKey: [...PATRIMONY_QUERY_KEY, 'history', from, to],
+    queryKey: queryKeys.patrimony.history(from, to),
     queryFn: () => getPatrimonyHistory(from, to),
     enabled,
   });

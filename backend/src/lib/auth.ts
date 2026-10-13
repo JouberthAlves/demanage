@@ -1,9 +1,8 @@
-import type { User } from '@/generated/prisma/client';
 import bcrypt from 'bcryptjs';
 import type { CookieOptions, Request, Response } from 'express';
 import jwt, { type SignOptions } from 'jsonwebtoken';
 
-import { prisma } from '@/lib/prisma';
+import type { User } from '@/generated/prisma/client';
 import type { PublicUser } from '@/types/auth';
 import {
   APP_URL,
@@ -62,6 +61,7 @@ export async function revokeAuthToken(token: string) {
     return;
   }
 
+  const { prisma } = await import('@/lib/prisma');
   await prisma.user.updateMany({
     where: {
       id: payload.userId,
@@ -153,6 +153,7 @@ export function toPublicUser(
 }
 
 export async function getSalaryReceiveDay(userId: string) {
+  const { prisma } = await import('@/lib/prisma');
   const salaryEntry = await prisma.entry.findFirst({
     where: {
       userId,

@@ -1,10 +1,7 @@
+import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 
-import { ENTRIES_QUERY_KEY } from '@/hooks/use-entries';
-import { EXPENSES_QUERY_KEY } from '@/hooks/use-expenses';
-import { PATRIMONY_QUERY_KEY } from '@/hooks/query-keys';
 import {
   archivePiggyBank,
   createPiggyBank,
@@ -12,28 +9,31 @@ import {
   depositPiggyBank,
   listPiggyBanks,
   listPiggyTransactions,
+  type PiggyBankPayload,
   processPiggyAutoDebit,
   updatePiggyBank,
   withdrawPiggyBank,
-  type PiggyBankPayload,
 } from '@/lib/piggy-api';
+import { invalidateDomain, queryKeys } from '@/lib/query-keys';
 
-export const PIGGY_BANKS_QUERY_KEY = ['piggy-banks'] as const;
+// Each authentication session has a distinct QueryClient. Do not run costly
+// daily accrual/autodebit once for every hook observer or route visit.
+const maintenanceStartedForSession = new WeakSet<ReturnType<typeof useQueryClient>>();
 
-export function usePiggyBanks(includeArchived = false) {
+export function usePiggyBanks(includeArchived = false, enabled = true) {
   const queryClient = useQueryClient();
-  const maintenanceStarted = useRef(false);
   const query = useQuery({
-    queryKey: [...PIGGY_BANKS_QUERY_KEY, { includeArchived }],
+    queryKey: queryKeys.piggyBanks.list(includeArchived),
     queryFn: () => listPiggyBanks(includeArchived),
-    staleTime: 30_000,
+    enabled,
+    staleTime: 60_000,
   });
 
   useEffect(() => {
-    if (!query.isSuccess || maintenanceStarted.current) return;
-    maintenanceStarted.current = true;
+    if (!enabled || !query.isSuccess || maintenanceStartedForSession.has(queryClient)) return;
+    maintenanceStartedForSession.add(queryClient);
 
-    void processPiggyAutoDebit()
+    processPiggyAutoDebit()
       .then((result) => {
         if (result.autoDebitFailedCount > 0) {
           toast.error('Não foi possível processar todos os débitos automáticos.');
@@ -41,116 +41,78 @@ export function usePiggyBanks(includeArchived = false) {
         if (result.interestStale) {
           toast.error('Os rendimentos do Cofrinho estão com atualização atrasada.');
         }
-        if (result.createdCount > 0) {
-          void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-        }
         if (result.createdCount > 0 || result.interestCreatedCount > 0) {
-          void queryClient.invalidateQueries({
-            queryKey: PIGGY_BANKS_QUERY_KEY,
-          });
+          return invalidateDomain(queryClient, 'piggyBanks').then(() => undefined);
         }
-        if (result.interestCreatedCount > 0) {
-          void queryClient.invalidateQueries({ queryKey: PATRIMONY_QUERY_KEY });
-        }
+        return undefined;
       })
       .catch(() => {
+        // Allow a later mount to retry the maintenance run.
+        maintenanceStartedForSession.delete(queryClient);
         toast.error('Não foi possível atualizar os Cofrinhos agora.');
       });
-  }, [query.isSuccess, queryClient]);
+  }, [enabled, query.isSuccess, queryClient]);
 
   return query;
 }
 
 export function usePiggyTransactions(piggyBankId: string | null) {
   return useQuery({
-    queryKey: [...PIGGY_BANKS_QUERY_KEY, piggyBankId, 'transactions'],
-    queryFn: () => listPiggyTransactions(piggyBankId as string),
+    queryKey: queryKeys.piggyBanks.transactions(piggyBankId),
+    queryFn: () => listPiggyTransactions(piggyBankId ?? ''),
     enabled: Boolean(piggyBankId),
+    staleTime: 60_000,
   });
 }
 
-function invalidatePiggyRelated(
-  queryClient: ReturnType<typeof useQueryClient>,
+// Every piggy mutation can move money (deposits, withdrawals, deleting or
+// archiving a bank with a balance), so all of them refresh related ledgers.
+function usePiggyMutation<TVariables, TResult>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
 ) {
-  void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: EXPENSES_QUERY_KEY });
-  void queryClient.invalidateQueries({ queryKey: ENTRIES_QUERY_KEY });
-}
-
-export function useCreatePiggyBank() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (payload: PiggyBankPayload) => createPiggyBank(payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
-    },
+    mutationFn,
+    onSuccess: () => invalidateDomain(queryClient, 'piggyBanks'),
   });
+}
+
+type MoneyMovement = {
+  id: string;
+  amount: number;
+  note?: string;
+  deductFromBalance?: boolean;
+};
+
+export function useCreatePiggyBank() {
+  return usePiggyMutation((payload: PiggyBankPayload) =>
+    createPiggyBank(payload),
+  );
 }
 
 export function useUpdatePiggyBank() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      payload,
-    }: {
-      id: string;
-      payload: Partial<PiggyBankPayload>;
-    }) => updatePiggyBank(id, payload),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
-    },
-  });
+  return usePiggyMutation(
+    ({ id, payload }: { id: string; payload: Partial<PiggyBankPayload> }) =>
+      updatePiggyBank(id, payload),
+  );
 }
 
 export function useDeletePiggyBank() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => deletePiggyBank(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
-    },
-  });
+  return usePiggyMutation((id: string) => deletePiggyBank(id));
 }
 
 export function useDepositPiggyBank() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      amount,
-      note,
-    }: {
-      id: string;
-      amount: number;
-      note?: string;
-    }) => depositPiggyBank(id, { amount, note }),
-    onSuccess: () => invalidatePiggyRelated(queryClient),
-  });
+  return usePiggyMutation(({ id, amount, note, deductFromBalance }: MoneyMovement) =>
+    depositPiggyBank(id, { amount, note, deductFromBalance }),
+  );
 }
 
 export function useWithdrawPiggyBank() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
-      id,
-      amount,
-      note,
-    }: {
-      id: string;
-      amount: number;
-      note?: string;
-    }) => withdrawPiggyBank(id, { amount, note }),
-    onSuccess: () => invalidatePiggyRelated(queryClient),
-  });
+  return usePiggyMutation(({ id, amount, note }: MoneyMovement) =>
+    withdrawPiggyBank(id, { amount, note }),
+  );
 }
 
 export function useArchivePiggyBank() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) => archivePiggyBank(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PIGGY_BANKS_QUERY_KEY });
-    },
-  });
+  return usePiggyMutation((id: string) => archivePiggyBank(id));
 }

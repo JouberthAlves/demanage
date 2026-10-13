@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router';
+import { Outlet, useLocation } from 'react-router';
 
 import { AppBottomNav } from '@/components/layout/app-bottom-nav';
 import { AppSidebar } from '@/components/layout/app-sidebar';
@@ -9,10 +9,18 @@ import { useExpenses } from '@/hooks/use-expenses';
 import { usePiggyBanks } from '@/hooks/use-piggy-banks';
 
 export function AppLayout() {
+  const { pathname } = useLocation();
+
+  // Keep card billing maintenance at session entry: it affects invoices and
+  // financial balances even when the user first opens another section.
   useCards();
-  useEntries();
-  useExpenses();
-  usePiggyBanks();
+
+  // Avoid fetching entries, expenses and piggy transactions for unrelated tabs.
+  useEntries(pathname === '/' || pathname === '/patrimonio');
+  useExpenses(pathname === '/' || pathname === '/perfil' || pathname === '/patrimonio');
+  // Patrimony needs fresh piggy interest; Dashboard and PiggyPage fetch it
+  // themselves. Maintenance runs at most once per account QueryClient.
+  usePiggyBanks(false, pathname === '/patrimonio');
 
   return (
     <div className='flex min-h-screen bg-background text-foreground'>

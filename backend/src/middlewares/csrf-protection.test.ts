@@ -1,3 +1,6 @@
+/* eslint-disable simple-import-sort/imports -- db-env precisa ser o primeiro import (define DATABASE_URL antes de carregar @/lib/prisma) */
+import '@/test-support/db-env';
+
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { NextFunction, Request, Response } from 'express';
