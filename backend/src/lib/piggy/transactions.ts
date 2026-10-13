@@ -12,6 +12,7 @@ export type DepositParams = {
   piggyBankId: string;
   amount: number;
   source?: 'manual' | 'auto_debit';
+  deductFromBalance?: boolean;
   note?: string | null;
   date?: Date;
 };
@@ -23,6 +24,7 @@ export async function depositToPiggyBankInTransaction(
     piggyBankId,
     amount,
     source = 'manual',
+    deductFromBalance = true,
     note = null,
     date = new Date(),
   }: DepositParams,
@@ -74,18 +76,23 @@ export async function depositToPiggyBankInTransaction(
   const depositAmount =
     remaining == null || requested.lte(remaining) ? requested : remaining;
 
-  const expense = await tx.expense.create({
-    data: {
-      userId,
-      name: `Cofrinho · ${bank.name}`,
-      amount: depositAmount,
-      category: 'cofrinho',
-      frequency: 'unica',
-      occurredAt: day,
-      systemOrigin: 'piggy',
-      notes: note || `Transferência interna para o cofrinho ${bank.name}`,
-    },
-  });
+  // Automatic deposits always debit cash. Manual deposits can represent funds
+  // already accounted for elsewhere; never create a duplicate expense then.
+  const shouldDeduct = source === 'auto_debit' || deductFromBalance;
+  const expense = shouldDeduct
+    ? await tx.expense.create({
+        data: {
+          userId,
+          name: `Cofrinho · ${bank.name}`,
+          amount: depositAmount,
+          category: 'cofrinho',
+          frequency: 'unica',
+          occurredAt: day,
+          systemOrigin: 'piggy',
+          notes: note || `Transferência interna para o cofrinho ${bank.name}`,
+        },
+      })
+    : null;
 
   const piggyTx = await tx.piggyTransaction.create({
     data: {
@@ -95,7 +102,7 @@ export async function depositToPiggyBankInTransaction(
       source,
       amount: depositAmount,
       date: day,
-      expenseId: expense.id,
+      expenseId: expense?.id ?? null,
       note,
     },
   });

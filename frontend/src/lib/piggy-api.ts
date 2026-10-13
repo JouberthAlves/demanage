@@ -39,7 +39,7 @@ export async function deletePiggyBank(id: string) {
 
 export async function depositPiggyBank(
   id: string,
-  payload: { amount: number; note?: string },
+  payload: { amount: number; note?: string; deductFromBalance?: boolean },
 ) {
   const { data } = await api.post<{
     bank: PiggyBank;
