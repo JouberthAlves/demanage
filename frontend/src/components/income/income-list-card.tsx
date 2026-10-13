@@ -1,122 +1,44 @@
-import { Pencil, Trash2 } from 'lucide-react';
-
+import { StatusNote } from '@/components/shared/schedule-form/status-note';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  INCOME_FREQUENCY_LABELS,
-  MONTH_LABELS,
-  incomeTypeLabel,
-  tagBadgeStyle,
-} from '@/data/labels';
+import { INCOME_FREQUENCY_LABELS } from '@/data/labels';
 import { formatCurrency } from '@/lib/format';
-import {
-  isIncomeAutoReceivedThisMonth,
-  isIncomeReceivedThisMonth,
-  isSalaryManuallyReceived,
-  isSalaryWaitingForConfirmation,
-} from '@/lib/income-schedule';
-import type { Income, IncomeType } from '@/types/finance';
+import { incomeStatus } from '@/lib/income-status';
+import { formatDayKeyBr } from '@/lib/schedule-labels';
+import type { Income } from '@/types/finance';
 
-const typeColors: Record<IncomeType, string> = {
-  salario: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  freelance: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  outro: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
-};
+import { IncomeTypeBadge } from './income-category-badge';
+import { incomeReceiveLabel } from './income-labels';
+import { IncomeRowActions, type ReceiptHandler } from './income-row-actions';
 
 type IncomeListCardProps = {
   income: Income;
-  pending?: boolean;
-  salaryPending?: boolean;
-  oneOffPending?: boolean;
-  onSalaryReceived?: () => void;
-  onSalaryWait?: () => void;
-  onOneOffReceived?: () => void;
-  onOneOffUndo?: (month: string) => void;
+  now: Date;
+  receiptPending: boolean;
+  deletePending: boolean;
+  onReceipt: ReceiptHandler;
   onEdit: () => void;
   onDelete: () => void;
 };
 
+/** Mobile representation of an income row. */
 export function IncomeListCard({
   income,
-  pending,
-  salaryPending,
-  oneOffPending,
-  onSalaryReceived,
-  onSalaryWait,
-  onOneOffReceived,
-  onOneOffUndo,
+  now,
+  receiptPending,
+  deletePending,
+  onReceipt,
   onEdit,
   onDelete,
 }: IncomeListCardProps) {
-  const received = isIncomeReceivedThisMonth(income);
-  const salaryMonthly =
-    income.type === 'salario' && income.frequency === 'mensal';
-  const salaryWaiting = isSalaryWaitingForConfirmation(income);
-  const salaryManual = isSalaryManuallyReceived(income);
-  const salaryAutomatic =
-    salaryMonthly && isIncomeAutoReceivedThisMonth(income);
-  const oneOffReceipt =
-    income.frequency === 'unica' ? income.receipts?.[0] : undefined;
-
-  const receiveLabel =
-    income.frequency === 'unica'
-      ? income.date
-        ? income.date.split('-').reverse().join('/')
-        : null
-      : income.receiveDay
-        ? `Dia ${String(income.receiveDay).padStart(2, '0')}${
-            income.startsAt
-              ? ` · ${MONTH_LABELS[Number(income.startsAt.slice(5, 7))] ?? ''}`
-              : ''
-          }`
-        : null;
-
-  const salaryStatus = (() => {
-    if (income.frequency === 'unica') {
-      return (
-        <p
-          className={
-            oneOffReceipt
-              ? 'text-xs text-neon-green'
-              : 'text-xs text-neon-amber'
-          }
-        >
-          {oneOffReceipt ? 'Recebimento confirmado' : 'Aguardando confirmação'}
-        </p>
-      );
-    }
-    if (!salaryMonthly) return null;
-    if (salaryWaiting) {
-      return (
-        <p className='text-xs text-neon-amber'>Aguardando confirmação manual</p>
-      );
-    }
-    if (salaryManual) {
-      return <p className='text-xs text-neon-green'>Recebimento confirmado</p>;
-    }
-    if (salaryAutomatic) {
-      return (
-        <p className='text-xs text-neon-green'>Recebido automaticamente</p>
-      );
-    }
-    return (
-      <p className='text-xs text-muted-foreground'>
-        Aguardando dia {income.receiveDay ?? '—'}
-      </p>
-    );
-  })();
+  const status = incomeStatus(income, now);
+  const receiveLabel = incomeReceiveLabel(income);
 
   return (
     <article className='rounded-xl border border-border bg-black/20 p-4'>
       <div className='flex items-start justify-between gap-3'>
         <div className='min-w-0 space-y-1'>
           <p className='truncate font-medium'>{income.name}</p>
-          {salaryStatus ??
-            (income.frequency !== 'unica' && !received ? (
-              <p className='text-xs text-muted-foreground'>
-                Aguardando dia {income.receiveDay ?? '—'}
-              </p>
-            ) : null)}
+          <StatusNote note={status.note} />
         </div>
         <p className='shrink-0 text-base font-semibold text-neon-green'>
           {formatCurrency(income.amount)}
@@ -124,18 +46,7 @@ export function IncomeListCard({
       </div>
 
       <div className='mt-3 flex flex-wrap items-center gap-2'>
-        {income.customTag ? (
-          <Badge
-            variant='outline'
-            style={tagBadgeStyle(income.customTag.color)}
-          >
-            {income.customTag.name}
-          </Badge>
-        ) : (
-          <Badge variant='outline' className={typeColors[income.type]}>
-            {incomeTypeLabel(income)}
-          </Badge>
-        )}
+        <IncomeTypeBadge income={income} />
         <Badge variant='outline' className='text-muted-foreground'>
           {INCOME_FREQUENCY_LABELS[income.frequency]}
         </Badge>
@@ -149,101 +60,20 @@ export function IncomeListCard({
           </p>
         ) : null}
         {income.type !== 'salario' && income.endsAt ? (
-          <p>Término: {income.endsAt.split('-').reverse().join('/')}</p>
+          <p>Término: {formatDayKeyBr(income.endsAt)}</p>
         ) : null}
       </div>
 
-      <div className='mt-4 flex flex-wrap justify-end gap-1'>
-        {salaryMonthly ? (
-          <>
-            {!salaryManual ? (
-              <Button
-                variant='secondary'
-                size='sm'
-                className='rounded-lg'
-                disabled={salaryPending}
-                onClick={onSalaryReceived}
-              >
-                Já recebi
-              </Button>
-            ) : null}
-            {!salaryWaiting ? (
-              <Button
-                variant='ghost'
-                size='sm'
-                className='rounded-lg'
-                disabled={salaryPending}
-                onClick={onSalaryWait}
-              >
-                {salaryAutomatic || salaryManual
-                  ? 'Ainda não recebi'
-                  : 'Aguardar confirmação'}
-              </Button>
-            ) : null}
-          </>
-        ) : income.frequency === 'unica' ? (
-          <>
-            <Button
-              variant={oneOffReceipt ? 'ghost' : 'secondary'}
-              size='sm'
-              className='rounded-lg'
-              disabled={oneOffPending}
-              onClick={() =>
-                oneOffReceipt
-                  ? onOneOffUndo?.(oneOffReceipt.month)
-                  : onOneOffReceived?.()
-              }
-            >
-              {oneOffReceipt ? 'Desfazer recebimento' : 'Já recebi'}
-            </Button>
-            {income.type !== 'salario' ? (
-              <>
-                <Button
-                  variant='ghost'
-                  size='icon-sm'
-                  aria-label={`Editar ${income.name}`}
-                  onClick={onEdit}
-                >
-                  <Pencil className='size-4' />
-                </Button>
-                <Button
-                  variant='ghost'
-                  size='icon-sm'
-                  aria-label={`Excluir ${income.name}`}
-                  disabled={pending}
-                  onClick={onDelete}
-                >
-                  <Trash2 className='size-4' />
-                </Button>
-              </>
-            ) : null}
-          </>
-        ) : income.type === 'salario' ? (
-          <span className='text-xs text-muted-foreground'>Perfil</span>
-        ) : (
-          <>
-            <Button
-              variant='ghost'
-              size='icon-sm'
-              aria-label={`Editar ${income.name}`}
-              onClick={onEdit}
-            >
-              <Pencil className='size-4' />
-            </Button>
-            <Button
-              variant='ghost'
-              size='icon-sm'
-              aria-label={`Excluir ${income.name}`}
-              disabled={pending}
-              onClick={onDelete}
-            >
-              <Trash2 className='size-4' />
-            </Button>
-          </>
-        )}
-      </div>
+      <IncomeRowActions
+        className='mt-4'
+        income={income}
+        status={status}
+        receiptPending={receiptPending}
+        deletePending={deletePending}
+        onReceipt={onReceipt}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
     </article>
   );
 }
-
-export { typeColors };

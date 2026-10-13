@@ -1,11 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
-  ipcaPeriodRange,
-  MarketDataError,
-  validateHistoryRange,
-} from '@/lib/market-data';
+import { ipcaPeriodRange } from '@/lib/market/providers/ibge';
+import { validateHistoryRange } from '@/lib/market/series';
+import { MarketDataError } from '@/lib/market/types';
 
 const now = new Date('2026-09-29T12:00:00.000Z');
 
@@ -19,7 +17,8 @@ test('rejects market-history ranges beyond ten years plus provider look-back', (
   assert.throws(
     () => validateHistoryRange('2016-09-18', '2026-09-29', now),
     (error: unknown) =>
-      error instanceof MarketDataError && error.message.includes('10 anos'),
+      error instanceof MarketDataError &&
+      error.message === 'O período máximo é de 10 anos e 10 dias',
   );
 });
 

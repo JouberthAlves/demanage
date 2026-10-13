@@ -1,44 +1,30 @@
-import { Prisma } from '@/generated/prisma/client';
-import type { Asset, AssetTransaction } from '@/generated/prisma/client';
-
+import type { Asset } from '@/generated/prisma/client';
 import {
   calculateAssetAccounting,
   enrichAccountingWithQuote,
   isAssetTimelineValid,
 } from '@/lib/asset-accounting';
 import {
-  dateOnlyUtc,
-  decimal,
-  money,
-  ZERO,
-} from '@/lib/decimal';
-import { todayInSaoPaulo } from '@/lib/card-billing';
-import { getAssetQuote } from '@/lib/market-data';
+  AssetValidationError,
+  type CreateAssetTransactionInput,
+  parseAssetTransactionValues,
+  type UpdateAssetTransactionInput,
+} from '@/lib/asset-values';
+import { money } from '@/lib/decimal';
+import { getAssetQuote } from '@/lib/market';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
-import { MAX_MONEY_AMOUNT } from '@/lib/validate';
 
-export function parseAsset(value: unknown): Asset | null {
-  return value === 'BTC' || value === 'USD' ? value : null;
-}
-
-export function serializeAssetTransaction(transaction: AssetTransaction) {
-  return {
-    id: transaction.id,
-    asset: transaction.asset,
-    type: transaction.type,
-    quantity: transaction.quantity.toString(),
-    cashAmountBrl: transaction.cashAmountBrl.toString(),
-    feeAmountBrl: transaction.feeAmountBrl.toString(),
-    feePercent: transaction.feePercent?.toString() ?? null,
-    costBasisKnown: transaction.costBasisKnown,
-    date: transaction.date.toISOString(),
-    note: transaction.note,
-    expenseId: transaction.expenseId,
-    entryId: transaction.entryId,
-    createdAt: transaction.createdAt.toISOString(),
-  };
-}
+// Pure parsing/serialization lives in lib/asset-values.ts; re-exported here.
+export {
+  AssetValidationError,
+  type CreateAssetTransactionInput,
+  parseAsset,
+  parseAssetDate,
+  parseAssetTransactionValues,
+  serializeAssetTransaction,
+  type UpdateAssetTransactionInput,
+} from '@/lib/asset-values';
 
 export async function assetSummary(userId: string, asset: Asset) {
   const [transactions, quote] = await Promise.all([
@@ -58,131 +44,6 @@ export async function assetSummary(userId: string, asset: Asset) {
       asOf: quote.asOf,
     },
   };
-}
-
-export type CreateAssetTransactionInput = {
-  userId: string;
-  asset: Asset;
-  type: 'BUY' | 'SELL' | 'MANUAL_ADJUSTMENT';
-  quantity: unknown;
-  cashAmountBrl: unknown;
-  feeAmountBrl?: unknown;
-  feePercent?: unknown;
-  costBasisKnown?: boolean;
-  date: unknown;
-  note?: string | null;
-};
-
-export type UpdateAssetTransactionInput = Omit<
-  CreateAssetTransactionInput,
-  'userId' | 'asset'
->;
-
-export class AssetValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'AssetValidationError';
-  }
-}
-
-export function parseAssetDate(value: unknown, now = new Date()) {
-  const date = new Date(String(value ?? ''));
-  if (Number.isNaN(date.getTime())) {
-    throw new AssetValidationError('Data inválida');
-  }
-  const normalized = dateOnlyUtc(date);
-  if (normalized.getTime() > dateOnlyUtc(todayInSaoPaulo(now)).getTime()) {
-    throw new AssetValidationError('Data futura não é permitida');
-  }
-  return normalized;
-}
-
-function parseDecimalValue(
-  value: unknown,
-  field: string,
-  precision: number,
-  scale: number,
-  allowNegative: boolean,
-) {
-  const raw = String(value ?? '').trim();
-  const pattern = allowNegative ? /^-?\d+(?:\.\d+)?$/ : /^\d+(?:\.\d+)?$/;
-  const unsigned = raw.startsWith('-') ? raw.slice(1) : raw;
-  const [integerPart, fractionPart = ''] = unsigned.split('.');
-  const integerDigits = integerPart?.replace(/^0+/, '').length ?? 0;
-  if (!pattern.test(raw)) {
-    throw new AssetValidationError(`${field} inválido`);
-  }
-  if (integerDigits > precision - scale || fractionPart.length > scale) {
-    throw new AssetValidationError(`${field} excede a precisão permitida`);
-  }
-
-  try {
-    const parsed = decimal(raw);
-    if (!parsed.isFinite() || (!allowNegative && parsed.lt(0))) throw new Error();
-    return parsed;
-  } catch {
-    throw new AssetValidationError(`${field} inválido`);
-  }
-}
-
-function parseQuantity(value: unknown, asset: Asset, allowNegative: boolean) {
-  const scale = asset === 'BTC' ? 8 : 12;
-  const parsed = parseDecimalValue(value, 'Quantidade', 30, scale, allowNegative);
-  if (parsed.eq(0)) throw new AssetValidationError('Quantidade inválida');
-  return parsed;
-}
-
-export function parseAssetTransactionValues(
-  asset: Asset,
-  input: UpdateAssetTransactionInput,
-) {
-  const allowNegative = input.type === 'MANUAL_ADJUSTMENT';
-  const quantity = parseQuantity(input.quantity, asset, allowNegative);
-  const cash = parseDecimalValue(input.cashAmountBrl, 'Valor em BRL', 18, 8, false);
-  const feePercent =
-    input.feePercent == null || input.feePercent === ''
-      ? null
-      : parseDecimalValue(
-          input.feePercent,
-          'Percentual de taxa',
-          12,
-          8,
-          false,
-        );
-  let fee =
-    input.feeAmountBrl == null || input.feeAmountBrl === ''
-      ? ZERO
-      : parseDecimalValue(input.feeAmountBrl, 'Taxa', 18, 8, false);
-  if (fee.eq(0) && feePercent != null && cash.gt(0)) {
-    fee = parseDecimalValue(
-      cash
-        .mul(feePercent)
-        .div(100)
-        .toDecimalPlaces(8, Prisma.Decimal.ROUND_HALF_UP)
-        .toFixed(8),
-      'Taxa',
-      18,
-      8,
-      false,
-    );
-  }
-  if (input.type !== 'MANUAL_ADJUSTMENT' && cash.lte(0)) {
-    throw new AssetValidationError(
-      'Compra/venda exige valor efetivo em BRL maior que zero',
-    );
-  }
-  if (input.type !== 'MANUAL_ADJUSTMENT' && money(cash).gt(MAX_MONEY_AMOUNT)) {
-    throw new AssetValidationError(
-      'Valor em BRL excede o limite das movimentações financeiras',
-    );
-  }
-  const date = parseAssetDate(input.date);
-  const costBasisKnown =
-    input.type === 'MANUAL_ADJUSTMENT'
-      ? Boolean(input.costBasisKnown && cash.gt(0))
-      : true;
-
-  return { quantity, cash, feePercent, fee, date, costBasisKnown };
 }
 
 function assertTransactionTimelineValid(

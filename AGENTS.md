@@ -23,7 +23,8 @@ Fase atual: **app full-stack com autenticação e API de domínio**. O frontend 
 ```
 deManage/
   frontend/     # React 19 + Vite + TypeScript + Tailwind 4 + shadcn + Zustand
-  backend/      # Express + TypeScript (esqueleto; GET /health)
+  backend/      # API Express + Prisma (auth, domínio, cofrinho, patrimônio, GET /health)
+  ops/cd/       # agente de deploy de produção (pull-only)
   AGENTS.md     # este arquivo
   plans.md      # roadmap de features (consultar sempre)
   CODING_STYLE.md
@@ -40,7 +41,7 @@ Espelha o padrão `frontend/` + `backend/` usado em outros apps do autor (ex.: r
 | Bundler | Vite 8 |
 | Estilo | Tailwind 4 + shadcn/Radix |
 | Rotas | React Router 8 |
-| Estado local | Zustand + `persist` (localStorage) |
+| Estado local | Zustand (cache da API, sem `persist`) |
 | Gráficos | Recharts (tema dark neon) |
 | Toasts | sonner |
 | Pacotes | pnpm |
@@ -111,6 +112,6 @@ cd backend && pnpm install && pnpm dev
 - [ ] `plans.md` consultado; etapa alinhada com o pedido do usuário
 - [ ] Se a feature foi concluída, `plans.md` atualizado (`- [x]`)
 - [ ] Código no estilo de `CODING_STYLE.md` (aspas simples + `;`)
-- [ ] Tipagem TypeScript ok (`pnpm exec tsc -b` no frontend)
+- [ ] Tipagem TypeScript ok (`pnpm typecheck` no frontend e no backend)
 - [ ] Sem segredos / pacotes corporativos
 - [ ] Mudanças focadas; sem refatoração oportunista

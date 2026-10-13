@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-
 import type { Request, Response } from 'express';
 
 import { AUTH_COOKIE_NAME } from '@/lib/auth';

@@ -1,38 +1,27 @@
-import { isAxiosError } from 'axios';
+import { useMemo, useState } from 'react';
 import { Settings2 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
 
+import { presetRange } from '@/components/charts/date-range';
+import { DateRangeFilter } from '@/components/charts/date-range-filter';
 import { PageHeader } from '@/components/layout/page-header';
-import { PatrimonyHistoryChart } from '@/components/patrimony/patrimony-history-chart';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
+import { PatrimonyBaseForm } from '@/components/patrimony/patrimony-base-form';
+import { PatrimonyHistoryChart } from '@/components/patrimony/patrimony-history-chart';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { useFinancialNow } from '@/hooks/use-financial-now';
+import {
+  useMonthlyExpenses,
+  useMonthlyIncome,
+} from '@/hooks/use-monthly-history';
 import {
   usePatrimonyHistory,
   usePatrimonySettings,
-  useSavePatrimonySettings,
 } from '@/hooks/use-patrimony';
+import { todayKey } from '@/lib/dates';
 import { formatCurrency } from '@/lib/format';
-import {
-  selectMonthlyExpenses,
-  selectMonthlyIncome,
-  useFinanceStore,
-} from '@/stores/finance-store';
-
-const DAY_MS = 86_400_000;
-
-function dateInput(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function daysAgo(days: number) {
-  return dateInput(new Date(Date.now() - days * DAY_MS));
-}
 
 function percent(raw: string | null) {
   if (raw == null) return '—';
@@ -61,56 +50,29 @@ function SummaryCard({
   );
 }
 
+function PatrimonyShell({ children }: { children: React.ReactNode }) {
+  return (
+    <div className='space-y-6'>
+      <title>Patrimônio | deManage</title>
+      {children}
+    </div>
+  );
+}
+
 export function PatrimonyPage() {
+  const now = useFinancialNow();
   const settingsQuery = usePatrimonySettings();
   const settings = settingsQuery.data;
-  const income = useFinanceStore(selectMonthlyIncome);
-  const expenses = useFinanceStore(selectMonthlyExpenses);
-  const dashboardBalance = income - expenses;
+  const dashboardBalance = useMonthlyIncome() - useMonthlyExpenses();
   const [editingSettings, setEditingSettings] = useState(false);
-  const [baseDate, setBaseDate] = useState(dateInput(new Date()));
-  const [openingCash, setOpeningCash] = useState(String(dashboardBalance));
-  const [from, setFrom] = useState<string | undefined>(daysAgo(30));
-  const [to, setTo] = useState<string | undefined>(dateInput(new Date()));
-  const saveSettings = useSavePatrimonySettings();
-  const historyQuery = usePatrimonyHistory(from, to, Boolean(settings));
-
-  useEffect(() => {
-    if (settings) {
-      setBaseDate(settings.baseDate);
-      setOpeningCash(settings.openingCashBrl);
-      return;
-    }
-    if (settings === null) {
-      setBaseDate(dateInput(new Date()));
-      setOpeningCash(String(dashboardBalance));
-    }
-  }, [dashboardBalance, settings]);
-
-  async function submitSettings(event: React.FormEvent) {
-    event.preventDefault();
-    try {
-      await saveSettings.mutateAsync({
-        baseDate,
-        openingCashBrl: openingCash.replace(',', '.'),
-      });
-      setEditingSettings(false);
-      setFrom(undefined);
-      setTo(undefined);
-      toast.success('Base patrimonial salva');
-    } catch (error) {
-      toast.error(
-        isAxiosError(error)
-          ? (error.response?.data?.error ?? 'Não foi possível salvar')
-          : 'Não foi possível salvar',
-      );
-    }
-  }
-
-  function preset(days: number) {
-    setFrom(daysAgo(days));
-    setTo(dateInput(new Date()));
-  }
+  const [range, setRange] = useState<{ from?: string; to?: string }>(() =>
+    presetRange(30, now),
+  );
+  const historyQuery = usePatrimonyHistory(
+    range.from,
+    range.to,
+    Boolean(settings),
+  );
 
   const chartData = useMemo(
     () =>
@@ -123,68 +85,63 @@ export function PatrimonyPage() {
     [historyQuery.data?.history],
   );
 
-  if (settingsQuery.isLoading) {
+  if (settingsQuery.isPending) {
     return (
-      <div className='flex h-60 items-center justify-center'>
+      <div className='flex h-60 items-center justify-center' role='status' aria-label='Carregando patrimônio'>
         <Spinner className='size-5' />
       </div>
     );
   }
 
+  if (settings === undefined) {
+    return (
+      <PatrimonyShell>
+        <PageHeader title='Patrimônio' description='Não foi possível carregar a configuração.' />
+        <SectionPanel>
+          <div role='alert' className='flex flex-wrap items-center gap-3'>
+            <p className='text-sm text-destructive'>
+              Falha ao carregar a base patrimonial. Nenhuma configuração foi alterada.
+            </p>
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={settingsQuery.isFetching}
+              onClick={() => void settingsQuery.refetch()}
+            >
+              Tentar novamente
+            </Button>
+          </div>
+        </SectionPanel>
+      </PatrimonyShell>
+    );
+  }
+
   if (settings === null || editingSettings) {
     return (
-      <div className='space-y-6'>
-        <title>Patrimônio | deManage</title>
+      <PatrimonyShell>
         <PageHeader
           title='Patrimônio'
           description='Defina a data-base e quanto existia em reais naquele dia. Meta e investimentos passam a ser reconstruídos a partir daí.'
         />
-        <SectionPanel
-          title={settings === null ? 'Configuração inicial' : 'Editar base patrimonial'}
-          description={`Sugestão do Dashboard atual: ${formatCurrency(dashboardBalance)}. Você pode corrigir esse valor antes de salvar.`}
-        >
-          <form onSubmit={(event) => void submitSettings(event)} className='grid gap-4 sm:grid-cols-2'>
-            <div className='space-y-2'>
-              <Label htmlFor='patrimony-base-date'>Data-base</Label>
-              <Input
-                id='patrimony-base-date'
-                type='date'
-                max={dateInput(new Date())}
-                value={baseDate}
-                onChange={(event) => setBaseDate(event.target.value)}
-              />
-            </div>
-            <div className='space-y-2'>
-              <Label htmlFor='patrimony-opening-cash'>Saldo em reais na data-base</Label>
-              <Input
-                id='patrimony-opening-cash'
-                inputMode='decimal'
-                value={openingCash}
-                onChange={(event) => setOpeningCash(event.target.value)}
-              />
-            </div>
-            <div className='flex gap-2 sm:col-span-2'>
-              <Button type='submit' disabled={saveSettings.isPending}>
-                {saveSettings.isPending ? 'Salvando…' : 'Salvar base'}
-              </Button>
-              {settings ? (
-                <Button type='button' variant='ghost' onClick={() => setEditingSettings(false)}>
-                  Cancelar
-                </Button>
-              ) : null}
-            </div>
-          </form>
-        </SectionPanel>
-      </div>
+        <PatrimonyBaseForm
+          settings={settings}
+          suggestedBalance={dashboardBalance}
+          onCancel={settings ? () => setEditingSettings(false) : undefined}
+          onSaved={() => {
+            setEditingSettings(false);
+            setRange({});
+          }}
+        />
+      </PatrimonyShell>
     );
   }
 
+  const today = todayKey(now);
   const data = historyQuery.data;
   const summary = data?.summary;
 
   return (
-    <div className='space-y-6'>
-      <title>Patrimônio | deManage</title>
+    <PatrimonyShell>
       <PageHeader
         title='Patrimônio'
         description='Tudo o que você possui hoje, comparado com 100% CDI e preservação do poder de compra pelo IPCA.'
@@ -197,12 +154,12 @@ export function PatrimonyPage() {
       />
 
       {historyQuery.isLoading ? (
-        <div className='flex h-60 items-center justify-center'>
+        <div className='flex h-60 items-center justify-center' role='status' aria-label='Reconstruindo patrimônio'>
           <Spinner className='size-5' />
         </div>
-      ) : historyQuery.isError || !summary ? (
+      ) : historyQuery.isError || !data || !summary ? (
         <SectionPanel>
-          <p className='text-sm text-destructive'>
+          <p role='alert' className='text-sm text-destructive'>
             Não foi possível reconstruir o patrimônio. Se uma cotação histórica ainda não estiver em cache, tente novamente quando o provedor estiver disponível.
           </p>
         </SectionPanel>
@@ -237,35 +194,26 @@ export function PatrimonyPage() {
             title='Evolução patrimonial'
             description='Transferências internas mudam a composição real, mas não são tratadas como aportes ou retiradas nas linhas CDI/IPCA.'
           >
-            <div className='mb-4 flex flex-wrap gap-2'>
-              <Button size='sm' variant='outline' onClick={() => preset(7)}>7d</Button>
-              <Button size='sm' variant='outline' onClick={() => preset(30)}>30d</Button>
-              <Button size='sm' variant='outline' onClick={() => preset(90)}>3m</Button>
-              <Button size='sm' variant='outline' onClick={() => preset(365)}>1a</Button>
-              <Button size='sm' variant='outline' onClick={() => { setFrom(undefined); setTo(undefined); }}>Máx</Button>
-              <Input
-                type='date'
-                min={settings.baseDate}
-                max={to ?? dateInput(new Date())}
-                value={from ?? settings.baseDate}
-                onChange={(event) => setFrom(event.target.value)}
-                className='w-auto'
-              />
-              <Input
-                type='date'
-                min={from ?? settings.baseDate}
-                max={dateInput(new Date())}
-                value={to ?? dateInput(new Date())}
-                onChange={(event) => setTo(event.target.value)}
-                className='w-auto'
-              />
-            </div>
+            <DateRangeFilter
+              from={range.from ?? settings.baseDate}
+              to={range.to ?? today}
+              min={settings.baseDate}
+              max={today}
+              onPreset={(days) => setRange(presetRange(days, now))}
+              onFromChange={(from) => setRange((current) => ({ ...current, from }))}
+              onToChange={(to) => setRange((current) => ({ ...current, to }))}
+              extra={
+                <Button type='button' size='sm' variant='outline' onClick={() => setRange({})}>
+                  Máx
+                </Button>
+              }
+            />
             <div className='h-[360px]'>
               <PatrimonyHistoryChart data={chartData} />
             </div>
           </SectionPanel>
         </>
       )}
-    </div>
+    </PatrimonyShell>
   );
 }

@@ -7,5 +7,6 @@
 /frontend/src/stores/ @bielxdh3
 /frontend/src/lib/ @bielxdh3
 /docker-compose*.yml @bielxdh3
-/.github/workflows/ @bielxdh3
+/.github/ @bielxdh3
+/ops/ @bielxdh3
 /scripts/ @bielxdh3

@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
-import { LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router';
+import { LogOut } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -14,6 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { getApiErrorCode } from '@/lib/api-error';
 import { getInitials } from '@/lib/format';
 import { useAuthStore } from '@/stores/auth-store';
 
@@ -30,9 +30,7 @@ export function AppTopbar() {
       navigate('/login', { replace: true });
     } catch (error) {
       if (
-        isAxiosError(error) &&
-        (error.response?.data as { code?: unknown } | undefined)?.code ===
-          'LOGOUT_REVOCATION_FAILED'
+        getApiErrorCode(error) === 'LOGOUT_REVOCATION_FAILED'
       ) {
         toast.error(
           'Você saiu deste navegador, mas não foi possível encerrar as outras sessões.',

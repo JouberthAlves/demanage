@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./frontend//src/assets/images/logos/logo.svg" alt="deManage" width="280" />
+  <img src="./frontend/src/assets/images/logos/logo.svg" alt="deManage" width="280" />
 </p>
 
 <p align="center"><em>Suas finanças, no controle.</em></p>
@@ -39,8 +39,9 @@ Monorepo `frontend/` + `backend/`, no mesmo espírito de outros apps do autor �
 
 ```
 frontend/   UI (Vite :5180)
-backend/    API Express (:8888) + Prisma
-docker-compose.yml   Postgres 16 (+ pgAdmin opcional)
+backend/    API Express (:8888) + Prisma (schema e migrations em backend/prisma/)
+ops/cd/     agente de deploy de produção (pull-only, ver docs/continuous-deployment.md)
+docker-compose.yml   PostgreSQL 18.6 (+ pgAdmin opcional)
 ```
 
 ## Layout do repo
@@ -55,8 +56,9 @@ frontend/src/
 
 backend/src/
   routes/             /auth/* + /entries|/expenses|/cards|/piggy-banks|…
-  prisma/             schema + migrations
   lib/                auth, cookies, fuso SP
+
+backend/prisma/       schema.prisma + migrations (SQL versionado)
 
 AGENTS.md             visão para agents
 plans.md              roadmap (fonte de verdade de prioridade)
@@ -67,7 +69,7 @@ Detalhe de features e checklist de deploy ficam em [`plans.md`](./plans.md). Est
 
 ## Como rodar
 
-Node **20.19+** ou **22.12+**, **pnpm**, PostgreSQL (Compose incluso). Esses mínimos atendem ao Vite 8; a imagem Docker de produção usa Node 26.
+Node **24+** (o `engines` do backend exige 24; a CI e as imagens usam Node 26), **pnpm 10.17.1**, PostgreSQL 18 (Compose incluso).
 
 ```bash
 # Banco
@@ -75,17 +77,30 @@ docker compose up -d db
 
 # Backend
 cd backend
-pnpm install
+pnpm install --frozen-lockfile
 cp .env.example .env
 pnpm exec prisma migrate dev
 pnpm dev
 # http://localhost:8888/health
 ```
 
+Atalhos a partir da raiz (cada pacote mantém o próprio lockfile):
+
+```bash
+pnpm bootstrap        # instala backend e frontend com lockfiles congelados
+pnpm typecheck        # tsc nos dois pacotes
+pnpm lint             # eslint nos dois pacotes (--max-warnings 0)
+pnpm test             # testes unitários e de frontend
+pnpm test:integration # testes do backend que usam banco (*.itest.ts)
+```
+
+Sem `DATABASE_URL`, `pnpm exec prisma generate` e `pnpm exec prisma validate` funcionam normalmente.
+Migrations e o drift gate estão em [`docs/database-migrations.md`](./docs/database-migrations.md).
+
 ```bash
 # Frontend
 cd frontend
-pnpm install
+pnpm install --frozen-lockfile
 cp .env.example .env
 pnpm dev
 # http://localhost:5180
@@ -101,8 +116,8 @@ Variáveis mínimas:
 | Frontend | `VITE_API_URL` | `http://localhost:8888` |
 
 ```bash
-cd frontend && pnpm format && pnpm exec tsc -b
-cd backend && pnpm format && pnpm build
+cd frontend && pnpm format && pnpm typecheck
+cd backend && pnpm format && pnpm typecheck && pnpm build
 ```
 
 ## Docs internas

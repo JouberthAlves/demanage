@@ -1,7 +1,6 @@
 import { api } from '@/lib/api';
 import type {
   Asset,
-  AssetPosition,
   AssetsSummary,
   AssetTransaction,
   AssetTransactionType,
@@ -23,11 +22,6 @@ export type AssetTransactionPayload = {
 
 export async function getAssetsSummary() {
   const { data } = await api.get<AssetsSummary>('/assets');
-  return data;
-}
-
-export async function getAssetPosition(asset: Asset) {
-  const { data } = await api.get<AssetPosition>(`/assets/${asset}`);
   return data;
 }
 
@@ -64,11 +58,7 @@ export async function deleteAssetTransaction(id: string) {
   await api.delete(`/assets/transactions/${id}`);
 }
 
-export async function getAssetHistory(
-  asset: Asset,
-  from: string,
-  to: string,
-) {
+export async function getAssetHistory(asset: Asset, from: string, to: string) {
   const { data } = await api.get<MarketSeries>(`/market/history/${asset}`, {
     params: { from, to },
   });

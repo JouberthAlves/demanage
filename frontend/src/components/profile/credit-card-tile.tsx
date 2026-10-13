@@ -1,6 +1,5 @@
-import { isAxiosError } from 'axios';
-import { CreditCard, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { useState } from 'react';
+import { CreditCard, Pencil, RefreshCw, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 
 import {
@@ -25,12 +24,15 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useUpdateCard } from '@/hooks/use-cards';
+import { getApiErrorMessage } from '@/lib/api-error';
 import { getCardTone } from '@/lib/card-tone';
 import {
+  applyCardExpiryInput,
+  CARD_EXPIRY_ERROR,
+  cardExpiryError,
   formatCardExpiry,
   formatCurrency,
   formatPercent,
-  applyCardExpiryInput,
   parseCardExpiryInput,
 } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -54,19 +56,21 @@ export function CreditCardTile({
   const tone = getCardTone(card);
   const updateCard = useUpdateCard();
   const expired = Boolean(card.expired);
-  const hasLimit = card.limit != null && card.limit > 0;
-  const percent = hasLimit ? (committed / (card.limit as number)) * 100 : 0;
+  const limit = card.limit != null && card.limit > 0 ? card.limit : null;
+  const percent = limit ? (committed / limit) * 100 : 0;
   const barWidth = Math.min(percent, 100);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [renewOpen, setRenewOpen] = useState(false);
   const [expiry, setExpiry] = useState(formatCardExpiry(card.expiresAt));
+  const [expiryError, setExpiryError] = useState<string | null>(null);
 
   async function handleRenew(event: React.FormEvent) {
     event.preventDefault();
     const parsed = parseCardExpiryInput(expiry);
     if (!parsed) {
-      toast.error('Validade inválida. Use MM/AA');
+      setExpiryError(CARD_EXPIRY_ERROR);
+      toast.error(CARD_EXPIRY_ERROR);
       return;
     }
 
@@ -78,10 +82,7 @@ export function CreditCardTile({
       toast.success('Cartão renovado');
       setRenewOpen(false);
     } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível renovar')
-        : 'Não foi possível renovar';
-      toast.error(message);
+      toast.error(getApiErrorMessage(err, 'Não foi possível renovar'));
     }
   }
 
@@ -114,20 +115,26 @@ export function CreditCardTile({
                 {card.name}
               </h3>
               <p className='text-xs text-muted-foreground'>
-                {hasLimit
-                  ? `Limite ${formatCurrency(card.limit as number)}`
+                {limit !== null
+                  ? `Limite ${formatCurrency(limit)}`
                   : 'Sem limite'}
               </p>
             </div>
           </div>
 
           <div className='flex gap-1 opacity-80 transition-opacity group-hover:opacity-100'>
-            <Button variant='ghost' size='icon-sm' onClick={onEdit}>
+            <Button
+              variant='ghost'
+              size='icon-sm'
+              aria-label={`Editar cartão ${card.name}`}
+              onClick={onEdit}
+            >
               <Pencil className='size-4' />
             </Button>
             <Button
               variant='ghost'
               size='icon-sm'
+              aria-label={`Remover cartão ${card.name}`}
               disabled={deleting}
               onClick={() => setConfirmDelete(true)}
             >
@@ -147,6 +154,7 @@ export function CreditCardTile({
               className='w-fit rounded-lg'
               onClick={() => {
                 setExpiry(formatCardExpiry(card.expiresAt));
+                setExpiryError(null);
                 setRenewOpen(true);
               }}
             >
@@ -166,7 +174,8 @@ export function CreditCardTile({
             </p>
             {card.pendingClosingDay != null ? (
               <p className='mt-1 text-xs text-muted-foreground'>
-                Próximo ciclo: dia {String(card.pendingClosingDay).padStart(2, '0')}
+                Próximo ciclo: dia{' '}
+                {String(card.pendingClosingDay).padStart(2, '0')}
               </p>
             ) : null}
           </div>
@@ -178,7 +187,7 @@ export function CreditCardTile({
           </div>
         </div>
 
-        {hasLimit ? (
+        {limit !== null ? (
           <div className='relative mt-5 space-y-2'>
             <div className='flex items-center justify-between text-xs'>
               <span className='text-muted-foreground'>Comprometido</span>
@@ -239,15 +248,25 @@ export function CreditCardTile({
                 inputMode='numeric'
                 value={expiry}
                 onChange={(event) => {
-                  const result = applyCardExpiryInput(event.target.value);
-                  if (result.error) {
-                    toast.error(result.error);
-                  }
-                  setExpiry(result.value);
+                  setExpiry(applyCardExpiryInput(event.target.value).value);
+                  setExpiryError(null);
                 }}
+                onBlur={() => setExpiryError(cardExpiryError(expiry))}
+                aria-invalid={expiryError ? true : undefined}
+                aria-describedby={
+                  expiryError ? `renew-${card.id}-error` : undefined
+                }
                 placeholder='MM/AA'
                 className='rounded-lg'
               />
+              {expiryError ? (
+                <p
+                  id={`renew-${card.id}-error`}
+                  className='text-xs text-destructive'
+                >
+                  {expiryError}
+                </p>
+              ) : null}
             </div>
             <DialogFooter>
               <Button

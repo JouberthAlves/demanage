@@ -1,0 +1,21 @@
+# Build-from-source override for docker-compose.prod.yml (self-host without GHCR).
+#
+#   docker compose -f docker-compose.prod.yml -f docker-compose.build.yml up -d --build
+#
+# The base file still requires DEMANAGE_BACKEND_IMAGE and DEMANAGE_FRONTEND_IMAGE to
+# be set; for builds, use local tags such as demanage-backend:local.
+# VITE_API_URL is passed to the build and to the runtime with the same value.
+services:
+  backend:
+    image: ${DEMANAGE_BACKEND_IMAGE}
+    build:
+      context: ./backend
+
+  frontend:
+    image: ${DEMANAGE_FRONTEND_IMAGE}
+    build:
+      context: ./frontend
+      args:
+        VITE_API_URL: ${VITE_API_URL:-/api}
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-/api}

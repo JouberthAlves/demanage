@@ -1,3 +1,4 @@
+import { parseMonthKey } from '@/lib/dates';
 const currencyFormatter = new Intl.NumberFormat('pt-BR', {
   style: 'currency',
   currency: 'BRL',
@@ -53,24 +54,22 @@ export function moneyValueClass(formatted: string) {
 }
 
 export function formatMonthLabel(monthKey: string) {
-  const [year, month] = monthKey.split('-').map(Number);
-  return monthFormatter.format(new Date(year, month - 1, 1));
+  const parsed = parseMonthKey(monthKey);
+  if (!parsed) return monthKey;
+  return monthFormatter.format(new Date(parsed.year, parsed.month - 1, 1));
 }
 
 export function getInitials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return 'DM';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+  const [first, second] = parts;
+  if (!first) return 'DM';
+  if (!second) return first.slice(0, 2).toUpperCase();
+  return `${first.charAt(0)}${second.charAt(0)}`.toUpperCase();
 }
 
 export function getFirstName(name: string) {
   const first = name.trim().split(/\s+/).filter(Boolean)[0];
   return first || 'bem-vindo';
-}
-
-export function createId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /** Exibe número como `1.234,56` para inputs monetários. */
@@ -108,10 +107,6 @@ export function parseCardExpiryInput(value: string): Date | null {
   return new Date(year, month, 0, 23, 59, 59, 999);
 }
 
-export function maskCardExpiryInput(raw: string) {
-  return applyCardExpiryInput(raw).value;
-}
-
 /** Máscara MM/AA; marca erro se o mês for > 12 ou 00. */
 export function applyCardExpiryInput(raw: string): {
   value: string;
@@ -140,6 +135,17 @@ export function applyCardExpiryInput(raw: string): {
   }
 
   return { value: `${digits.slice(0, 2)}/${digits.slice(2)}` };
+}
+
+export const CARD_EXPIRY_ERROR = 'Validade inválida. Use MM/AA';
+
+/**
+ * Validação de validade para blur/submit (nunca durante a digitação).
+ * Vazio é válido: o cartão fica sem validade.
+ */
+export function cardExpiryError(value: string): string | null {
+  if (!value.trim()) return null;
+  return parseCardExpiryInput(value) ? null : CARD_EXPIRY_ERROR;
 }
 
 export function formatCardExpiry(expiresAt?: string | null) {

@@ -36,11 +36,18 @@ export const BUILTIN_EXPENSE_CATEGORY_LABELS: Record<
   divida: 'Dívida',
 };
 
-export const EXPENSE_FREQUENCY_LABELS: Record<ExpenseFrequency, string> = {
+/** Despesas e rendas usam a mesma escala de frequência. */
+export const FREQUENCY_LABELS: Record<
+  ExpenseFrequency | IncomeFrequency,
+  string
+> = {
   mensal: 'Mensal',
   semanal: 'Semanal',
   unica: 'Única',
 };
+
+export const EXPENSE_FREQUENCY_LABELS: Record<ExpenseFrequency, string> =
+  FREQUENCY_LABELS;
 
 export const INCOME_TYPE_LABELS: Record<Income['type'], string> = {
   salario: 'Salário',
@@ -55,11 +62,8 @@ export const BUILTIN_INCOME_TYPE_LABELS: Record<
   freelance: 'Freelance',
 };
 
-export const INCOME_FREQUENCY_LABELS: Record<IncomeFrequency, string> = {
-  mensal: 'Mensal',
-  semanal: 'Semanal',
-  unica: 'Única',
-};
+export const INCOME_FREQUENCY_LABELS: Record<IncomeFrequency, string> =
+  FREQUENCY_LABELS;
 
 export const MONTH_LABELS: Record<number, string> = {
   1: 'Janeiro',
@@ -101,6 +105,11 @@ export function tagBadgeStyle(color: string): CSSProperties {
   };
 }
 
+/**
+ * Converte um valor pela frequência para o equivalente mensal (semanal x4,
+ * única = 0). Usado pelas libs de agenda (expense-schedule, income-schedule):
+ * não alterar sem revisar os cálculos de comprometimento mensal.
+ */
 export function monthlyAmount(
   amount: number,
   frequency: ExpenseFrequency | IncomeFrequency,

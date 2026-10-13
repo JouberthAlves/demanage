@@ -23,6 +23,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
+    "noUncheckedIndexedAccess": true,
     "paths": {
       "@/*": [
         "./src/*"
@@ -30,8 +31,6 @@
     }
   },
   "include": [
-    "src",
-    "src/components/Tickets/TicketDetails/.tsxetInfo.tsx",
-    "backup"
+    "src"
   ]
 }

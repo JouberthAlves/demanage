@@ -4,11 +4,24 @@ set -e
 : "${API_HOST:?API_HOST is required}"
 : "${API_PORT:?API_PORT is required}"
 : "${PORT:=80}"
-: "${NGINX_RESOLVER:=[fd12::10]}"
-: "${NGINX_RESOLVER_IPV6:=on}"
 : "${TRUST_CF_CONNECTING_IP:=0}"
 : "${APP_URL:=http://localhost}"
 : "${VITE_API_URL:=/api}"
+
+# nginx resolver: default to the container's own DNS server (Docker embedded DNS,
+# Kubernetes, or any host resolver). Override with NGINX_RESOLVER when needed.
+if [ -z "${NGINX_RESOLVER:-}" ]; then
+  NGINX_RESOLVER=$(awk '/^nameserver/ { print $2; exit }' /etc/resolv.conf 2>/dev/null || true)
+  NGINX_RESOLVER=${NGINX_RESOLVER:-127.0.0.11}
+fi
+case "$NGINX_RESOLVER" in
+  \[*) NGINX_RESOLVER_IS_IPV6=1 ;;
+  *:*) NGINX_RESOLVER_IS_IPV6=1; NGINX_RESOLVER="[$NGINX_RESOLVER]" ;;
+  *) NGINX_RESOLVER_IS_IPV6=0 ;;
+esac
+if [ -z "${NGINX_RESOLVER_IPV6:-}" ]; then
+  if [ "$NGINX_RESOLVER_IS_IPV6" = 1 ]; then NGINX_RESOLVER_IPV6=on; else NGINX_RESOLVER_IPV6=off; fi
+fi
 
 validate_api_csp_source() {
   if ! printf '%s\n' "$API_CSP_SOURCE" | grep -Eq '^https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(:[0-9]{1,5})?$'; then

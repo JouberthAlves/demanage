@@ -1,49 +1,32 @@
-import { Pencil, Trash2 } from 'lucide-react';
-
+import { StatusNote } from '@/components/shared/schedule-form/status-note';
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  EXPENSE_FREQUENCY_LABELS,
-  MONTH_LABELS,
-  expenseTypeLabel,
-  tagBadgeStyle,
-} from '@/data/labels';
+import { EXPENSE_FREQUENCY_LABELS } from '@/data/labels';
 import { getCardTone } from '@/lib/card-tone';
-import {
-  canConfirmExpensePayment,
-  canPayExpenseEarly,
-  isExpenseAutoDebitedThisMonth,
-  isExpenseInvoicePaidThisMonth,
-  isExpensePaidThisMonth,
-} from '@/lib/expense-schedule';
-import {
-  expenseCashAmount,
-  formatExpensePaymentLabel,
-} from '@/lib/expense-splits';
+import { expensePayState, expenseStatusNote } from '@/lib/expense-pay-state';
+import { formatExpensePaymentLabel } from '@/lib/expense-splits';
 import { formatCurrency } from '@/lib/format';
-import type { Card, ExpenseCategory, RecurringExpense } from '@/types/finance';
+import { formatDayKeyBr } from '@/lib/schedule-labels';
+import type { Card, RecurringExpense } from '@/types/finance';
 
-const categoryColors: Record<ExpenseCategory, string> = {
-  assinatura: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  parcela: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  divida: 'bg-rose-500/15 text-rose-300 border-rose-500/30',
-  outro: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
-  cofrinho: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
-  investimento: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-};
+import { ExpenseCategoryBadge } from './expense-category-badge';
+import { expenseDiscountLabel } from './expense-labels';
+import { ExpenseRowActions } from './expense-row-actions';
 
 type ExpenseListCardProps = {
   expense: RecurringExpense;
   cards: Card[];
-  pending?: boolean;
+  now: Date;
+  pending: boolean;
   onPay: () => void;
   onEdit: () => void;
   onDelete: () => void;
 };
 
+/** Mobile representation of an expense row. */
 export function ExpenseListCard({
   expense,
   cards,
+  now,
   pending,
   onPay,
   onEdit,
@@ -52,64 +35,16 @@ export function ExpenseListCard({
   const primaryCard = cards.find((item) => item.id === expense.cardId);
   const tone = primaryCard ? getCardTone(primaryCard) : null;
   const paymentLabel = formatExpensePaymentLabel(expense, cards);
-  const hasCash = expenseCashAmount(expense) > 0;
-  const paidEarly = isExpensePaidThisMonth(expense);
-  const autoDebited = hasCash && isExpenseAutoDebitedThisMonth(expense);
-  const canPayEarly = canPayExpenseEarly(expense);
-  const isRecurring = expense.frequency !== 'unica' && !expense.isInvoice;
-
-  const payState = (() => {
-    if (expense.isInvoice) {
-      return isExpenseInvoicePaidThisMonth(expense)
-        ? { label: 'Pago', disabled: true }
-        : { label: 'Confirmar pagamento', disabled: Boolean(pending) };
-    }
-    if (!isRecurring) return { label: 'Pago', disabled: true };
-    if (!hasCash) return { label: 'Via fatura', disabled: true };
-    if (paidEarly) return { label: 'Pago', disabled: true };
-    if (autoDebited) {
-      return {
-        label: 'Confirmar pagamento',
-        disabled: Boolean(pending) || !canConfirmExpensePayment(expense),
-      };
-    }
-    if (canPayEarly) {
-      return { label: 'Pagar agora', disabled: Boolean(pending) };
-    }
-    return { label: 'Aguardando', disabled: true };
-  })();
-
-  const discountLabel =
-    expense.frequency === 'unica'
-      ? expense.registeredAt
-        ? expense.registeredAt.split('-').reverse().join('/')
-        : 'Hoje'
-      : expense.dueDay
-        ? `Dia ${String(expense.dueDay).padStart(2, '0')}${
-            expense.startsAt
-              ? ` · ${MONTH_LABELS[Number(expense.startsAt.slice(5, 7))] ?? ''}`
-              : ''
-          }`
-        : null;
+  const discountLabel = expenseDiscountLabel(expense);
+  const showEndsAt =
+    expense.frequency !== 'unica' && !expense.isInvoice && expense.endsAt;
 
   return (
     <article className='rounded-xl border border-border bg-black/20 p-4'>
       <div className='flex items-start justify-between gap-3'>
         <div className='min-w-0 space-y-1'>
           <p className='truncate font-medium'>{expense.name}</p>
-          {isRecurring && hasCash ? (
-            paidEarly ? (
-              <p className='text-xs text-neon-green'>Pagamento confirmado</p>
-            ) : autoDebited ? (
-              <p className='text-xs text-neon-amber'>
-                Já no saldo; confirme quando pagar
-              </p>
-            ) : (
-              <p className='text-xs text-muted-foreground'>
-                Aguardando dia {expense.dueDay ?? '—'}
-              </p>
-            )
-          ) : null}
+          <StatusNote note={expenseStatusNote(expense, now)} />
         </div>
         <p className='shrink-0 text-base font-semibold'>
           {formatCurrency(expense.amount)}
@@ -117,18 +52,7 @@ export function ExpenseListCard({
       </div>
 
       <div className='mt-3 flex flex-wrap items-center gap-2'>
-        {expense.customTag ? (
-          <Badge
-            variant='outline'
-            style={tagBadgeStyle(expense.customTag.color)}
-          >
-            {expense.customTag.name}
-          </Badge>
-        ) : (
-          <Badge variant='outline' className={categoryColors[expense.category]}>
-            {expenseTypeLabel(expense)}
-          </Badge>
-        )}
+        <ExpenseCategoryBadge expense={expense} />
         <Badge variant='outline' className='text-muted-foreground'>
           {EXPENSE_FREQUENCY_LABELS[expense.frequency]}
         </Badge>
@@ -147,45 +71,18 @@ export function ExpenseListCard({
           </p>
         ) : null}
         {discountLabel ? <p>Desconto: {discountLabel}</p> : null}
-        {expense.frequency !== 'unica' &&
-        !expense.isInvoice &&
-        expense.endsAt ? (
-          <p>Término: {expense.endsAt.split('-').reverse().join('/')}</p>
-        ) : null}
+        {showEndsAt ? <p>Término: {formatDayKeyBr(expense.endsAt)}</p> : null}
       </div>
 
-      <div className='mt-4 flex flex-wrap justify-end gap-1'>
-        <Button
-          variant='secondary'
-          size='sm'
-          className='rounded-lg'
-          disabled={payState.disabled}
-          onClick={onPay}
-        >
-          {payState.label}
-        </Button>
-        {!expense.isInvoice ? (
-          <Button
-            variant='ghost'
-            size='icon-sm'
-            aria-label={`Editar ${expense.name}`}
-            onClick={onEdit}
-          >
-            <Pencil className='size-4' />
-          </Button>
-        ) : null}
-        <Button
-          variant='ghost'
-          size='icon-sm'
-          aria-label={`Excluir ${expense.name}`}
-          disabled={pending}
-          onClick={onDelete}
-        >
-          <Trash2 className='size-4' />
-        </Button>
-      </div>
+      <ExpenseRowActions
+        className='mt-4 flex-wrap'
+        expense={expense}
+        payState={expensePayState(expense, now, pending)}
+        pending={pending}
+        onPay={onPay}
+        onEdit={onEdit}
+        onDelete={onDelete}
+      />
     </article>
   );
 }
-
-export { categoryColors };

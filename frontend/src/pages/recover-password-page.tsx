@@ -1,30 +1,22 @@
-import { isAxiosError } from 'axios';
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router';
 import { toast } from 'sonner';
 
+import { AuthCard, AuthLoading } from '@/components/auth/auth-card';
+import { PasswordFields } from '@/components/auth/password-fields';
+import { validatePasswordPair } from '@/components/auth/password-validation';
 import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
-import { AuthShell } from '@/components/layout/auth-shell';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardFooter,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
 import {
   Field,
   FieldDescription,
-  FieldError,
   FieldGroup,
   FieldLabel,
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { api } from '@/lib/api';
-import { passwordPolicyError } from '@/lib/password-policy';
+import { getApiErrorMessage } from '@/lib/api-error';
 import { useAuthStore } from '@/stores/auth-store';
 
 export function RecoverPasswordPage() {
@@ -47,13 +39,7 @@ export function RecoverPasswordPage() {
     void fetchMe();
   }, [fetchMe]);
 
-  if (isLoading) {
-    return (
-      <div className='flex min-h-screen items-center justify-center bg-background'>
-        <Spinner className='size-6' />
-      </div>
-    );
-  }
+  if (isLoading) return <AuthLoading />;
 
   if (isAuthenticated) {
     return <Navigate to='/' replace />;
@@ -64,25 +50,22 @@ export function RecoverPasswordPage() {
     setError(null);
     setConfirmPasswordError(null);
 
-    if (password !== confirmPassword) {
-      const message = 'As senhas não coincidem';
-      setConfirmPasswordError(message);
-      toast.error(message);
-      document.getElementById('recovery-confirm-password')?.focus();
-      return;
-    }
-
-    const policyError = passwordPolicyError(password);
-    if (policyError) {
-      setError(policyError);
-      toast.error(policyError);
-      document.getElementById('recovery-password')?.focus();
+    const issue = validatePasswordPair(password, confirmPassword);
+    if (issue) {
+      if (issue.field === 'confirm-password') {
+        setConfirmPasswordError(issue.message);
+      } else {
+        setError(issue.message);
+      }
+      toast.error(issue.message);
+      document.getElementById(`recovery-${issue.field}`)?.focus();
       return;
     }
 
     setSubmitting(true);
 
     try {
+      // Direct call kept in the page: there is no auth API module for this route yet.
       const { data } = await api.post<{ recoveryCode: string }>(
         '/auth/recover-password',
         {
@@ -94,9 +77,10 @@ export function RecoverPasswordPage() {
       setNextRecoveryCode(data.recoveryCode);
       toast.success('Senha redefinida');
     } catch (err) {
-      const message = isAxiosError(err)
-        ? (err.response?.data?.error ?? 'Não foi possível recuperar a senha')
-        : 'Não foi possível recuperar a senha';
+      const message = getApiErrorMessage(
+        err,
+        'Não foi possível recuperar a senha',
+      );
       setError(message);
       toast.error(message);
     } finally {
@@ -105,148 +89,87 @@ export function RecoverPasswordPage() {
   }
 
   return (
-    <AuthShell>
-      <div className='mb-8 flex flex-col items-center gap-3 text-center'>
-        <img
-          src='/favicon.svg'
-          alt='deManage'
-          className='size-16 drop-shadow-[0_0_24px_rgba(52,211,153,0.35)]'
-        />
-        <div>
-          <p className='text-2xl font-semibold tracking-tight'>
-            Recuperar senha
-          </p>
-          <p className='mt-1 text-sm text-muted-foreground'>
-            Use o código que você guardou offline
-          </p>
-        </div>
-      </div>
+    <AuthCard
+      brandTitle='Recuperar senha'
+      brandSubtitle='Use o código que você guardou offline'
+      title={nextRecoveryCode ? 'Senha alterada' : 'Código de recuperação'}
+      description={
+        nextRecoveryCode
+          ? 'Seu código antigo foi invalidado. Salve o novo código abaixo.'
+          : 'Não é necessário e-mail, SMS ou serviço externo.'
+      }
+      footer={
+        <FieldDescription>
+          <Link to='/login' className='underline underline-offset-4'>
+            {nextRecoveryCode ? 'Ir para o login' : 'Voltar para o login'}
+          </Link>
+        </FieldDescription>
+      }
+    >
+      {nextRecoveryCode ? (
+        <RecoveryCodePanel recoveryCode={nextRecoveryCode} />
+      ) : (
+        <form onSubmit={handleSubmit}>
+          <FieldGroup>
+            {error ? (
+              <p role='alert' className='text-sm text-destructive'>
+                {error}
+              </p>
+            ) : null}
+            <Field>
+              <FieldLabel htmlFor='recovery-email'>E-mail</FieldLabel>
+              <Input
+                id='recovery-email'
+                type='email'
+                autoComplete='email'
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
+            </Field>
 
-      <Card
-        className='w-full border-white/10 bg-card/55 shadow-[0_0_0_1px_rgba(255,255,255,0.03)] backdrop-blur-xl'
-        size='sm'
-      >
-        <CardHeader>
-          <CardTitle>
-            {nextRecoveryCode ? 'Senha alterada' : 'Código de recuperação'}
-          </CardTitle>
-          <CardDescription>
-            {nextRecoveryCode
-              ? 'Seu código antigo foi invalidado. Salve o novo código abaixo.'
-              : 'Não é necessário e-mail, SMS ou serviço externo.'}
-          </CardDescription>
-        </CardHeader>
+            <Field>
+              <FieldLabel htmlFor='recovery-code'>Código offline</FieldLabel>
+              <Input
+                id='recovery-code'
+                type='text'
+                autoComplete='off'
+                autoCapitalize='characters'
+                spellCheck={false}
+                value={recoveryCode}
+                onChange={(event) => setRecoveryCode(event.target.value)}
+                placeholder='XXXXX-XXXXX-XXXXX-XXXXX'
+                required
+              />
+              <FieldDescription>
+                Hífens e espaços são ignorados.
+              </FieldDescription>
+            </Field>
 
-        <CardContent>
-          {nextRecoveryCode ? (
-            <RecoveryCodePanel recoveryCode={nextRecoveryCode} />
-          ) : (
-            <form onSubmit={handleSubmit}>
-              <FieldGroup>
-                {error ? (
-                  <p role='alert' className='text-sm text-destructive'>
-                    {error}
-                  </p>
-                ) : null}
-                <Field>
-                  <FieldLabel htmlFor='recovery-email'>E-mail</FieldLabel>
-                  <Input
-                    id='recovery-email'
-                    type='email'
-                    autoComplete='email'
-                    value={email}
-                    onChange={(event) => setEmail(event.target.value)}
-                    required
-                  />
-                </Field>
+            <PasswordFields
+              idPrefix='recovery'
+              passwordLabel='Nova senha'
+              confirmLabel='Confirmar nova senha'
+              password={password}
+              confirmPassword={confirmPassword}
+              confirmError={confirmPasswordError}
+              onPasswordChange={(value) => {
+                setPassword(value);
+                setConfirmPasswordError(null);
+              }}
+              onConfirmPasswordChange={(value) => {
+                setConfirmPassword(value);
+                setConfirmPasswordError(null);
+              }}
+            />
 
-                <Field>
-                  <FieldLabel htmlFor='recovery-code'>
-                    Código offline
-                  </FieldLabel>
-                  <Input
-                    id='recovery-code'
-                    type='text'
-                    autoComplete='off'
-                    autoCapitalize='characters'
-                    spellCheck={false}
-                    value={recoveryCode}
-                    onChange={(event) => setRecoveryCode(event.target.value)}
-                    placeholder='XXXXX-XXXXX-XXXXX-XXXXX'
-                    required
-                  />
-                  <FieldDescription>
-                    Hífens e espaços são ignorados.
-                  </FieldDescription>
-                </Field>
-
-                <Field>
-                  <FieldLabel htmlFor='recovery-password'>
-                    Nova senha
-                  </FieldLabel>
-                  <Input
-                    id='recovery-password'
-                    type='password'
-                    autoComplete='new-password'
-                    value={password}
-                    onChange={(event) => {
-                      setPassword(event.target.value);
-                      setConfirmPasswordError(null);
-                    }}
-                    minLength={12}
-                    required
-                  />
-                  <FieldDescription>
-                    Mínimo de 12 caracteres e máximo de 72 bytes em UTF-8.
-                  </FieldDescription>
-                </Field>
-
-                <Field data-invalid={confirmPasswordError ? true : undefined}>
-                  <FieldLabel htmlFor='recovery-confirm-password'>
-                    Confirmar nova senha
-                  </FieldLabel>
-                  <Input
-                    id='recovery-confirm-password'
-                    type='password'
-                    autoComplete='new-password'
-                    value={confirmPassword}
-                    onChange={(event) => {
-                      setConfirmPassword(event.target.value);
-                      setConfirmPasswordError(null);
-                    }}
-                    aria-invalid={Boolean(confirmPasswordError)}
-                    aria-describedby={
-                      confirmPasswordError
-                        ? 'recovery-confirm-password-error'
-                        : undefined
-                    }
-                    minLength={12}
-                    required
-                  />
-                  {confirmPasswordError ? (
-                    <FieldError id='recovery-confirm-password-error'>
-                      {confirmPasswordError}
-                    </FieldError>
-                  ) : null}
-                </Field>
-
-                <Button type='submit' className='w-full' disabled={submitting}>
-                  {submitting ? <Spinner data-icon='inline-start' /> : null}
-                  Redefinir senha
-                </Button>
-              </FieldGroup>
-            </form>
-          )}
-        </CardContent>
-
-        <CardFooter>
-          <FieldDescription>
-            <Link to='/login' className='underline underline-offset-4'>
-              {nextRecoveryCode ? 'Ir para o login' : 'Voltar para o login'}
-            </Link>
-          </FieldDescription>
-        </CardFooter>
-      </Card>
-    </AuthShell>
+            <Button type='submit' className='w-full' disabled={submitting}>
+              {submitting ? <Spinner data-icon='inline-start' /> : null}
+              Redefinir senha
+            </Button>
+          </FieldGroup>
+        </form>
+      )}
+    </AuthCard>
   );
 }

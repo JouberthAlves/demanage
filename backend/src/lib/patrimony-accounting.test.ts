@@ -6,7 +6,7 @@ import {
   enrichAccountingWithQuote,
 } from '@/lib/asset-accounting';
 import { decimal } from '@/lib/decimal';
-import { balanceFromTransactions } from '@/lib/piggy';
+import { balanceFromTransactions } from '@/lib/piggy/ledger';
 
 function marketValue(
   asset: 'BTC' | 'USD',

@@ -1,8 +1,7 @@
-import { isAxiosError } from 'axios';
 import { create } from 'zustand';
 
-import { api } from '@/lib/api';
-import { useFinanceStore } from '@/stores/finance-store';
+import { api, onSessionExpired } from '@/lib/api';
+import { getApiErrorCode, getApiErrorStatus } from '@/lib/api-error';
 import type { AuthUser } from '@/types/auth';
 
 type UpdateProfileInput = {
@@ -43,11 +42,6 @@ export const useAuthStore = create<AuthState>((set, get) => {
   function setSessionUser(user: AuthUser | null, forceNewSession = false) {
     const sessionChanged = forceNewSession || get().user?.id !== user?.id;
 
-    if (sessionChanged) {
-      // Zustand finance data is separate from the TanStack Query cache.
-      useFinanceStore.getState().clearAll();
-    }
-
     set((state) => ({
       user,
       isAuthenticated: Boolean(user),
@@ -74,10 +68,16 @@ export const useAuthStore = create<AuthState>((set, get) => {
         if (requestVersion !== meRequestVersion) return get().user;
         setSessionUser(data.user);
         return data.user;
-      } catch {
+      } catch (error) {
         if (requestVersion !== meRequestVersion) return get().user;
-        setSessionUser(null);
-        return null;
+        // Only an explicit 401 ends the session; a network blip or a 5xx
+        // must not log the user out.
+        if (getApiErrorStatus(error) === 401 || !get().user) {
+          setSessionUser(null);
+          return null;
+        }
+        set({ isLoading: false });
+        return get().user;
       }
     },
 
@@ -139,10 +139,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
         await api.post('/auth/logout');
         clearLocalSession = true;
       } catch (error) {
+        // The cookie is cleared server-side even when revocation fails.
         clearLocalSession =
-          isAxiosError(error) &&
-          (error.response?.data as { code?: unknown } | undefined)?.code ===
-            'LOGOUT_REVOCATION_FAILED';
+          getApiErrorCode(error) === 'LOGOUT_REVOCATION_FAILED';
         throw error;
       } finally {
         if (clearLocalSession) {
@@ -152,4 +151,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
       }
     },
   };
+});
+
+onSessionExpired(() => {
+  const { user, setUser } = useAuthStore.getState();
+  if (user) setUser(null);
 });

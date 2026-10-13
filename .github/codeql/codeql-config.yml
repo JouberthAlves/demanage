@@ -1,2 +1,3 @@
 paths-ignore:
-  - backend/src/lib/financial-routes.integration.test.ts
+  - backend/src/**/*.test.ts
+  - backend/src/**/*.itest.ts

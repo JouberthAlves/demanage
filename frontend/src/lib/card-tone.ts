@@ -192,5 +192,5 @@ export function getCardTone(card: { id: string; name: string }): CardTone {
     }
   }
 
-  return FALLBACK_TONES[hashString(card.id) % FALLBACK_TONES.length];
+  return FALLBACK_TONES[hashString(card.id) % FALLBACK_TONES.length]!;
 }

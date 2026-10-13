@@ -1,6 +1,10 @@
 services:
+  # Same PostgreSQL image digest as docker-compose.prod.yml and CI.
+  # PostgreSQL 18 keeps PGDATA under /var/lib/postgresql/18/docker, so the volume
+  # is mounted at /var/lib/postgresql. A volume created by PostgreSQL 16 (old
+  # mount /var/lib/postgresql/data) is not compatible: back it up or remove it.
   db:
-    image: postgres:16-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     container_name: demanage-db
     restart: unless-stopped
     ports:
@@ -11,7 +15,13 @@ services:
       POSTGRES_DB: demanage
       TZ: UTC
     volumes:
-      - demanage_pgdata:/var/lib/postgresql/data
+      - demanage_pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U demanage -d demanage']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
   pgadmin:
     image: dpage/pgadmin4:9.18.0@sha256:c332c5f6dfba995d9ebc4af261d93506d6876085d712eaaa3defc8dd1a3f26de
     container_name: demanage-pgadmin
@@ -23,6 +33,7 @@ services:
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-development-only-change-me}
       TZ: UTC
     depends_on:
-      - db
+      db:
+        condition: service_healthy
 volumes:
   demanage_pgdata:

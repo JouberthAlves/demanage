@@ -38,9 +38,15 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 ---
 
+## Infraestrutura — CI/CD
+
+- [x] **Pipeline de imagens e promoção** — Publicação de imagens imutáveis GHCR após CI da `master`, aprovação manual via ambiente GitHub `production`, agente outbound-only com backup, rollout seletivo e rollback da aplicação.
+- [ ] **`[HUMAN]` Ativação da produção** — Configurar no GitHub o ambiente protegido com required reviewer e variável `PRODUCTION_GATE_CONFIGURED=true`; autorizar GHCR; inventariar Compose efetivo do Debian e instalar o serviço systemd do agente. Sem esses passos, não há deploy automático.
+
 ## P1 — Frontend
 
 - [x] ~~**Renovar o frontend**~~ — Polish visual (pedido explícito): hero/panels, dashboard, despesas, entradas, perfil, layout e auth. Cores de cartão estáveis (`lib/card-tone.ts`) compartilhadas entre perfil e gráfico radial.
+- [x] **Cofrinho: erros e carregamento por página** — Corrigir falso saldo zero em falhas de API, exibir estado recuperável com nova tentativa, limitar retries e evitar consultas/manutenções financeiras duplicadas no layout.
 
 ---
 
@@ -66,11 +72,13 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
   2. Backend prod: `DATABASE_URL`, `JWT_SECRET`, `APP_URL` (sem fallback fraco)
   3. Se FE e API em origens diferentes: cookie `sameSite=none` + `secure` (auto ou `COOKIE_SAME_SITE`)
   4. Frontend build: `VITE_API_URL` apontando para a API
-  5. Docker/Railway: `PORT` (ou `API_PORT`); entrypoint roda migrate + `node dist/server.js`
+  5. Docker/PaaS: `PORT` (ou `API_PORT`); entrypoint roda migrate + `node dist/server.js`
 
 - [x] ~~Pente fino pré-deploy~~ — Docker/entrypoint/`PORT`; billing day-key SP; cookie TTL = JWT; rate limit auth; `closingDay` NOT NULL; confirm delete entradas; polish auth/dashboard/tabelas.
 
 - [x] ~~**Cofrinho**~~ — Aba de metas de poupança com depósito/saque, impacto no saldo, histórico e dashboard.
+
+- [x] **Cofrinho: depósito sem descontar do saldo (opt-in)** — Ao guardar, o padrão segue sendo criar a despesa Cofrinho; a opção “Não descontar este valor do meu saldo” registra o depósito sem uma segunda despesa. Saques e débito automático mantêm o comportamento existente. Sem migração de banco.
 
   ### Regras de negócio
   - Vários cofres por usuário.
@@ -121,7 +129,7 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] ~~**Patrimônio: saldo em reais sincronizado com o financeiro**~~ — Reconstrução patrimonial respeita pagamento antecipado de despesas e confirmação/atraso do salário, registra a data real dos eventos e invalida o cache patrimonial após alterações em entradas/despesas.
 
-- [x] ~~**Self-host de produção + Cloudflare Tunnel**~~ — Compose de produção sem expor PostgreSQL/API, frontend publicado apenas em loopback, resolver Nginx compatível com Railway/Docker, env de exemplo, runbook de migração/cutover e helper de backup PostgreSQL.
+- [x] ~~**Self-host de produção + Cloudflare Tunnel**~~ — Compose de produção sem expor PostgreSQL/API, frontend publicado apenas em loopback, resolver Nginx compatível com Docker, env de exemplo, runbook de migração/cutover e helper de backup PostgreSQL.
 
 - [x] ~~Histórico mensal do dashboard~~ — até seis meses de pagamentos e recebimentos registrados, agrupados pela data real do evento; previsões e recorrências apenas vencidas não entram. Pagamentos mensais e recebimentos de salário confirmados ficam em registros por ciclo, preservando valores após editar o cadastro. Despesas avulsas usam a data de ocorrência; entradas avulsas só entram depois da confirmação do recebimento. Recorrências semanais sem confirmação por ocorrência, outras entradas recorrentes sem registro de recebimento e faturas de cartão sem baixa continuam fora. A migration preserva o último mês confirmado pelo schema anterior, mas não o valor histórico: como não havia snapshot, usa o valor atual do cadastro. Ciclos anteriores sobrescritos não podem ser reconstruídos.
 

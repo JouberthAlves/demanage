@@ -1,9 +1,10 @@
+import { DomainError } from '@/lib/errors';
+
 export const MAX_EXTERNAL_JSON_BYTES = 1024 * 1024;
 
-export class ExternalJsonTooLargeError extends Error {
+export class ExternalJsonTooLargeError extends DomainError {
   constructor() {
-    super('Resposta do provider excede o limite permitido');
-    this.name = 'ExternalJsonTooLargeError';
+    super('Resposta do provider excede o limite permitido', 'EXTERNAL_JSON_TOO_LARGE');
   }
 }
 

@@ -9,6 +9,12 @@ export type Card = {
   lastBillingProcessedAt?: string | null;
   createdAt?: string;
   expired?: boolean;
+  /** Limit already committed in the current billing cycle (from the backend). */
+  committed: number;
+  /** Limit minus committed; null when the card has no limit. */
+  available: number | null;
+  /** Worst-case charges per frequency in this card's current open cycle. */
+  maxChargesPerCycle?: Record<ExpenseFrequency, number>;
 };
 
 export type Profile = {

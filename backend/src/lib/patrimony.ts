@@ -1,168 +1,36 @@
-import { Prisma } from '@/generated/prisma/client';
-
-import { dateOnlyUtc, decimal, money, ZERO } from '@/lib/decimal';
-import { dateKeyInSaoPaulo, todayInSaoPaulo } from '@/lib/card-billing';
+import type { Prisma } from '@/generated/prisma/client';
+import { dayKeyInSaoPaulo } from '@/lib/civil-date';
+import { decimal } from '@/lib/decimal';
 import {
-  MAX_HISTORY_RANGE_DAYS,
   getAssetHistory,
   getAssetQuote,
   getCdiHistory,
   getIpcaHistory,
-  type MarketPoint,
-} from '@/lib/market-data';
+} from '@/lib/market';
+import { plainDecimal, toMoney } from '@/lib/money';
+import {
+  buildCashFlows,
+  buildPatrimonyRows,
+  calculationStart,
+  parseHistoryDate,
+  PatrimonyError,
+  patrimonyToday,
+  percentDiff,
+  withTodayPoint,
+} from '@/lib/patrimony-calc';
 import { prisma } from '@/lib/prisma';
 
-type ExpenseWithSplits = Prisma.ExpenseGetPayload<{
-  include: { splits: true; payments: true };
-}>;
-type EntryRecord = Prisma.EntryGetPayload<{ include: { receipts: true } }>;
-type AssetTx = Prisma.AssetTransactionGetPayload<{}>;
-type PiggyTx = Prisma.PiggyTransactionGetPayload<{}>;
+// Pure maths lives in lib/patrimony-calc.ts; re-exported for callers.
+export {
+  buildCashFlows,
+  calculationStart,
+  PatrimonyError,
+  patrimonyToday,
+} from '@/lib/patrimony-calc';
 
-type CashFlow = {
-  date: string;
-  amount: Prisma.Decimal;
-  external: boolean;
-};
-
-export class PatrimonyError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'PatrimonyError';
-  }
-}
-
-function addDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setUTCDate(next.getUTCDate() + days);
-  return next;
-}
-
-function parseHistoryDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new PatrimonyError('Data inválida');
-  }
-  const date = dateOnlyUtc(value);
-  if (Number.isNaN(date.getTime()) || dateKeyInSaoPaulo(date) !== value) {
-    throw new PatrimonyError('Data inválida');
-  }
-  return date;
-}
-
-export function calculationStart(base: Date, today: Date) {
-  const earliest = addDays(today, 11 - MAX_HISTORY_RANGE_DAYS);
-  return base < earliest ? earliest : base;
-}
-
-export function patrimonyToday(now = new Date()) {
-  return dateOnlyUtc(todayInSaoPaulo(now));
-}
-
-function amountForExpense(expense: ExpenseWithSplits) {
-  if (expense.isInvoice) return decimal(expense.amount);
-  if (expense.splits.length > 0) {
-    return expense.splits
-      .filter((split) => split.kind === 'pix')
-      .reduce((sum, split) => sum.plus(split.amount), ZERO);
-  }
-  if (expense.cardId) return ZERO;
-  return decimal(expense.amount);
-}
-
-export function buildCashFlows(args: {
-  baseDate: Date;
-  to: Date;
-  expenses: ExpenseWithSplits[];
-  entries: EntryRecord[];
-  internalExpenseIds: Set<string>;
-  internalEntryIds: Set<string>;
-}) {
-  const flows: CashFlow[] = [];
-  const baseKey = dateKeyInSaoPaulo(args.baseDate);
-  const toKey = dateKeyInSaoPaulo(args.to);
-
-  for (const expense of args.expenses) {
-    const external = !args.internalExpenseIds.has(expense.id);
-    if (expense.systemOrigin !== 'manual') {
-      if (expense.archivedAt) continue;
-      const amount = amountForExpense(expense);
-      const when = dateKeyInSaoPaulo(expense.occurredAt ?? expense.createdAt);
-      if (amount.gt(0) && when > baseKey && when <= toKey) {
-        flows.push({ date: when, amount: amount.negated(), external: false });
-      }
-    } else if (expense.payments.length > 0) {
-      for (const payment of expense.payments) {
-        const when = dateKeyInSaoPaulo(payment.paidAt);
-        const amount = decimal(payment.amount);
-        if (amount.gt(0) && when > baseKey && when <= toKey) {
-          flows.push({ date: when, amount: amount.negated(), external });
-        }
-      }
-    }
-  }
-
-  for (const entry of args.entries) {
-    const external = !args.internalEntryIds.has(entry.id);
-    if (entry.systemOrigin !== 'manual') {
-      if (entry.archivedAt) continue;
-      const amount = decimal(entry.amount);
-      const when = dateKeyInSaoPaulo(entry.date ?? entry.createdAt);
-      if (amount.gt(0) && when > baseKey && when <= toKey) {
-        flows.push({ date: when, amount, external: false });
-      }
-    } else if (entry.receipts.length > 0) {
-      for (const receipt of entry.receipts) {
-        const when = dateKeyInSaoPaulo(receipt.receivedAt);
-        const amount = decimal(receipt.amount);
-        if (amount.gt(0) && when > baseKey && when <= toKey) {
-          flows.push({ date: when, amount, external });
-        }
-      }
-    }
-  }
-
-  return flows;
-}
-
-function latestPointAtOrBefore(points: MarketPoint[], day: string) {
-  let found: MarketPoint | null = null;
-  for (const point of points) {
-    if (point.date > day) break;
-    found = point;
-  }
-  return found;
-}
-
-function sumPiggyAt(transactions: PiggyTx[], day: string) {
-  return transactions.reduce((sum, transaction) => {
-    if (dateKeyInSaoPaulo(transaction.date) > day) return sum;
-    return transaction.type === 'withdraw'
-      ? sum.minus(transaction.amount)
-      : sum.plus(transaction.amount);
-  }, ZERO);
-}
-
-function assetQuantityAt(
-  transactions: AssetTx[],
-  asset: 'BTC' | 'USD',
-  day: string,
-) {
-  return transactions.reduce((sum, transaction) => {
-    if (
-      transaction.asset !== asset ||
-      dateKeyInSaoPaulo(transaction.date) > day
-    ) {
-      return sum;
-    }
-    if (transaction.type === 'SELL') return sum.minus(transaction.quantity);
-    return sum.plus(transaction.quantity);
-  }, ZERO);
-}
-
-function percentDiff(value: Prisma.Decimal, reference: Prisma.Decimal) {
-  if (reference.eq(0)) return null;
-  return value.minus(reference).div(reference.abs()).mul(100);
-}
+/** Days before the base date used to find the last price/index before it. */
+const PRICE_LOOKBACK_DAYS = 10;
+const IPCA_LOOKBACK_DAYS = 60;
 
 export async function getPatrimonyHistory(
   userId: string,
@@ -178,7 +46,14 @@ export async function getPatrimonyHistory(
   }
 
   const today = patrimonyToday(now);
-  const base = dateOnlyUtc(settings.baseDate);
+  const base = new Date(
+    Date.UTC(
+      settings.baseDate.getUTCFullYear(),
+      settings.baseDate.getUTCMonth(),
+      settings.baseDate.getUTCDate(),
+      12,
+    ),
+  );
   const requestedFrom = fromInput ? parseHistoryDate(fromInput) : base;
   const requestedTo = toInput ? parseHistoryDate(toInput) : today;
   if (requestedFrom > today || requestedTo > today) {
@@ -209,11 +84,7 @@ export async function getPatrimonyHistory(
 
   const internalExpenseIds = new Set<string>();
   const internalEntryIds = new Set<string>();
-  for (const transaction of assetTransactions) {
-    if (transaction.expenseId) internalExpenseIds.add(transaction.expenseId);
-    if (transaction.entryId) internalEntryIds.add(transaction.entryId);
-  }
-  for (const transaction of piggyTransactions) {
+  for (const transaction of [...assetTransactions, ...piggyTransactions]) {
     if (transaction.expenseId) internalExpenseIds.add(transaction.expenseId);
     if (transaction.entryId) internalEntryIds.add(transaction.entryId);
   }
@@ -226,134 +97,53 @@ export async function getPatrimonyHistory(
     internalExpenseIds,
     internalEntryIds,
   });
-  const flowsByDay = new Map<string, CashFlow[]>();
-  for (const flow of flows) {
-    const list = flowsByDay.get(flow.date) ?? [];
-    list.push(flow);
-    flowsByDay.set(flow.date, list);
-  }
 
-  const calculationBaseKey = dateKeyInSaoPaulo(calculationBase);
-  const storedBaseKey = dateKeyInSaoPaulo(base);
-  const marketFrom = addDays(calculationBase, -10);
-  const ipcaFrom = addDays(calculationBase, -800);
+  const calculationBaseKey = dayKeyInSaoPaulo(calculationBase);
+  const storedBaseKey = dayKeyInSaoPaulo(base);
+  const toKey = dayKeyInSaoPaulo(to);
+  const todayKey = dayKeyInSaoPaulo(today);
+
+  // The history cap applies to [calculationBase, to] only; look-backs are
+  // added by the market layer on top of it.
   const [btcSeries, usdSeries, cdiSeries, ipcaSeries, btcQuote, usdQuote] =
     await Promise.all([
-      getAssetHistory('BTC', dateKeyInSaoPaulo(marketFrom), dateKeyInSaoPaulo(to)),
-      getAssetHistory('USD', dateKeyInSaoPaulo(marketFrom), dateKeyInSaoPaulo(to)),
-      getCdiHistory(calculationBaseKey, dateKeyInSaoPaulo(to)),
-      getIpcaHistory(dateKeyInSaoPaulo(ipcaFrom), dateKeyInSaoPaulo(to)),
+      getAssetHistory('BTC', calculationBaseKey, toKey, {
+        lookbackDays: PRICE_LOOKBACK_DAYS,
+      }),
+      getAssetHistory('USD', calculationBaseKey, toKey, {
+        lookbackDays: PRICE_LOOKBACK_DAYS,
+      }),
+      getCdiHistory(calculationBaseKey, toKey),
+      getIpcaHistory(calculationBaseKey, toKey, {
+        lookbackDays: IPCA_LOOKBACK_DAYS,
+      }),
       getAssetQuote('BTC'),
       getAssetQuote('USD'),
     ]);
 
-  const todayKey = dateKeyInSaoPaulo(today);
-  if (dateKeyInSaoPaulo(to) === todayKey) {
-    btcSeries.points.push({ date: todayKey, value: btcQuote.value });
-    usdSeries.points.push({ date: todayKey, value: usdQuote.value });
-    btcSeries.points = dedupeMarket(btcSeries.points);
-    usdSeries.points = dedupeMarket(usdSeries.points);
-  }
+  // Series are copies, but never mutate them anyway: build new arrays.
+  const includeToday = toKey === todayKey;
+  const btcPoints = includeToday
+    ? withTodayPoint(btcSeries.points, todayKey, btcQuote.value)
+    : btcSeries.points;
+  const usdPoints = includeToday
+    ? withTodayPoint(usdSeries.points, todayKey, usdQuote.value)
+    : usdSeries.points;
 
-  const baseBtcPrice = latestPointAtOrBefore(
-    btcSeries.points,
+  const rows = buildPatrimonyRows({
+    storedBaseKey,
     calculationBaseKey,
-  );
-  const baseUsdPrice = latestPointAtOrBefore(
-    usdSeries.points,
-    calculationBaseKey,
-  );
-  if (!baseBtcPrice || !baseUsdPrice) {
-    throw new PatrimonyError(
-      'Histórico de cotação insuficiente para a data-base',
-    );
-  }
-
-  const baseBtc = assetQuantityAt(
+    fromKey: dayKeyInSaoPaulo(from),
+    toKey,
+    openingCash: decimal(settings.openingCashBrl),
+    flows,
+    piggyTransactions,
     assetTransactions,
-    'BTC',
-    calculationBaseKey,
-  ).mul(baseBtcPrice.value);
-  const baseUsd = assetQuantityAt(
-    assetTransactions,
-    'USD',
-    calculationBaseKey,
-  ).mul(baseUsdPrice.value);
-  const basePiggy = sumPiggyAt(piggyTransactions, calculationBaseKey);
-  let cash = flows.reduce(
-    (balance, flow) =>
-      flow.date > storedBaseKey && flow.date <= calculationBaseKey
-        ? balance.plus(flow.amount)
-        : balance,
-    decimal(settings.openingCashBrl),
-  );
-  const baseReal = cash.plus(basePiggy).plus(baseBtc).plus(baseUsd);
-  let cdiBenchmark = baseReal;
-  let ipcaBenchmark = baseReal;
-  let lastIpca = latestPointAtOrBefore(ipcaSeries.points, calculationBaseKey);
-
-  const cdiMap = new Map(
-    cdiSeries.points.map((point) => [point.date, decimal(point.value)]),
-  );
-  const ipcaMap = new Map(
-    ipcaSeries.points.map((point) => [point.date, decimal(point.value)]),
-  );
-  const rows: Array<Record<string, string>> = [];
-
-  let cursor = calculationBase;
-  while (cursor <= to) {
-    const key = dateKeyInSaoPaulo(cursor);
-    if (key !== calculationBaseKey) {
-      const dayFlows = flowsByDay.get(key) ?? [];
-      for (const flow of dayFlows) cash = cash.plus(flow.amount);
-      const externalFlow = dayFlows
-        .filter((flow) => flow.external)
-        .reduce((sum, flow) => sum.plus(flow.amount), ZERO);
-
-      const newIpca = ipcaMap.get(key);
-      if (newIpca && lastIpca) {
-        ipcaBenchmark = ipcaBenchmark.mul(newIpca).div(lastIpca.value);
-        lastIpca = { date: key, value: newIpca.toString() };
-      } else if (newIpca) {
-        lastIpca = { date: key, value: newIpca.toString() };
-      }
-      ipcaBenchmark = ipcaBenchmark.plus(externalFlow);
-
-      cdiBenchmark = cdiBenchmark.plus(externalFlow);
-      const cdiRate = cdiMap.get(key);
-      if (cdiRate) {
-        cdiBenchmark = cdiBenchmark.mul(decimal(1).plus(cdiRate.div(100)));
-      }
-    }
-
-    if (cursor >= from) {
-      const btcPrice = latestPointAtOrBefore(btcSeries.points, key);
-      const usdPrice = latestPointAtOrBefore(usdSeries.points, key);
-      if (!btcPrice || !usdPrice) {
-        throw new PatrimonyError(`Cotação histórica ausente em ${key}`);
-      }
-      const piggy = sumPiggyAt(piggyTransactions, key);
-      const btc = assetQuantityAt(assetTransactions, 'BTC', key).mul(
-        btcPrice.value,
-      );
-      const usd = assetQuantityAt(assetTransactions, 'USD', key).mul(
-        usdPrice.value,
-      );
-      const real = cash.plus(piggy).plus(btc).plus(usd);
-      rows.push({
-        date: key,
-        patrimonyBrl: real.toString(),
-        cashBrl: cash.toString(),
-        piggyBrl: piggy.toString(),
-        btcBrl: btc.toString(),
-        usdBrl: usd.toString(),
-        cdiBrl: cdiBenchmark.toString(),
-        ipcaBrl: ipcaBenchmark.toString(),
-      });
-    }
-
-    cursor = addDays(cursor, 1);
-  }
+    btcPoints,
+    usdPoints,
+    cdiPoints: cdiSeries.points,
+    ipcaPoints: ipcaSeries.points,
+  });
 
   const latest = rows.at(-1);
   if (!latest) throw new PatrimonyError('Sem histórico patrimonial');
@@ -364,7 +154,7 @@ export async function getPatrimonyHistory(
   return {
     settings: {
       baseDate: storedBaseKey,
-      openingCashBrl: settings.openingCashBrl.toString(),
+      openingCashBrl: plainDecimal(settings.openingCashBrl),
     },
     summary: {
       patrimonyBrl: latest.patrimonyBrl,
@@ -374,10 +164,10 @@ export async function getPatrimonyHistory(
       usdBrl: latest.usdBrl,
       cdiBrl: latest.cdiBrl,
       ipcaBrl: latest.ipcaBrl,
-      versusCdiBrl: real.minus(cdi).toString(),
-      versusCdiPercent: percentDiff(real, cdi)?.toString() ?? null,
-      versusIpcaBrl: real.minus(ipca).toString(),
-      versusIpcaPercent: percentDiff(real, ipca)?.toString() ?? null,
+      versusCdiBrl: plainDecimal(real.minus(cdi)),
+      versusCdiPercent: stringOrNull(percentDiff(real, cdi)),
+      versusIpcaBrl: plainDecimal(real.minus(ipca)),
+      versusIpcaPercent: stringOrNull(percentDiff(real, ipca)),
     },
     stale: {
       btc: btcSeries.stale || btcQuote.stale,
@@ -389,11 +179,8 @@ export async function getPatrimonyHistory(
   };
 }
 
-function dedupeMarket(points: MarketPoint[]) {
-  const map = new Map(points.map((point) => [point.date, point.value]));
-  return [...map.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([date, value]) => ({ date, value }));
+function stringOrNull(value: Prisma.Decimal | null) {
+  return value ? plainDecimal(value) : null;
 }
 
 export async function savePatrimonySettings(
@@ -410,7 +197,7 @@ export async function savePatrimonySettings(
 
   let openingCash: Prisma.Decimal;
   try {
-    openingCash = money(String(openingCashInput ?? ''));
+    openingCash = toMoney(String(openingCashInput ?? ''));
     if (!openingCash.isFinite()) throw new Error();
   } catch {
     throw new PatrimonyError('Saldo inicial inválido');

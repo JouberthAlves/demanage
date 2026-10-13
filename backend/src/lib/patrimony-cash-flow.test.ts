@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCashFlows } from '@/lib/patrimony';
+import { buildCashFlows } from '@/lib/patrimony-calc';
 
 const baseDate = new Date('2026-08-31T12:00:00.000Z');
 const to = new Date('2026-09-30T12:00:00.000Z');

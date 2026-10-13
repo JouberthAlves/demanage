@@ -33,7 +33,7 @@ function isPrivateIpv4Hostname(hostname: string) {
     return false;
   }
 
-  const [first, second] = parts;
+  const [first = -1, second = -1] = parts;
   return (
     first === 10 ||
     (first === 172 && second >= 16 && second <= 31) ||

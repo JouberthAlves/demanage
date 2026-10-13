@@ -1,6 +1,7 @@
 import type { Asset, AssetTransactionType } from '@/generated/prisma/client';
-
+import { Prisma } from '@/generated/prisma/client';
 import { decimal, type DecimalLike, ZERO } from '@/lib/decimal';
+import { plainDecimal } from '@/lib/money';
 
 export type AccountingTransaction = {
   id?: string;
@@ -117,40 +118,41 @@ export function calculateAssetAccounting(
         continue;
       }
 
-      const removeQty = quantity.abs();
-      const totalQty = knownQty.plus(unknownQty);
-      if (totalQty.lte(0)) continue;
-      const bounded = minDecimal(removeQty, totalQty);
-      const knownShare = totalQty.eq(0) ? ZERO : knownQty.div(totalQty);
-      const removeKnown = bounded.mul(knownShare);
-      const removeUnknown = bounded.minus(removeKnown);
-      const averageCost = knownQty.gt(0) ? knownCost.div(knownQty) : ZERO;
-      knownQty = knownQty.minus(removeKnown);
-      unknownQty = unknownQty.minus(removeUnknown);
-      knownCost = knownCost.minus(averageCost.mul(removeKnown));
-      if (removeUnknown.gt(0)) pnlComplete = false;
+      const removal = removeFromBuckets(
+        knownQty,
+        unknownQty,
+        knownCost,
+        quantity.abs(),
+      );
+      if (removal.total.lte(0)) continue;
+      knownQty = removal.knownQty;
+      unknownQty = removal.unknownQty;
+      knownCost = removal.knownCost;
+      if (removal.removedUnknown.gt(0)) pnlComplete = false;
       continue;
     }
 
     if (transaction.type === 'SELL') {
       if (quantity.lte(0)) continue;
-      const totalQty = knownQty.plus(unknownQty);
-      if (totalQty.lte(0)) continue;
-      const sold = minDecimal(quantity, totalQty);
-      const knownShare = totalQty.eq(0) ? ZERO : knownQty.div(totalQty);
-      const soldKnown = sold.mul(knownShare);
-      const soldUnknown = sold.minus(soldKnown);
-      const averageCost = knownQty.gt(0) ? knownCost.div(knownQty) : ZERO;
-      const soldKnownCost = averageCost.mul(soldKnown);
-      const knownCashShare = sold.eq(0) ? ZERO : soldKnown.div(sold);
-      const receivedForKnown = cash.mul(knownCashShare);
+      const removal = removeFromBuckets(
+        knownQty,
+        unknownQty,
+        knownCost,
+        quantity,
+      );
+      if (removal.total.lte(0)) continue;
+      const knownCashShare = removal.removed.eq(0)
+        ? ZERO
+        : removal.removedKnown.div(removal.removed);
 
-      realizedPnl = realizedPnl.plus(receivedForKnown.minus(soldKnownCost));
-      realizedCost = realizedCost.plus(soldKnownCost);
-      knownQty = knownQty.minus(soldKnown);
-      unknownQty = unknownQty.minus(soldUnknown);
-      knownCost = knownCost.minus(soldKnownCost);
-      if (soldUnknown.gt(0)) pnlComplete = false;
+      realizedPnl = realizedPnl.plus(
+        cash.mul(knownCashShare).minus(removal.removedKnownCost),
+      );
+      realizedCost = realizedCost.plus(removal.removedKnownCost);
+      knownQty = removal.knownQty;
+      unknownQty = removal.unknownQty;
+      knownCost = removal.knownCost;
+      if (removal.removedUnknown.gt(0)) pnlComplete = false;
     }
   }
 
@@ -159,23 +161,88 @@ export function calculateAssetAccounting(
 
   return {
     asset,
-    quantity: quantity.toString(),
-    knownQuantity: knownQty.toString(),
-    unknownQuantity: unknownQty.toString(),
-    investedBrl: knownCost.toString(),
-    averageCostBrl: averageCost?.toString() ?? null,
-    feesBrl: fees.toString(),
-    realizedPnlBrl: realizedPnl.toString(),
-    realizedCostBasisBrl: realizedCost.toString(),
+    quantity: plainDecimal(quantity),
+    knownQuantity: plainDecimal(knownQty),
+    unknownQuantity: plainDecimal(unknownQty),
+    investedBrl: plainDecimal(knownCost),
+    averageCostBrl: averageCost ? plainDecimal(averageCost) : null,
+    feesBrl: plainDecimal(fees),
+    realizedPnlBrl: plainDecimal(realizedPnl),
+    realizedCostBasisBrl: plainDecimal(realizedCost),
     pnlComplete,
   };
 }
 
-function minDecimal(
-  left: ReturnType<typeof decimal>,
-  right: ReturnType<typeof decimal>,
+/** Stored quantities have at most 12 decimal places (Decimal(30,12)). */
+const QUANTITY_SCALE = 12;
+
+/**
+ * Removes `requested` units (capped at what is held) from the known/unknown
+ * buckets, EXACTLY: the known share is rounded once to the quantity scale and
+ * clamped, so quantities stay exact multiples of 1e-12 and a full exit zeroes
+ * both buckets and the cost basis (no "1e-20" residue with a stale cost).
+ */
+export function removeFromBuckets(
+  knownQty: ReturnType<typeof decimal>,
+  unknownQty: ReturnType<typeof decimal>,
+  knownCost: ReturnType<typeof decimal>,
+  requested: ReturnType<typeof decimal>,
 ) {
-  return left.lte(right) ? left : right;
+  const total = knownQty.plus(unknownQty);
+  const none = {
+    total,
+    removed: ZERO,
+    removedKnown: ZERO,
+    removedUnknown: ZERO,
+    removedKnownCost: ZERO,
+    knownQty,
+    unknownQty,
+    knownCost,
+  };
+  if (total.lte(0) || requested.lte(0)) return none;
+
+  const removed = requested.lte(total) ? requested : total;
+  if (removed.eq(total)) {
+    return {
+      total,
+      removed,
+      removedKnown: knownQty,
+      removedUnknown: unknownQty,
+      removedKnownCost: knownCost,
+      knownQty: ZERO,
+      unknownQty: ZERO,
+      knownCost: ZERO,
+    };
+  }
+
+  let removedKnown = removed
+    .mul(knownQty)
+    .div(total)
+    .toDecimalPlaces(QUANTITY_SCALE, Prisma.Decimal.ROUND_HALF_UP);
+  const mostKnown = removed.lte(knownQty) ? removed : knownQty;
+  const leastKnown = removed.minus(unknownQty);
+  if (removedKnown.gt(mostKnown)) removedKnown = mostKnown;
+  if (removedKnown.lt(leastKnown)) removedKnown = leastKnown;
+  if (removedKnown.lt(0)) removedKnown = ZERO;
+  const removedUnknown = removed.minus(removedKnown);
+
+  const nextKnownQty = knownQty.minus(removedKnown);
+  const removedKnownCost = removedKnown.eq(knownQty)
+    ? knownCost
+    : knownQty.gt(0)
+      ? knownCost.mul(removedKnown).div(knownQty)
+      : ZERO;
+
+  return {
+    total,
+    removed,
+    removedKnown,
+    removedUnknown,
+    removedKnownCost,
+    knownQty: nextKnownQty,
+    unknownQty: unknownQty.minus(removedUnknown),
+    knownCost: nextKnownQty.eq(0) ? ZERO : knownCost.minus(removedKnownCost),
+  };
 }
 
 export function enrichAccountingWithQuote(
@@ -199,10 +266,10 @@ export function enrichAccountingWithQuote(
 
   return {
     ...accounting,
-    quoteBrl: quote.toString(),
-    marketValueBrl: marketValue.toString(),
-    unrealizedPnlBrl: unrealized.toString(),
-    totalPnlBrl: total.toString(),
-    totalPnlPercent: totalPercent?.toString() ?? null,
+    quoteBrl: plainDecimal(quote),
+    marketValueBrl: plainDecimal(marketValue),
+    unrealizedPnlBrl: plainDecimal(unrealized),
+    totalPnlBrl: plainDecimal(total),
+    totalPnlPercent: totalPercent ? plainDecimal(totalPercent) : null,
   };
 }
