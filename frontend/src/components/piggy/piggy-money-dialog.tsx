@@ -50,8 +50,8 @@ export function PiggyMoneyDialog({
           <DialogDescription>
             {isDeposit
               ? piggyHasGoal(bank?.goalAmount)
-                ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.`
-                : 'Antes de guardar, confirme abaixo que este valor será descontado do saldo do mês.'
+                ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. O valor será descontado do saldo do mês, a menos que você escolha não descontar.`
+                : 'O valor será descontado do saldo do mês, a menos que você escolha não descontar.'
               : bank?.isEmergency
                 ? 'Atenção: este é um cofre de emergência. O valor volta ao saldo do mês.'
                 : 'O valor volta ao saldo do mês como entrada de resgate.'}
@@ -81,7 +81,7 @@ function PiggyMoneyForm({
   const deposit = useDepositPiggyBank();
   const withdraw = useWithdrawPiggyBank();
   const [amount, setAmount] = useState('');
-  const [confirmBalanceDeduction, setConfirmBalanceDeduction] = useState(false);
+  const [skipBalanceDeduction, setSkipBalanceDeduction] = useState(false);
   const submitting = deposit.isPending || withdraw.isPending;
 
   const monthlyHint = useMemo(() => {
@@ -105,20 +105,16 @@ function PiggyMoneyForm({
       return;
     }
 
-    if (mode === 'deposit' && !confirmBalanceDeduction) {
-      toast.error('Confirme que o valor será descontado do seu saldo');
-      return;
-    }
-
     try {
       if (mode === 'deposit') {
         // The shared mutation hook types its result as unknown.
         const result = (await deposit.mutateAsync({
           id: bank.id,
           amount: value,
+          deductFromBalance: !skipBalanceDeduction,
         })) as Awaited<ReturnType<typeof depositPiggyBank>>;
         toast.success(
-          `Guardado ${formatCurrency(result.depositAmount)} em ${bank.name}`,
+          `Guardado ${formatCurrency(result.depositAmount)} em ${bank.name}${skipBalanceDeduction ? ' sem descontar do saldo' : ''}`,
         );
         if (result.completed) {
           celebrateGoal();
@@ -151,7 +147,7 @@ function PiggyMoneyForm({
           </p>
           <p className='mt-1 text-xs text-violet-200/80'>
             Ainda faltam {formatCurrency(monthlyHint.remaining)}. Você
-            escolhe o valor — só guarda ao confirmar abaixo.
+            escolhe o valor que deseja guardar.
           </p>
         </div>
       ) : null}
@@ -170,26 +166,26 @@ function PiggyMoneyForm({
         <div className='rounded-lg border border-border bg-black/20 p-3'>
           <div className='flex items-start gap-3'>
             <Checkbox
-              id='piggy-confirm-balance-deduction'
-              checked={confirmBalanceDeduction}
+              id='piggy-skip-balance-deduction'
+              checked={skipBalanceDeduction}
               onCheckedChange={(checked) =>
-                setConfirmBalanceDeduction(checked === true)
+                setSkipBalanceDeduction(checked === true)
               }
-              aria-describedby='piggy-confirm-balance-deduction-description'
+              aria-describedby='piggy-skip-balance-deduction-description'
             />
             <div className='space-y-1'>
               <Label
-                htmlFor='piggy-confirm-balance-deduction'
+                htmlFor='piggy-skip-balance-deduction'
                 className='cursor-pointer leading-snug'
               >
-                Deseja que esse valor desconte do seu saldo?
+                Não descontar este valor do meu saldo
               </Label>
               <p
-                id='piggy-confirm-balance-deduction-description'
+                id='piggy-skip-balance-deduction-description'
                 className='text-xs text-muted-foreground'
               >
-                Ao confirmar, será criada uma despesa “Cofrinho” com esse
-                valor no mês atual.
+                Marcando esta opção, o cofrinho recebe o valor sem criar uma
+                despesa no mês atual. Ao sacar, o resgate ainda volta ao saldo.
               </p>
             </div>
           </div>
@@ -213,7 +209,7 @@ function PiggyMoneyForm({
         <Button
           type='submit'
           variant={isDeposit ? 'default' : 'destructive'}
-          disabled={submitting || (isDeposit && !confirmBalanceDeduction)}
+          disabled={submitting}
         >
           {submitting ? <Spinner data-icon='inline-start' /> : null}
           {isDeposit ? 'Confirmar depósito' : 'Sacar'}

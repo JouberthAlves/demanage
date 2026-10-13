@@ -44,7 +44,8 @@ function loadErrorMessage(error: unknown) {
 function transactionLabel(transaction: PiggyTransaction) {
   if (transaction.type === 'interest') return 'Rendimento CDI';
   if (transaction.type === 'deposit') {
-    return transaction.source === 'auto_debit' ? 'Depósito automático' : 'Depósito';
+    if (transaction.source === 'auto_debit') return 'Depósito automático';
+    return transaction.expenseId === null ? 'Depósito sem desconto' : 'Depósito';
   }
   return 'Saque';
 }
@@ -144,7 +145,7 @@ export function PiggyPage() {
               ? 'Carregando cofres…'
               : 'Cofres indisponíveis'
         }
-        description='Guardar move dinheiro do saldo em reais para o Cofrinho sem reduzir o patrimônio. Se houver rendimento, o CDI é capitalizado diariamente.'
+        description='Guardar normalmente transfere valor do saldo para o Cofrinho; você também pode guardar sem descontar do saldo. Se houver rendimento, o CDI é capitalizado diariamente.'
       >
         <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
           <p className='text-xs text-muted-foreground'>Total nos cofres</p>

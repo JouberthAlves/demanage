@@ -77,7 +77,12 @@ function usePiggyMutation<TVariables, TResult>(
   });
 }
 
-type MoneyMovement = { id: string; amount: number; note?: string };
+type MoneyMovement = {
+  id: string;
+  amount: number;
+  note?: string;
+  deductFromBalance?: boolean;
+};
 
 export function useCreatePiggyBank() {
   return usePiggyMutation((payload: PiggyBankPayload) =>
@@ -97,8 +102,8 @@ export function useDeletePiggyBank() {
 }
 
 export function useDepositPiggyBank() {
-  return usePiggyMutation(({ id, amount, note }: MoneyMovement) =>
-    depositPiggyBank(id, { amount, note }),
+  return usePiggyMutation(({ id, amount, note, deductFromBalance }: MoneyMovement) =>
+    depositPiggyBank(id, { amount, note, deductFromBalance }),
   );
 }
 
