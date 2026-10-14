@@ -125,14 +125,14 @@ export function DashboardPage() {
       <div className='grid gap-4 lg:grid-cols-3'>
         <SectionPanel
           title='Entrada vs saída'
-          description={
-            hasHistory
-              ? 'Pagamentos e recebimentos registrados; previsões, recorrências semanais sem confirmação e faturas sem baixa ficam fora'
-              : 'O histórico mostra somente pagamentos e recebimentos registrados'
-          }
+          description='Meses anteriores: movimentações registradas. Mês atual: valores já no saldo.'
           className='lg:col-span-2'
         >
-          <IncomeExpenseAreaChart history={history} />
+          <IncomeExpenseAreaChart
+            history={history}
+            currentIncome={income}
+            currentExpense={expenses}
+          />
         </SectionPanel>
 
         <SectionPanel
