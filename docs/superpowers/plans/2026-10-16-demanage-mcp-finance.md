@@ -29,7 +29,7 @@
 2. **Nearly full piggy:** request +R$20 with only R$8 goal remaining must clarify/fail without creating any entry/tag/deposit; Task 4 test must assert rollback and zero new rows.
 3. **Tag casing and accents:** two simultaneous `Presente`/`presente` requests must reuse one tag, and Unicode normalization cannot create indistinguishable duplicate tags; Task 3's tests must check one persisted category or a deterministic conflict.
 4. **Cross-account/redirect injection:** a malicious bearer identity, foreign bank/tag ID or crafted redirect URI must not access funds or exfiltrate authorization codes; Task 7/8 tests must assert denial and unchanged ledger.
-5. **Timeout and replay:** two concurrent executes with the same key must create only one compound movement; a repeated key with different payload must conflict; Task 5 and Task 9 tests must check IDs and counts.
+5. **Timeout and replay:** two concurrent executes with the same key must create only one compound movement; a repeated key with different payload must conflict. Also forbid replaying **the same signed intent with a different idempotency key**, using a second unique constraint on the intent nonce. Task 5 and Task 9 tests must check IDs and counts.
 
 ---
 
@@ -120,11 +120,11 @@ The test files named below are target locations (create if absent), not permissi
 - Modify: `backend/prisma/schema.prisma` (new `FinanceMcpOperation` with subject/client/key unique, canonical payload digest, result JSON, committedAt)
 - Create: migration `20261016194500_finance_mcp_operations/migration.sql`, `backend/src/services/finance-operation-store.ts`, `backend/src/services/finance-operation-store.itest.ts`
 
-**Interfaces:** `commitFinanceOperation(input:{userId:string;clientId:string;idempotencyKey:string;payloadDigest:string;action:FinanceAction}):Promise<{replayed:boolean;result:FinanceActionResult}>` locks by user and checks `@@unique([userId,clientId,idempotencyKey])` **in the same transaction** as Task 4's financial writes; `getCommittedOperation(userId,clientId,key)` exposes only authorized record status.
+**Interfaces:** `commitFinanceOperation(input:{userId:string;clientId:string;idempotencyKey:string;intentNonce:string;payloadDigest:string;action:FinanceAction}):Promise<{replayed:boolean;result:FinanceActionResult}>` locks by user and checks both `@@unique([userId,clientId,idempotencyKey])` and `@@unique([userId,clientId,intentNonce])` **in the same transaction** as Task 4's financial writes; `getCommittedOperation(userId,clientId,key)` exposes only authorized record status.
 
-- [ ] **Step 1: Write failing tests:** parallel exact same calls create exactly one entry/receipt/expense/piggy transaction, return same IDs with `replayed=true` on retry; same key/different payload raises conflict; induced failure leaves no committed idempotency row and no money records; status lookup filters another user's data.
+- [ ] **Step 1: Write failing tests:** parallel exact same calls create exactly one entry/receipt/expense/piggy transaction, return same IDs with `replayed=true` on retry; same key/different payload raises conflict; same intent nonce/different key returns existing result or fails safely without a second posting; induced failure leaves no committed idempotency row and no money records; status lookup filters another user's data.
 - [ ] **Step 2: Verify RED:** `pnpm --dir backend exec tsx --test src/services/finance-operation-store.itest.ts`.
-- [ ] **Step 3: Implement:** atomic unique key, canonical digest, immutable committed response and minimal redacted audit data. Do not log raw chat messages/tokens. An unknown network outcome must be resolved by status/retry **with the same key**.
+- [ ] **Step 3: Implement:** atomic unique idempotency key and independently unique signed-intent nonce, canonical digest, immutable committed response and minimal redacted audit data. Do not log raw chat messages/tokens. An unknown network outcome must be resolved by status/retry **with the same key**.
 - [ ] **Step 4: Verify GREEN:** concurrency integration suite + `prisma validate` and migration drift gate.
 - [ ] **Step 5: Commit:** `feat(demanage): guarantee MCP financial write idempotency`.
 
