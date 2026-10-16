@@ -15,6 +15,7 @@ import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
 
 export type IncomeFormState = {
   name: string;
+  notes: string;
   amount: string;
   /** Built-in type, or `tag:<id>` for a custom tag. */
   typeKey: string;
@@ -29,6 +30,7 @@ export type IncomeFormState = {
 export const INCOME_FIELD_IDS = {
   error: 'income-form-error',
   name: 'income-name',
+  notes: 'income-notes',
   amount: 'income-amount',
   schedule: {
     day: 'income-receive-day',
@@ -48,6 +50,7 @@ const SCHEDULE_MESSAGES = {
 export function emptyIncomeForm(now: Date): IncomeFormState {
   return {
     name: '',
+    notes: '',
     amount: '',
     typeKey: 'freelance',
     frequency: 'mensal',
@@ -61,6 +64,7 @@ export function emptyIncomeForm(now: Date): IncomeFormState {
 export function formFromIncome(income: Income, now: Date): IncomeFormState {
   return {
     name: income.name,
+    notes: income.notes ?? '',
     amount: formatBrlInputValue(income.amount),
     typeKey: income.customTagId ? `tag:${income.customTagId}` : income.type,
     frequency: income.frequency,
@@ -120,6 +124,9 @@ export function validateIncomeForm(
   if (!form.name.trim()) {
     return { fieldId: INCOME_FIELD_IDS.name, message: 'Informe o nome da entrada' };
   }
+  if (form.notes.trim().length > 500) {
+    return { fieldId: INCOME_FIELD_IDS.notes, message: 'Descrição deve ter no máximo 500 caracteres' };
+  }
   if (parseCurrencyInput(form.amount) <= 0) {
     return { fieldId: INCOME_FIELD_IDS.amount, message: 'Informe um valor válido' };
   }
@@ -153,6 +160,7 @@ export function buildIncomePayload(
 
   return {
     name: form.name.trim().slice(0, 100),
+    notes: form.notes.trim() || null,
     amount: parseCurrencyInput(form.amount),
     type: isCustom ? 'outro' : (form.typeKey as IncomeType),
     frequency: form.frequency,

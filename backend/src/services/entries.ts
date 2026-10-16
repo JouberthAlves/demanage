@@ -13,6 +13,7 @@ import {
   parseOptionalId,
   parseRequiredText,
 } from '@/http/parsers';
+import { parseOptionalNote, parsePatchNote } from '@/http/request';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { isValidEntryType, isValidFrequency } from '@/lib/validate';
@@ -60,6 +61,7 @@ export function serializeEntry(entry: EntryRow) {
 
 export type CreateEntryInput = {
   name: string;
+  notes: string | null;
   amount: number;
   type: EntryType;
   frequency: EntryFrequency;
@@ -69,6 +71,7 @@ export type CreateEntryInput = {
 
 export type UpdateEntryInput = {
   name?: string;
+  notes?: string | null;
   amount?: number;
   type?: EntryType;
   frequency?: EntryFrequency;
@@ -89,10 +92,17 @@ function parseTagId(value: unknown) {
   return parseOptionalId(value, 'Tipo personalizado inválido');
 }
 
+function validateNoteLength(value: unknown) {
+  if (typeof value === 'string' && value.trim().length > 500) {
+    throw badRequest('Descrição deve ter no máximo 500 caracteres');
+  }
+}
+
 export function parseCreateEntry(
   body: Record<string, unknown>,
 ): CreateEntryInput {
   const { name, amount, type, frequency } = body;
+  validateNoteLength(body.notes);
 
   const trimmedName = parseRequiredText(
     name,
@@ -110,6 +120,7 @@ export function parseCreateEntry(
 
   return {
     name: trimmedName,
+    notes: parseOptionalNote(body.notes),
     amount: parsedAmount,
     type: type as EntryType,
     frequency: frequency as EntryFrequency,
@@ -122,6 +133,7 @@ export function parseUpdateEntry(
   body: Record<string, unknown>,
 ): UpdateEntryInput {
   const { name, amount, type, frequency } = body;
+  validateNoteLength(body.notes);
 
   if (type !== undefined && !isValidEntryType(type)) {
     throw badRequest('Tipo inválido');
@@ -136,6 +148,7 @@ export function parseUpdateEntry(
       name === undefined
         ? undefined
         : parseRequiredText(name, 100, 'Nome inválido'),
+    notes: parsePatchNote(body.notes),
     amount: amount === undefined ? undefined : parseAmount(amount),
     type: type as EntryType | undefined,
     frequency: frequency as EntryFrequency | undefined,
@@ -190,6 +203,7 @@ export async function createEntry(userId: string, input: CreateEntryInput) {
     data: {
       userId,
       name: input.name,
+      notes: input.notes,
       amount: input.amount,
       type: input.type,
       frequency: input.frequency,
@@ -253,6 +267,7 @@ export async function updateEntry(
       where: { id, userId, updatedAt: existing.updatedAt },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
+        ...(input.notes !== undefined ? { notes: input.notes } : {}),
         ...(input.amount !== undefined ? { amount: input.amount } : {}),
         ...(input.type !== undefined ? { type: input.type } : {}),
         ...(input.frequency !== undefined
