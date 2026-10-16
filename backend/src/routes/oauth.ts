@@ -157,7 +157,8 @@ export function createOAuthDiscoveryRouter(provider = getOAuthProvider()) {
       jwks_uri: `${issuer}/jwks`,
       response_types_supported: ['code'],
       grant_types_supported: ['authorization_code', 'refresh_token'],
-      token_endpoint_auth_methods_supported: ['none'],
+      token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'],
+      token_endpoint_auth_signing_alg_values_supported: ['RS256'],
       code_challenge_methods_supported: ['S256'],
       // oidc-provider@9.12.2 includes `iss` in authorization-code redirects
       // and redirectable authorization errors (RFC 9207).
