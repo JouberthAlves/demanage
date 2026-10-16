@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import Provider, { type ClientMetadata, type Configuration,errors } from 'oidc-provider';
+import Provider, { type Client, type ClientMetadata, type Configuration, errors } from 'oidc-provider';
 
 import { prisma } from '@/lib/prisma';
 import { APP_URL } from '@/utils/var';
@@ -16,6 +16,8 @@ type OAuthOptions = {
   cookieKeys?: string[];
   clients?: ClientMetadata[];
   clientHosts?: string[];
+  // Test-only injection; production uses oidc-provider's protected fetch.
+  fetch?: Configuration['fetch'];
 };
 
 /** Only exact, explicitly trusted client-metadata hostnames; no wildcard. */
@@ -34,6 +36,50 @@ export function allowedCimdHosts(configuredHosts = process.env.MCP_OAUTH_CLIENT_
   // ChatGPT's stable CIMD is always available; all additional hostnames are opt-in.
   return new Set(['chatgpt.com', ...configuredHosts]
     .map((host) => host.toLowerCase().trim()).filter(Boolean));
+}
+
+const CHATGPT_CIMD = 'https://chatgpt.com/oauth/client.json';
+const CHATGPT_JWKS = 'https://chatgpt.com/oauth/jwks.json';
+
+/** A CIMD URL is the identity. Never accept public keys from a different host. */
+export function isAllowedCimdClient(client: Client, hosts: ReadonlySet<string>) {
+  const clientId = client.clientId;
+  if (!isAllowedCimdClientId(clientId, hosts) || !Array.isArray(client.grantTypes) ||
+      !client.grantTypes.length ||
+      !client.grantTypes.every((type) => type === 'authorization_code' || type === 'refresh_token') ||
+      !Array.isArray(client.responseTypes) || !client.responseTypes.length ||
+      !client.responseTypes.every((type) => type === 'code') ||
+      !Array.isArray(client.redirectUris) || !client.redirectUris.length) return false;
+
+  const clientOrigin = new URL(clientId).origin;
+  if (!client.redirectUris.every((value) => {
+    try {
+      const uri = new URL(value);
+      return uri.username === '' && uri.password === '' && uri.hash === '' &&
+        (uri.protocol === 'https:' ||
+          (uri.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(uri.hostname))) &&
+        (clientId !== CHATGPT_CIMD || uri.origin === clientOrigin);
+    } catch {
+      return false;
+    }
+  })) return false;
+
+  if (client.tokenEndpointAuthMethod === 'none') return true;
+  if (client.tokenEndpointAuthMethod !== 'private_key_jwt' ||
+      client.tokenEndpointAuthSigningAlg !== 'RS256' || !client.jwksUri) return false;
+
+  // Restrict signed ChatGPT assertions to OpenAI's published JWKS endpoint.
+  if (clientOrigin === 'https://chatgpt.com') {
+    return clientId === CHATGPT_CIMD && client.jwksUri === CHATGPT_JWKS && !client.jwks;
+  }
+  try {
+    const jwks = new URL(client.jwksUri);
+    return jwks.protocol === 'https:' && jwks.origin === clientOrigin &&
+      jwks.username === '' && jwks.password === '' && jwks.hash === '' && jwks.search === '' &&
+      jwks.port === '' && !client.jwks;
+  } catch {
+    return false;
+  }
 }
 
 export function oauthSettings() {
@@ -82,6 +128,11 @@ export function createOAuthProvider(options: OAuthOptions = {}) {
     adapter: (model) => new OAuthPrismaAdapter(model),
     jwks,
     clients: options.clients ?? [],
+    clientAuthMethods: ['none', 'private_key_jwt'],
+    enabledJWA: { clientAuthSigningAlgValues: ['RS256'] },
+    // Keep oidc-provider's SSRF-protected dispatcher (passed via init), and
+    // reject all redirects so an approved JWKS URL cannot forward to another host.
+    fetch: options.fetch ?? ((input, init) => fetch(input, { ...init, redirect: 'manual' })),
     responseTypes: ['code'],
     scopes: ['openid', 'offline_access', ...FINANCE_SCOPES],
     pkce: { required: () => true },
@@ -93,22 +144,7 @@ export function createOAuthProvider(options: OAuthOptions = {}) {
         allowFetch(_ctx, id) {
           return isAllowedCimdClientId(id, clientHosts);
         },
-        allowClient(_ctx, client) {
-          return client.tokenEndpointAuthMethod === 'none' &&
-            Array.isArray(client.grantTypes) && client.grantTypes.every((type) => type === 'authorization_code' || type === 'refresh_token') &&
-            Array.isArray(client.responseTypes) && client.responseTypes.every((type) => type === 'code') &&
-            Array.isArray(client.redirectUris) && client.redirectUris.length > 0 &&
-            client.redirectUris.every((redirect) => {
-              try {
-                const url = new URL(redirect);
-                return !url.username && !url.password && !url.hash &&
-                  (url.protocol === 'https:' ||
-                    (url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)));
-              } catch {
-                return false;
-              }
-            });
-        },
+        allowClient(_ctx, client) { return isAllowedCimdClient(client, clientHosts); },
         cacheDuration: { min: 30, max: 300 },
       },
       resourceIndicators: {
