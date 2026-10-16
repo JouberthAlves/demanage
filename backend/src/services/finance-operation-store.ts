@@ -10,6 +10,7 @@ import {
   type FinanceActionResult,
   runFinanceOperationInTransaction,
 } from './finance-operation';
+import { withFreshInterest } from './piggy-banks';
 
 export type CommitFinanceOperationInput = {
   userId: string;
@@ -117,6 +118,17 @@ export async function commitFinanceOperation(
 ): Promise<{ replayed: boolean; result: FinanceActionResult }> {
   validateCommand(input);
   const { userId, clientId, idempotencyKey, intentNonce, payloadDigest, action } = input;
+
+  // Exactly like the website's piggy operation: close any due automatic debits
+  // and CDI interest BEFORE taking the requested money movement's DB lock.
+  // Preview remains read-only. Replays skip this unrelated catch-up, while the
+  // in-transaction checks below still enforce the original key/nonce/digest.
+  if (action.kind !== 'receive_income') {
+    const alreadyCommitted = await getCommittedOperation(userId, clientId, idempotencyKey);
+    if (!alreadyCommitted) {
+      await withFreshInterest(userId, async () => undefined);
+    }
+  }
 
   return withUserWriteLockTransaction(userId, async (tx) => {
     const byKey = await tx.financeMcpOperation.findUnique({

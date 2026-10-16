@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 
 import type { FinanceAction } from './finance-operation';
@@ -230,5 +231,45 @@ test('operation status and keys are isolated by both user and OAuth client', asy
   } finally {
     await removeTestUser(owner.id);
     await removeTestUser(other.id);
+  }
+});
+
+test('MCP settles a due piggy auto-debit before manual posting and rejects a newly capped goal', async () => {
+  const user = await createTestUser();
+  const today = todayKeyInSaoPaulo();
+  const yesterday = dayKeyToDate(addDaysToKey(today, -1));
+  const bank = await prisma.piggyBank.create({
+    data: {
+      userId: user.id,
+      name: 'Auto debit before MCP',
+      createdAt: yesterday,
+      goalAmount: 10,
+      monthlyGoal: 6,
+      autoDebit: true,
+      autoDebitDay: Number(today.slice(-2)),
+      autoDebitEnabledAt: yesterday,
+    },
+  });
+  try {
+    const action: FinanceAction = {
+      kind: 'deposit_existing_cash',
+      amountCents: 600,
+      dateKey: today,
+      bankId: bank.id,
+      deductFromBalance: true,
+      note: null,
+    };
+    await assert.rejects(commitFinanceOperation(input(user.id, action)), /meta|cofrinho/i);
+    const auto = await prisma.piggyTransaction.findMany({
+      where: { userId: user.id, piggyBankId: bank.id },
+    });
+    assert.equal(auto.length, 1, 'a single due automatic deposit is applied first');
+    assert.equal(auto[0].source, 'auto_debit');
+    assert.equal(Number(auto[0].amount), 6);
+    assert.equal(await prisma.financeMcpOperation.count({ where: { userId: user.id } }), 0);
+    assert.equal(await prisma.entry.count({ where: { userId: user.id } }), 0);
+    assert.equal(await prisma.expense.count({ where: { userId: user.id } }), 1);
+  } finally {
+    await removeTestUser(user.id);
   }
 });
