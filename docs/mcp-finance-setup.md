@@ -4,7 +4,7 @@
 
 ## O que o MCP faz
 
-O ChatGPT (ou outro cliente MCP compatível) pode ler dados autorizados do deManage e propor lançamentos financeiros. A operação é pré-visualizada antes de executar. Uma instrução com duas interpretações possíveis **exige esclarecimento**.
+O ChatGPT (ou outro cliente MCP compatível) pode ler dados autorizados do deManage e propor lançamentos financeiros. A operação é pré-visualizada antes de executar. Uma instrução com duas interpretações possíveis **exige esclarecimento**. Um cliente com escopo de escrita autorizado pode executar sem confirmação adicional dentro do site; reveja a permissão antes de aprovar a conexão.
 
 Exemplo: “Ganhei R$ 20 da vó e coloquei no cofrinho Porco” cria uma entrada recebida com **tag** `Presente`, **descrição** `Presente da minha vó`, depois debita R$ 20 do saldo principal e deposita R$ 20 no cofrinho. O lançamento é atômico: se falhar um passo, todos voltam ao estado anterior. A assinatura da prévia vence, e um identificador único de intenção mais uma chave de idempotência evitam duplicações.
 
@@ -19,6 +19,8 @@ Exemplo ambíguo: “Coloca R$ 20 no Porco”. O cliente **precisa perguntar** s
 
 O cliente não envia `userId`: toda identidade vem de um token OAuth verificado, vinculado ao recurso e a permissões `finance:read` e `finance:write`. O usuário pode desconectar o cliente pela área **Integrações**. Não há ferramentas de exclusão de registros ou saques nesta primeira versão.
 
+**Rendimentos e débito automático:** a prévia nunca altera o livro financeiro. Na execução, o backend fecha juros CDI e débitos automáticos pendentes e verifica novamente o espaço restante da meta; se não couber o valor solicitado, a operação composta é rejeitada. Depósitos retroativos em cofrinhos com rendimento ativo ou já apurado são recusados para não reescrever incorretamente o histórico de juros.
+
 ## Configuração de um ambiente isolado
 
 1. Use um domínio HTTPS de homologação e um PostgreSQL isolado (nunca a base real). O Nginx do projeto publica `/api/mcp` e `/api/oauth/*` e encaminha a descoberta OAuth pela raiz `/.well-known/oauth-*`.
@@ -27,6 +29,8 @@ O cliente não envia `userId`: toda identidade vem de um token OAuth verificado,
 4. Defina `MCP_OAUTH_CLIENT_HOSTS` com os **hosts exatos** de documentos CIMD aceitos. Não habilite hosts arbitrários, redes privadas ou IPs. Para um cliente OpenAI que utilize o documento oficial, valide as URLs atuais na documentação da plataforma e inclua somente os hosts necessários.
 5. Mantenha `MCP_ENABLED=false` enquanto prepara o ambiente. Mude para `true` somente no ambiente de homologação depois de conferir rotas, autenticação, HTTPS, escopos, metadados, proteção contra replay e revogação.
 6. Teste com **contas descartáveis** e verifique diretamente os IDs e os totais no PostgreSQL. A configuração de homologação não deve publicar o banco na Internet.
+
+O emissor OAuth usa código de autorização com PKCE S256 e aceita clientes públicos (`none`) ou identidade CIMD assinada (`private_key_jwt`, RS256), com metadados e JWKS validados. Em operação, artefatos OAuth vencidos são expurgados automaticamente em lotes limitados; os registros de autorização não vencidos não são removidos pelo processo de limpeza.
 
 URLs públicas esperadas para uma instalação sob a mesma origem:
 
