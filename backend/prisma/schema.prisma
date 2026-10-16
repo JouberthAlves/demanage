@@ -102,6 +102,7 @@ model User {
   piggyBanks            PiggyBank[]
   piggyTransactions     PiggyTransaction[]
   financeMcpOperations  FinanceMcpOperation[]
+  oauthConnections      OAuthConnection[]
   assetTransactions     AssetTransaction[]
   patrimonySettings     PatrimonySettings?
 }
@@ -166,6 +167,39 @@ model FinanceMcpOperation {
 
   @@unique([userId, clientId, idempotencyKey])
   @@unique([userId, clientId, intentNonce])
+}
+
+// The OIDC adapter stores opaque, short-lived protocol objects. Do not log payloads.
+model OAuthArtifact {
+  model       String
+  id          String
+  payload     Json
+  grantId     String?
+  userCode    String?
+  uid         String?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@id([model, id])
+  @@index([model, grantId])
+  @@index([model, userCode])
+  @@index([model, uid])
+  @@index([expiresAt])
+}
+
+model OAuthConnection {
+  id         String    @id @default(uuid())
+  userId     String
+  clientId   String
+  clientName String
+  grantId    String    @unique
+  scopes     String
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId])
+  @@index([userId, revokedAt])
 }
 
 model Expense {
