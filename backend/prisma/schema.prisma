@@ -101,6 +101,7 @@ model User {
   customTags            CustomTag[]
   piggyBanks            PiggyBank[]
   piggyTransactions     PiggyTransaction[]
+  financeMcpOperations  FinanceMcpOperation[]
   assetTransactions     AssetTransaction[]
   patrimonySettings     PatrimonySettings?
 }
@@ -145,6 +146,26 @@ model CustomTag {
   // express its functional/partial expression; keep the migration and finance
   // tag resolver's SQL predicate in sync. Display names remain unchanged.
   @@unique([userId, scope, name])
+}
+
+// Append-only committed operation receipt. Financial rows and this audit row
+// are inserted together inside the same per-user locked transaction. Removing
+// an account follows the existing privacy/cascade deletion policy.
+model FinanceMcpOperation {
+  id             String   @id @default(uuid())
+  userId         String
+  clientId       String
+  idempotencyKey String
+  intentNonce    String
+  payloadDigest  String
+  actionKind     String
+  amountCents    BigInt
+  result         Json
+  committedAt    DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId, idempotencyKey])
+  @@unique([userId, clientId, intentNonce])
 }
 
 model Expense {
