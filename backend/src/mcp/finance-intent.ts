@@ -47,7 +47,11 @@ export function createSignedFinanceIntent(
   };
   const payload = Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64url');
   const mac = signature(payload, secret).toString('base64url');
-  return { token: `${payload}.${mac}`, nonce };
+  const token = `${payload}.${mac}`;
+  if (token.length > MAX_TOKEN_LENGTH) {
+    throw new Error('Intent financeiro grande demais');
+  }
+  return { token, nonce };
 }
 
 /** Returns unknown action content; callers must use typed schema validation. */

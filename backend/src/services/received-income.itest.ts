@@ -63,6 +63,19 @@ test('received gift creates a one-time entry and a matching paid receipt', async
       await prisma.entryReceipt.count({ where: { entry: { userId: user.id } } }),
       1,
     );
+    await assert.rejects(
+      withUserWriteLockTransaction(user.id, (tx) =>
+        createReceivedOneTimeIncomeInTransaction(tx, user.id, {
+          amountCents: 2_000,
+          dateKey: '2099-01-01',
+          name: 'Presente futuro',
+          notes: null,
+          tagId: null,
+        }),
+      ),
+      /Data.*futur|futur/i,
+    );
+    assert.equal(await prisma.entry.count({ where: { userId: user.id } }), 1);
   } finally {
     await prisma.entryReceipt.deleteMany({ where: { entry: { userId: user.id } } });
     await prisma.entry.deleteMany({ where: { userId: user.id } });

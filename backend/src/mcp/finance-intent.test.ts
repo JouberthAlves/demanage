@@ -49,3 +49,10 @@ test('intent rejects tampering, key confusion and malformed tokens', () => {
   assert.throws(() => verifySignedFinanceIntent('garbage', identity, secret, 100_001));
   assert.notEqual(createSignedFinanceIntent(identity, draft, secret, 100_000).nonce, signed.nonce);
 });
+
+test('oversized signed intents are rejected at creation, not at execution', () => {
+  assert.throws(
+    () => createSignedFinanceIntent(identity, { ...draft, extra: 'x'.repeat(10_000) }, secret, 100_000),
+    /grande|inválido|longo/i,
+  );
+});

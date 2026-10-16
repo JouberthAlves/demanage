@@ -56,3 +56,42 @@ test('contradictory structured intent asks instead of silently dropping a transf
     ),
   );
 });
+
+test('different bank identifiers cannot be silently collapsed into one target', () => {
+  assert.ok(
+    validateFinancialDraft({
+      kind: 'deposit_existing_cash',
+      amountCents: 2_000,
+      dateKey: '2026-10-16',
+      deductFromBalance: true,
+      bankId: 'bank-1',
+      bankName: 'Outro cofrinho',
+      note: null,
+    }).some((question) => /cofrinho/i.test(question)),
+  );
+});
+
+test('oversized cofrinho names and identifiers are rejected before signing intent', () => {
+  for (const bankField of ['bankName', 'bankId']) {
+    assert.ok(
+      validateFinancialDraft({
+        kind: 'deposit_existing_cash',
+        amountCents: 2_000,
+        dateKey: '2026-10-16',
+        deductFromBalance: true,
+        [bankField]: 'x'.repeat(10_000),
+      }).some((question) => /cofrinho/i.test(question)),
+    );
+  }
+});
+
+test('received income dated in the future must ask for correction', () => {
+  const problems = validateFinancialDraft({
+    kind: 'receive_income',
+    amountCents: 2_000,
+    dateKey: '2099-01-01',
+    description: 'Presente da minha vó',
+    tagName: 'Presente',
+  });
+  assert.ok(problems.some((question) => /data/i.test(question)));
+});

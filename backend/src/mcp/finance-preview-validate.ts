@@ -1,4 +1,4 @@
-import { parseDayKey } from '@/lib/civil-date';
+import { parseDayKey, todayKeyInSaoPaulo } from '@/lib/civil-date';
 
 /** Deterministic guardrail: structured AI inputs cannot invent missing money intent. */
 export function validateFinancialDraft(draft: Record<string, unknown>): string[] {
@@ -20,6 +20,11 @@ export function validateFinancialDraft(draft: Record<string, unknown>): string[]
   }
   if (!parseDayKey(draft.dateKey)) {
     questions.push('Qual é a data da movimentação?');
+  } else if (
+    (kind === 'receive_income' || kind === 'receive_and_save') &&
+    (draft.dateKey as string) > todayKeyInSaoPaulo()
+  ) {
+    questions.push('A data informada é futura. Em qual data você realmente recebeu o dinheiro?');
   }
 
   if (kind === 'receive_income' || kind === 'receive_and_save') {
@@ -45,6 +50,13 @@ export function validateFinancialDraft(draft: Record<string, unknown>): string[]
     const hasBankName = typeof draft.bankName === 'string' && draft.bankName.trim();
     if (!hasBankId && !hasBankName) {
       questions.push('Em qual cofrinho você quer guardar o valor?');
+    } else if (
+      (hasBankId && (draft.bankId as string).length > 128) ||
+      (hasBankName && (draft.bankName as string).length > 50)
+    ) {
+      questions.push('O nome ou identificador do cofrinho é muito longo. Confirme o cofrinho.');
+    } else if (hasBankId && hasBankName) {
+      questions.push('Há dois identificadores para o cofrinho. Confirme qual cofrinho deseja utilizar.');
     }
   }
   if (
