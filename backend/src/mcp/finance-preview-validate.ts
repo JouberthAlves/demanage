@@ -47,6 +47,20 @@ export function validateFinancialDraft(draft: Record<string, unknown>): string[]
       questions.push('Em qual cofrinho você quer guardar o valor?');
     }
   }
+  if (
+    kind === 'receive_income' &&
+    ((typeof draft.bankId === 'string' && draft.bankId.trim()) ||
+      (typeof draft.bankName === 'string' && draft.bankName.trim()))
+  ) {
+    questions.push('Você quer apenas registrar a entrada ou também guardar esse dinheiro no cofrinho informado?');
+  }
+  if (
+    kind === 'receive_and_save' &&
+    draft.deductFromBalance !== undefined &&
+    draft.deductFromBalance !== true
+  ) {
+    questions.push('Para receber e guardar, o valor precisa sair do saldo principal. Confirma esse desconto?');
+  }
   if (kind === 'deposit_existing_cash' && typeof draft.deductFromBalance !== 'boolean') {
     questions.push('Deseja descontar esse valor do saldo principal ou apenas registrá-lo no cofrinho?');
   }
