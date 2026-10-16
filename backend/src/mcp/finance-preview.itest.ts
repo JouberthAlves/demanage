@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 
 import { previewFinanceOperation, verifyIntent } from './finance-preview';
@@ -140,6 +141,42 @@ test('deposit existing money signs explicit cash deduction choice', async () => 
         note: 'Da poupança',
       });
     }
+  } finally {
+    await cleanup([me.id]);
+  }
+});
+
+test('historical deposits into a bank with accrued CDI must ask before signing', async () => {
+  const me = await createTestUser();
+  const today = todayKeyInSaoPaulo();
+  const yesterday = addDaysToKey(today, -1);
+  const older = addDaysToKey(today, -3);
+  try {
+    const bank = await prisma.piggyBank.create({
+      data: {
+        userId: me.id,
+        name: 'Cofre rendimento',
+        monthlyGoal: 0,
+        yieldEnabled: true,
+        cdiPercent: 0,
+        interestAccruedThrough: dayKeyToDate(yesterday),
+      },
+    });
+    const identity = { userId: me.id, clientId: 'client-1' };
+    for (const backdated of [
+      {
+        kind: 'deposit_existing_cash', dateKey: older, amountCents: 2_000,
+        bankId: bank.id, deductFromBalance: true, note: null,
+      },
+      { ...draft, dateKey: older, bankId: bank.id },
+    ]) {
+      const preview = await previewFinanceOperation(identity, backdated, { secret });
+      assert.equal(preview.status, 'clarification_required');
+      if (preview.status === 'clarification_required') {
+        assert.match(preview.questions.join(' '), /retroativ|rendimento|juros/i);
+      }
+    }
+    assert.equal(await prisma.piggyTransaction.count({ where: { userId: me.id } }), 0);
   } finally {
     await cleanup([me.id]);
   }
