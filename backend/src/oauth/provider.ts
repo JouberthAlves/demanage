@@ -18,6 +18,24 @@ type OAuthOptions = {
   clientHosts?: string[];
 };
 
+/** Only exact, explicitly trusted client-metadata hostnames; no wildcard. */
+export function isAllowedCimdClientId(clientId: string, allowedHosts: ReadonlySet<string>) {
+  try {
+    const url = new URL(clientId);
+    return url.protocol === 'https:' && !url.username && !url.password &&
+      !url.hash && !isIP(url.hostname) && url.port === '' &&
+      allowedHosts.has(url.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function allowedCimdHosts(configuredHosts = process.env.MCP_OAUTH_CLIENT_HOSTS?.split(',') ?? []) {
+  // ChatGPT's stable CIMD is always available; all additional hostnames are opt-in.
+  return new Set(['chatgpt.com', ...configuredHosts]
+    .map((host) => host.toLowerCase().trim()).filter(Boolean));
+}
+
 export function oauthSettings() {
   const base = APP_URL?.replace(/\/+$/, '');
   return {
@@ -58,8 +76,7 @@ export function createOAuthProvider(options: OAuthOptions = {}) {
       throw new Error('[deManage] MCP_OAUTH_JWKS must be a private signing key set');
     }
   }
-  const clientHosts = new Set((options.clientHosts ?? process.env.MCP_OAUTH_CLIENT_HOSTS?.split(',') ?? [])
-    .map((host) => host.toLowerCase().trim()).filter(Boolean));
+  const clientHosts = allowedCimdHosts(options.clientHosts);
 
   const configuration: Configuration = {
     adapter: (model) => new OAuthPrismaAdapter(model),
@@ -74,14 +91,7 @@ export function createOAuthProvider(options: OAuthOptions = {}) {
         enabled: true,
         ack: 'draft-02',
         allowFetch(_ctx, id) {
-          try {
-            const url = new URL(id);
-            return url.protocol === 'https:' && !url.username && !url.password &&
-              !url.hash && !isIP(url.hostname) && url.port === '' &&
-              clientHosts.has(url.hostname.toLowerCase());
-          } catch {
-            return false;
-          }
+          return isAllowedCimdClientId(id, clientHosts);
         },
         allowClient(_ctx, client) {
           return client.tokenEndpointAuthMethod === 'none' &&

@@ -15,7 +15,7 @@ type ConsentRequest = {
 
 const SCOPE_DESCRIPTIONS: Record<string, string> = {
   'finance:read': 'Consultar saldos, entradas e cofrinhos.',
-  'finance:write': 'Solicitar alterações financeiras com confirmação.',
+  'finance:write': 'Registrar operações financeiras por meio do aplicativo conectado.',
 };
 
 export function OAuthConsentPage() {
@@ -55,7 +55,10 @@ export function OAuthConsentPage() {
                 {request.scopes.map((scope) => <li key={scope}>{SCOPE_DESCRIPTIONS[scope] ?? scope}</li>)}
               </ul>
             </div>
-            <p className='text-xs text-muted-foreground'>Você pode revogar esse acesso a qualquer momento em Integrações. Operações financeiras exigem confirmação no deManage.</p>
+            {request.scopes.includes('finance:write') && (
+              <p className='text-sm text-amber-400'>Atenção: este aplicativo poderá executar operações financeiras autorizadas sem pedir uma nova confirmação no site deManage. Autorize apenas aplicativos em que confia.</p>
+            )}
+            <p className='text-xs text-muted-foreground'>Você pode revogar esse acesso a qualquer momento em Integrações.</p>
             <form method='post' action={`${API_URL}/oauth/interaction/${encodeURIComponent(request.uid)}/finish`} className='flex flex-wrap gap-3'>
               <input type='hidden' name='csrf' value={request.csrf} />
               <button className='rounded-lg bg-primary px-5 py-3 font-semibold text-primary-foreground' type='submit' name='decision' value='approve'>Autorizar</button>

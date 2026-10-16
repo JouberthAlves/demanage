@@ -79,6 +79,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
       assert.ok(redirect, 'OAuth flow requires redirect');
       const destination = new URL(redirect, base);
       if (destination.origin === new URL(callback).origin && destination.pathname === '/finish') {
+        assert.equal(destination.searchParams.get('iss'), `${base}/oauth`, 'RFC 9207 issuer must match discovery');
         const code = destination.searchParams.get('code');
         assert.ok(code, `OAuth rejected: ${destination.searchParams.get('error')}`);
         return { code, pkceVerifier, jar };
@@ -111,13 +112,53 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
   }
 
   try {
-    const metadata = await fetch(`${base}/.well-known/oauth-authorization-server`);
-    assert.equal(metadata.status, 200);
-    assert.deepEqual((await metadata.json() as { code_challenge_methods_supported: string[] }).code_challenge_methods_supported, ['S256']);
+    for (const path of [
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-authorization-server/api/oauth',
+    ]) {
+      const metadata = await fetch(`${base}${path}`);
+      assert.equal(metadata.status, 200);
+      const advertised = await metadata.json() as Record<string, unknown>;
+      assert.equal(advertised.issuer, `${base}/oauth`);
+      assert.equal(advertised.client_id_metadata_document_supported, true);
+      assert.equal(advertised.authorization_response_iss_parameter_supported, true);
+      assert.equal(advertised.registration_endpoint, undefined, 'DCR is disabled');
+      assert.deepEqual(advertised.code_challenge_methods_supported, ['S256']);
+      assert.deepEqual(advertised.token_endpoint_auth_methods_supported, ['none']);
+    }
+
+    // RFC 9207 also requires `iss` on redirectable authorization errors.
+    const noPrompt = new URL(`${base}/oauth/auth`);
+    noPrompt.search = new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: callback,
+      response_type: 'code',
+      scope: 'finance:read',
+      resource,
+      prompt: 'none',
+      code_challenge: challenge(verifier()),
+      code_challenge_method: 'S256',
+    }).toString();
+    const errorResponse = await request(noPrompt.toString(), new Map());
+    assert.equal(errorResponse.status, 303);
+    const errorLocation = errorResponse.headers.get('location');
+    assert.ok(errorLocation);
+    const errorRedirect = new URL(errorLocation, base);
+    assert.ok(errorRedirect.searchParams.get('error'), 'prompt=none must return a redirectable authorization error');
+    assert.equal(errorRedirect.searchParams.get('iss'), `${base}/oauth`);
 
     const first = await authorize(0, 'finance:read');
     const rejectedVerifier = await exchange(first.code, verifier());
     assert.notEqual(rejectedVerifier.status, 200, 'wrong PKCE verifier must be rejected');
+
+    const concurrentCode = await authorize(0, 'finance:read');
+    const concurrentExchanges = await Promise.all([
+      exchange(concurrentCode.code, concurrentCode.pkceVerifier),
+      exchange(concurrentCode.code, concurrentCode.pkceVerifier),
+    ]);
+    assert.deepEqual(concurrentExchanges.map((response) => response.status).sort(), [200, 400],
+      'a one-time authorization code must never issue two tokens concurrently');
+
     const validFirst = await authorize(0, 'finance:read');
     const firstResponse = await exchange(validFirst.code, validFirst.pkceVerifier);
     assert.equal(firstResponse.status, 200, `Token exchange failure: ${await firstResponse.clone().text()}`);
