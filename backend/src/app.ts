@@ -9,6 +9,7 @@ import { isAllowedBrowserOrigin } from '@/lib/request-origin';
 import { createMcpHttpRouter } from '@/mcp/http';
 import { csrfProtection } from '@/middlewares/csrf-protection';
 import { requestLogger } from '@/middlewares/request-logger';
+import { startOAuthArtifactCleanup } from '@/oauth/cleanup';
 import { getOAuthGrantSubject, oauthSettings } from '@/oauth/provider';
 import api from '@/routes';
 import { createOAuthDiscoveryRouter, createOAuthRouter } from '@/routes/oauth';
@@ -89,6 +90,7 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
   if (MCP_ENABLED) {
     app.use(createOAuthDiscoveryRouter());
     app.use('/oauth', createOAuthRouter());
+    startOAuthArtifactCleanup();
   }
 
   const authLimiter = rateLimit({
