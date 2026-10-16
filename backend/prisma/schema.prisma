@@ -216,6 +216,7 @@ model Entry {
   userId              String
   customTagId         String?
   name                String
+  notes               String?
   amount              Decimal           @db.Decimal(12, 2)
   type                EntryType
   frequency           EntryFrequency

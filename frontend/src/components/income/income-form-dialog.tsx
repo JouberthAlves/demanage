@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
+import { Textarea } from '@/components/ui/textarea';
 import { INCOME_FREQUENCY_LABELS } from '@/data/labels';
 import { INCOME_FIELD_IDS, incomeTypeOptions } from '@/lib/income-form';
 import type { Income } from '@/types/finance';
@@ -26,6 +27,7 @@ import { type IncomeFormApi, useIncomeForm } from './use-income-form';
 const {
   error: ERROR_ID,
   name: NAME_ID,
+  notes: NOTES_ID,
   amount: AMOUNT_ID,
   date: DATE_ID,
 } = INCOME_FIELD_IDS;
@@ -99,6 +101,21 @@ function IncomeFormBody({
             className='rounded-lg'
           />
           <FieldError error={f.error} fieldId={NAME_ID} errorId={ERROR_ID} />
+        </div>
+
+        <div className='flex flex-col gap-2'>
+          <Label htmlFor={NOTES_ID}>Descrição (opcional)</Label>
+          <Textarea
+            id={NOTES_ID}
+            {...fieldErrorProps(f.error, NOTES_ID, ERROR_ID)}
+            value={form.notes}
+            onChange={(event) => f.patch({ notes: event.target.value })}
+            placeholder='Ex: Presente da minha vó'
+            maxLength={500}
+            className='max-h-40 min-h-20 field-sizing-fixed overflow-y-auto rounded-lg'
+          />
+          <FieldError error={f.error} fieldId={NOTES_ID} errorId={ERROR_ID} />
+          <p className='text-xs text-muted-foreground'>{form.notes.length}/500</p>
         </div>
 
         <div className='flex flex-col gap-2'>

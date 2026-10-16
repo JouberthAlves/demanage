@@ -91,6 +91,46 @@ test('create input validates required fields, salary and tag type', () => {
   );
 });
 
+test('entry notes are separate from name and custom income tag', () => {
+  const parsed = parseCreateEntry({
+    name: 'Presente',
+    amount: 20,
+    type: 'outro',
+    frequency: 'unica',
+    customTagId: 'income-tag',
+    notes: '  Presente da minha vó  ',
+    date: '2026-10-16',
+  });
+  assert.equal(parsed.name, 'Presente');
+  assert.equal(parsed.customTagId, 'income-tag');
+  assert.equal(parsed.notes, 'Presente da minha vó');
+  assert.equal(parseCreateEntry({
+    name: 'Presente', amount: 20, type: 'outro', frequency: 'unica',
+  }).notes, null);
+
+  const entry = {
+    id: 'entry-notes',
+    name: 'Presente',
+    notes: 'Presente da minha vó',
+    customTagId: 'income-tag',
+    amount: new Prisma.Decimal(20),
+  } as Entry;
+  const serialized = serializeEntry(entry);
+  assert.equal(serialized.notes, 'Presente da minha vó');
+  assert.equal(serialized.name, 'Presente');
+  assert.equal(serialized.customTagId, 'income-tag');
+});
+
+test('entry note updates accept null, preserve omitted notes and reject invalid or oversized text', () => {
+  assert.equal(parseUpdateEntry({ notes: null }).notes, null);
+  assert.equal(parseUpdateEntry({ notes: '  outra descrição  ' }).notes, 'outra descrição');
+  assert.equal(parseUpdateEntry({ name: 'Novo' }).notes, undefined);
+  const base = { name: 'Presente', amount: 20, type: 'outro', frequency: 'unica' };
+  assert.equal(status(() => parseCreateEntry({ ...base, notes: 7 })), 400);
+  assert.equal(status(() => parseCreateEntry({ ...base, notes: 'x'.repeat(501) })), 400);
+  assert.equal(status(() => parseUpdateEntry({ notes: 'x'.repeat(501) })), 400);
+});
+
 test('update input is partial and refuses the salary type', () => {
   const parsed = parseUpdateEntry({ amount: '15.5' });
   assert.equal(parsed.amount, 15.5);
