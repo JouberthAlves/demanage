@@ -36,3 +36,23 @@ test('missing date, source or destination is not silently assumed', () => {
   assert.ok(validateFinancialDraft({ kind: 'receive_income', amountCents: -1 }).length > 0);
   assert.ok(validateFinancialDraft({ kind: 'receive_income', amountCents: 2_000, dateKey: '2026-02-30' }).some((question) => /data/i.test(question)));
 });
+
+test('contradictory structured intent asks instead of silently dropping a transfer', () => {
+  const base = {
+    amountCents: 2_000,
+    dateKey: '2026-10-16',
+    description: 'Presente da minha vó',
+    tagName: 'Presente',
+    bankId: 'bank-porco',
+  };
+  assert.ok(
+    validateFinancialDraft({ ...base, kind: 'receive_income' }).some((question) =>
+      /cofrinho|guardar|transferir/i.test(question),
+    ),
+  );
+  assert.ok(
+    validateFinancialDraft({ ...base, kind: 'receive_and_save', deductFromBalance: false }).some(
+      (question) => /saldo|descontar/i.test(question),
+    ),
+  );
+});
