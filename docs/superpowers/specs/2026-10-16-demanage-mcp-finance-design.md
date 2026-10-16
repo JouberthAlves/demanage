@@ -1,7 +1,7 @@
 # Design — deManage MCP Finance (v1)
 
-**Date:** 2026-10-16  
-**Stage:** proposal for user review; NOT an implementation plan  
+**Date:** 2026-10-16
+**Stage:** proposal for user review; NOT an implementation plan
 **Target:** existing deManage monorepo (Express 5, Prisma 7, PostgreSQL, React)
 
 ## 1. Purpose and success criteria
