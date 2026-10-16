@@ -4,6 +4,7 @@ import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
 export type ApiEntry = {
   id: string;
   name: string;
+  notes?: string | null;
   amount: string | number;
   type: IncomeType;
   frequency: IncomeFrequency;
@@ -30,6 +31,7 @@ export type ApiEntry = {
 
 export type EntryPayload = {
   name: string;
+  notes?: string | null;
   amount: number;
   type: IncomeType;
   frequency: IncomeFrequency;
@@ -51,6 +53,7 @@ export function mapEntryToIncome(entry: ApiEntry): Income {
   return {
     id: entry.id,
     name: entry.name,
+    notes: entry.notes ?? null,
     amount: Number(entry.amount),
     type: entry.type,
     frequency: entry.frequency,

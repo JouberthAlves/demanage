@@ -93,6 +93,55 @@ async function startApi(userId: string) {
   };
 }
 
+test('entry create, list and edit keep description independent of title and income tag', async () => {
+  const user = await createUser('Income note round trip');
+  const tag = await prisma.customTag.create({
+    data: { userId: user.id, scope: 'income', name: 'Presente', color: '#34D399' },
+  });
+  const api = await startApi(user.id);
+
+  try {
+    const newEntry = {
+      name: 'Presente',
+      amount: 20,
+      type: 'outro',
+      frequency: 'unica',
+      date: '2026-10-16',
+      customTagId: tag.id,
+      notes: '  Presente da minha vó  ',
+    };
+    const created = await api.request('/entries', 'POST', newEntry);
+    assert.equal(created.response.status, 201);
+    const row = created.data as { id: string; name: string; notes: string; customTagId: string };
+    assert.equal(row.name, 'Presente');
+    assert.equal(row.customTagId, tag.id);
+    assert.equal(row.notes, 'Presente da minha vó');
+
+    const entries = await api.request('/entries', 'GET');
+    assert.equal(entries.response.status, 200);
+    const listed = (entries.data as Array<{ id: string; notes: string }>).find(
+      (entry) => entry.id === row.id,
+    );
+    assert.equal(listed?.notes, 'Presente da minha vó');
+
+    const invalid = await api.request(`/entries/${row.id}`, 'PATCH', {
+      notes: 'x'.repeat(501),
+    });
+    assert.equal(invalid.response.status, 400);
+
+    const cleared = await api.request(`/entries/${row.id}`, 'PATCH', { notes: null });
+    assert.equal(cleared.response.status, 200);
+    assert.equal((cleared.data as { notes: string | null }).notes, null);
+    const persisted = await prisma.entry.findUniqueOrThrow({ where: { id: row.id } });
+    assert.equal(persisted.notes, null);
+    assert.equal(persisted.name, 'Presente');
+    assert.equal(persisted.customTagId, tag.id);
+  } finally {
+    await api.close();
+    await cleanupUser(user.id);
+  }
+});
+
 test('invoice settlement is authorized, idempotent, immutable, and cannot be deleted', async () => {
   const user = await createUser('Invoice settlement test');
   const invoice = await prisma.expense.create({
