@@ -139,6 +139,7 @@ cd backend && pnpm format && pnpm typecheck && pnpm build
 ## Docs internas
 
 - [`AGENTS.md`](./AGENTS.md) — contexto rápido para agents
+- [`docs/mcp-finance-setup.md`](./docs/mcp-finance-setup.md) — implantação segura e teste local do servidor MCP financeiro (desligado por padrão)
 - [`plans.md`](./plans.md) — roadmap P0 → P2+
 - [`CODING_STYLE.md`](./CODING_STYLE.md) — estilo de código
 - [`CONTRIBUTING.md`](./CONTRIBUTING.md) — como contribuir
