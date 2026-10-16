@@ -97,6 +97,22 @@ pnpm test:integration # testes do backend que usam banco (*.itest.ts)
 Sem `DATABASE_URL`, `pnpm exec prisma generate` e `pnpm exec prisma validate` funcionam normalmente.
 Migrations e o drift gate estão em [`docs/database-migrations.md`](./docs/database-migrations.md).
 
+### CI local (sem minutos do GitHub Actions)
+
+Com Node 24+, Corepack, Docker ativo e Python 3.14+, execute a partir da raiz:
+
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ci-local.ps1
+    # Opcional: compilar ambas as imagens Docker localmente, sem publicar:
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\ci-local.ps1 -BuildImages
+    # Autoteste das barreiras de segurança e do retorno não-zero:
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\ci-local.tests.ps1
+    # Autoteste opcional da limpeza de contêineres (requer imagem PostgreSQL no Docker):
+    powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\tests\ci-local-docker.tests.ps1
+
+O runner usa Corepack para resolver o **pnpm 10.17.1** definido nos package.json, mesmo que o pnpm global seja outro. Ele cria um contêiner PostgreSQL 18 temporário, com duas bases de nomes aleatórios e uma porta exclusiva em 127.0.0.1, e remove somente esse contêiner ao encerrar. Por segurança, recusa DATABASE_URL ou SHADOW_DATABASE_URL já presentes no ambiente; limpe essas variáveis na sessão antes de executar. Nunca reutiliza o Compose de produção, não publica imagens e não faz deploy.
+
+Os comandos seguem o workflow CI: instalações congeladas, auditorias, validação/geração Prisma, migrations e drift via shadow DB descartável, verificações de tipos, lint, testes unitários/de integração, builds e testes do agente de deploy. Falhas interrompem o processo com exit code não zero; logs por etapa ficam em artifacts/ci-local/ (ignorado pelo Git, sem credenciais). -BuildImages acrescenta duas compilações Docker locais opcionais.
+
 ```bash
 # Frontend
 cd frontend
