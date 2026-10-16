@@ -10,19 +10,25 @@ import {
   YAxis,
 } from 'recharts';
 
-import { formatCurrencyCompact, formatMonthLabel } from '@/lib/format';
+import { formatCurrencyCompact } from '@/lib/format';
 import type { MonthlySnapshot } from '@/types/finance';
+
+import { incomeExpenseAreaData } from './income-expense-area-data';
 
 export function IncomeExpenseAreaChart({
   history,
+  currentIncome,
+  currentExpense,
 }: {
   history: MonthlySnapshot[];
+  currentIncome: number;
+  currentExpense: number;
 }) {
-  const currentMonth = history[history.length - 1];
-  const currentIncome = currentMonth?.income ?? 0;
-  const currentExpense = currentMonth?.expense ?? 0;
-
-  if (!history.some((month) => month.hasActivity)) {
+  if (
+    !history.some((month) => month.hasActivity) &&
+    currentIncome === 0 &&
+    currentExpense === 0
+  ) {
     return (
       <div className='flex h-72 flex-col items-center justify-center gap-3 px-6 text-center'>
         <div className='flex size-12 items-center justify-center rounded-2xl bg-neon-amber/10'>
@@ -33,20 +39,16 @@ export function IncomeExpenseAreaChart({
             Sem pagamentos ou recebimentos registrados
           </p>
           <p className='text-sm text-muted-foreground'>
-            O gráfico mostra valores registrados como pagos ou recebidos. Este
-            mês: {formatCurrencyCompact(currentIncome)} recebidos ·{' '}
-            {formatCurrencyCompact(currentExpense)} pagos.
+            Não há movimentações no período. Este mês:{' '}
+            {formatCurrencyCompact(currentIncome)} em entradas ·{' '}
+            {formatCurrencyCompact(currentExpense)} em saídas.
           </p>
         </div>
       </div>
     );
   }
 
-  const data = history.map((item) => ({
-    label: formatMonthLabel(item.month),
-    income: item.income,
-    expense: item.expense,
-  }));
+  const data = incomeExpenseAreaData(history, currentIncome, currentExpense);
 
   return (
     <div className='h-72 w-full'>
