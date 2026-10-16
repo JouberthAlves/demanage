@@ -6,10 +6,13 @@ import helmet from 'helmet';
 
 import { errorHandler, notFoundHandler } from '@/http/errors';
 import { isAllowedBrowserOrigin } from '@/lib/request-origin';
+import { createMcpHttpRouter } from '@/mcp/http';
 import { csrfProtection } from '@/middlewares/csrf-protection';
 import { requestLogger } from '@/middlewares/request-logger';
+import { getOAuthGrantSubject, oauthSettings } from '@/oauth/provider';
 import api from '@/routes';
-import { APP_URL, NODE_ENV } from '@/utils/var';
+import { createOAuthDiscoveryRouter, createOAuthRouter } from '@/routes/oauth';
+import { APP_URL, MCP_ENABLED, NODE_ENV } from '@/utils/var';
 
 export type CreateAppOptions = {
   /** Loga cada requisição (padrão: `true`). */
@@ -69,8 +72,24 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
 
   if (logRequests) app.use(requestLogger);
   app.use(cookieParser());
+  // Separate bearer-only MCP transport from the browser cookie/CSRF boundary.
+  // The regular website routes retain their original CSRF protection.
+  if (MCP_ENABLED) {
+    const settings = oauthSettings();
+    app.use(createMcpHttpRouter({
+      verifyBearer: getOAuthGrantSubject,
+      resourceUrl: settings.resource,
+      issuerUrl: settings.issuer,
+      isProduction,
+    }));
+  }
   app.use(csrfProtection);
   app.use(express.json({ limit: '256kb' }));
+
+  if (MCP_ENABLED) {
+    app.use(createOAuthDiscoveryRouter());
+    app.use('/oauth', createOAuthRouter());
+  }
 
   const authLimiter = rateLimit({
     windowMs: FIFTEEN_MINUTES_MS,
