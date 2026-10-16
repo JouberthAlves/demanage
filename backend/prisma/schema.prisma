@@ -140,6 +140,10 @@ model CustomTag {
   entries   Entry[]
 
   // The unique below also serves (userId, scope) lookups.
+  // PostgreSQL additionally enforces a casefold + NFKC unique index for income
+  // tags per user (20261016194000_income_tag_casefold_unique). Prisma cannot
+  // express its functional/partial expression; keep the migration and finance
+  // tag resolver's SQL predicate in sync. Display names remain unchanged.
   @@unique([userId, scope, name])
 }
 
