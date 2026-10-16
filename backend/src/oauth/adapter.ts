@@ -1,4 +1,4 @@
-import type { Adapter, AdapterPayload } from 'oidc-provider';
+import { type Adapter, type AdapterPayload,errors } from 'oidc-provider';
 
 import { type Prisma } from '@/generated/prisma/client';
 import { prisma } from '@/lib/prisma';
@@ -55,18 +55,23 @@ export class OAuthPrismaAdapter implements Adapter {
   }
 
   async consume(id: string): Promise<void> {
-    const item = await prisma.oAuthArtifact.findUnique({
-      where: { model_id: { model: this.model, id } },
-      select: { payload: true },
-    });
-    if (!item) return;
-    const payload = item.payload as Record<string, unknown>;
-    await prisma.oAuthArtifact.updateMany({
-      where: { model: this.model, id },
-      data: {
-        payload: { ...payload, consumed: Math.floor(Date.now() / 1_000) } as Prisma.InputJsonObject,
-      },
-    });
+    // A token exchange loads the code before calling consume(). Two requests
+    // can both observe it as valid, so the consume step MUST be a DB-level CAS.
+    // Only the winner can issue tokens; losers receive invalid_grant.
+    const changed = await prisma.$executeRaw`
+      UPDATE "OAuthArtifact"
+      SET "payload" = jsonb_set(
+        "payload", '{consumed}'::text[],
+        to_jsonb(FLOOR(EXTRACT(EPOCH FROM NOW()))::bigint), true
+      )
+      WHERE "model" = ${this.model}
+        AND "id" = ${id}
+        AND NOT ("payload" ? 'consumed')
+        AND ("expiresAt" IS NULL OR "expiresAt" > NOW())
+    `;
+    if (changed !== 1) {
+      throw new errors.InvalidGrant('OAuth credential already consumed or expired');
+    }
   }
 
   async destroy(id: string): Promise<void> {
