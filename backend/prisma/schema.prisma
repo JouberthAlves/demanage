@@ -101,6 +101,8 @@ model User {
   customTags            CustomTag[]
   piggyBanks            PiggyBank[]
   piggyTransactions     PiggyTransaction[]
+  financeMcpOperations  FinanceMcpOperation[]
+  oauthConnections      OAuthConnection[]
   assetTransactions     AssetTransaction[]
   patrimonySettings     PatrimonySettings?
 }
@@ -140,7 +142,64 @@ model CustomTag {
   entries   Entry[]
 
   // The unique below also serves (userId, scope) lookups.
+  // PostgreSQL additionally enforces a casefold + NFKC unique index for income
+  // tags per user (20261016194000_income_tag_casefold_unique). Prisma cannot
+  // express its functional/partial expression; keep the migration and finance
+  // tag resolver's SQL predicate in sync. Display names remain unchanged.
   @@unique([userId, scope, name])
+}
+
+// Append-only committed operation receipt. Financial rows and this audit row
+// are inserted together inside the same per-user locked transaction. Removing
+// an account follows the existing privacy/cascade deletion policy.
+model FinanceMcpOperation {
+  id             String   @id @default(uuid())
+  userId         String
+  clientId       String
+  idempotencyKey String
+  intentNonce    String
+  payloadDigest  String
+  actionKind     String
+  amountCents    BigInt
+  result         Json
+  committedAt    DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId, idempotencyKey])
+  @@unique([userId, clientId, intentNonce])
+}
+
+// The OIDC adapter stores opaque, short-lived protocol objects. Do not log payloads.
+model OAuthArtifact {
+  model       String
+  id          String
+  payload     Json
+  grantId     String?
+  userCode    String?
+  uid         String?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@id([model, id])
+  @@index([model, grantId])
+  @@index([model, userCode])
+  @@index([model, uid])
+  @@index([expiresAt])
+}
+
+model OAuthConnection {
+  id         String    @id @default(uuid())
+  userId     String
+  clientId   String
+  clientName String
+  grantId    String    @unique
+  scopes     String
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId])
+  @@index([userId, revokedAt])
 }
 
 model Expense {
@@ -216,6 +275,7 @@ model Entry {
   userId              String
   customTagId         String?
   name                String
+  notes               String?
   amount              Decimal           @db.Decimal(12, 2)
   type                EntryType
   frequency           EntryFrequency
