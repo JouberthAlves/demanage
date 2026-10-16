@@ -1,6 +1,6 @@
 import { Prisma } from '@/generated/prisma/client';
 import { badRequest } from '@/http/errors';
-import { dayKeyToDate, monthKey, parseDayKey } from '@/lib/civil-date';
+import { dayKeyToDate, monthKey, parseDayKey, todayKeyInSaoPaulo } from '@/lib/civil-date';
 
 /** Reusable primitive: caller must own the user-level write lock and transaction. */
 export async function createReceivedOneTimeIncomeInTransaction(
@@ -23,6 +23,9 @@ export async function createReceivedOneTimeIncomeInTransaction(
   }
   if (!parseDayKey(input.dateKey)) {
     throw badRequest('Data da entrada inválida');
+  }
+  if (input.dateKey > todayKeyInSaoPaulo()) {
+    throw badRequest('Data futura não pode ser marcada como recebida');
   }
   const name = input.name.trim();
   if (!name || name.length > 100) {
