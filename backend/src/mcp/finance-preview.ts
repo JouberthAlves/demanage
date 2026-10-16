@@ -1,5 +1,5 @@
 import { Prisma } from '@/generated/prisma/client';
-import { todayKeyInSaoPaulo } from '@/lib/civil-date';
+import { dayKeyOfDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { balanceDecimalFromTransactions } from '@/lib/piggy/ledger';
 import { type FinanceAction } from '@/services/finance-operation';
 import { getMcpIntentSecret } from '@/utils/var';
@@ -119,6 +119,8 @@ type BankRow = {
   id: string;
   name: string;
   archivedAt: Date | null;
+  yieldEnabled: boolean;
+  interestAccruedThrough: Date | null;
   goalAmount: Prisma.Decimal | null;
   transactions: Array<{ type: string; amount: Prisma.Decimal }>;
 };
@@ -151,6 +153,7 @@ async function findBankForPreview(
     where: { id: selectedId, userId },
     select: {
       id: true, name: true, archivedAt: true, goalAmount: true,
+      yieldEnabled: true, interestAccruedThrough: true,
       transactions: { select: { type: true, amount: true } },
     },
   });
@@ -241,6 +244,18 @@ export async function previewFinanceOperation(
     const matched = await findBankForPreview(identity.userId, draft);
     if ('question' in matched) return clarify(matched.question);
     bank = matched.bank;
+    const recordedDate = draft.dateKey as string;
+    const accruedThrough = bank.interestAccruedThrough
+      ? dayKeyOfDate(bank.interestAccruedThrough)
+      : null;
+    if (
+      recordedDate < todayKeyInSaoPaulo() &&
+      (bank.yieldEnabled || (accruedThrough !== null && recordedDate <= accruedThrough))
+    ) {
+      return clarify(
+        'Depósito retroativo nesse cofrinho alteraria o rendimento CDI já calculado. Deseja registrar com a data de hoje?',
+      );
+    }
     const balance = balanceDecimalFromTransactions(bank.transactions);
     if (bank.goalAmount != null) {
       const remainingCents = bank.goalAmount.minus(balance).mul(100);

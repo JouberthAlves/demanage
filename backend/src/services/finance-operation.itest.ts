@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
@@ -141,6 +142,35 @@ test('deposit of existing cash requires an explicit deduction flag', async () =>
       ),
     );
     assert.equal(await prisma.piggyTransaction.count({ where: { userId: user.id } }), 0);
+  } finally {
+    await removeTestUser(user.id);
+  }
+});
+
+test('backdated deposits cannot change already-accrued CDI history, including compound gifts', async () => {
+  const user = await createTestUser();
+  const today = todayKeyInSaoPaulo();
+  const older = addDaysToKey(today, -3);
+  const bank = await prisma.piggyBank.create({
+    data: {
+      userId: user.id, name: 'CDI cofre', monthlyGoal: 0,
+      yieldEnabled: true, cdiPercent: 0,
+      interestAccruedThrough: dayKeyToDate(addDaysToKey(today, -1)),
+    },
+  });
+  try {
+    for (const action of [
+      { kind: 'deposit_existing_cash' as const, amountCents: 2_000, dateKey: older, bankId: bank.id, deductFromBalance: true, note: null },
+      { kind: 'receive_and_save' as const, amountCents: 2_000, dateKey: older, bankId: bank.id, tagName: 'Presente', description: 'Presente da minha vó' },
+    ]) {
+      await assert.rejects(
+        withUserWriteLockTransaction(user.id, (tx) => runFinanceOperationInTransaction(tx, user.id, action)),
+        /retroativ|rendimento|juros/i,
+      );
+      assert.equal(await prisma.piggyTransaction.count({ where: { userId: user.id } }), 0);
+      assert.equal(await prisma.entry.count({ where: { userId: user.id } }), 0);
+      assert.equal(await prisma.customTag.count({ where: { userId: user.id } }), 0);
+    }
   } finally {
     await removeTestUser(user.id);
   }

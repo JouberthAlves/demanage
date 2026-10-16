@@ -1,6 +1,6 @@
 import { Prisma } from '@/generated/prisma/client';
 import { badRequest } from '@/http/errors';
-import { dayKeyToDate } from '@/lib/civil-date';
+import { dayKeyOfDate, dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { depositToPiggyBankInTransaction } from '@/lib/piggy/transactions';
 import { validateFinancialDraft } from '@/mcp/finance-preview-validate';
 
@@ -76,6 +76,21 @@ export async function runFinanceOperationInTransaction(
   }
 
   if (action.kind !== 'receive_income') {
+    if (action.dateKey > todayKeyInSaoPaulo()) {
+      throw badRequest('Depósito com data futura não permitido');
+    }
+    const targetBank = await tx.piggyBank.findFirst({
+      where: { userId, id: action.bankId },
+      select: { yieldEnabled: true, interestAccruedThrough: true },
+    });
+    if (targetBank && action.dateKey < todayKeyInSaoPaulo()) {
+      const accruedThrough = targetBank.interestAccruedThrough
+        ? dayKeyOfDate(targetBank.interestAccruedThrough)
+        : null;
+      if (targetBank.yieldEnabled || (accruedThrough !== null && action.dateKey <= accruedThrough)) {
+        throw badRequest('Depósito retroativo não permitido nesse cofrinho com rendimento CDI já calculado');
+      }
+    }
     const deposit = await depositToPiggyBankInTransaction(tx, {
       userId,
       piggyBankId: action.bankId,
