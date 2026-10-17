@@ -97,17 +97,38 @@ test('money movements need a positive amount and a text note', () => {
   );
 });
 
-test('withdrawal credits cash unless user explicitly chooses correction without credit', () => {
+test('ordinary withdrawal defaults to cash credit; corrections need origin and explicit no-credit confirmation', () => {
   assert.deepEqual(parseWithdrawMovement({ amount: 450 }), {
     amount: 450,
     note: null,
     creditToBalance: true,
+    correctionOrigin: undefined,
   });
-  assert.deepEqual(parseWithdrawMovement({ amount: 150, creditToBalance: false }), {
+  assert.deepEqual(parseWithdrawMovement({
+    amount: 150,
+    creditToBalance: false,
+    correctionOrigin: 'not_debited',
+  }), {
     amount: 150,
     note: null,
     creditToBalance: false,
+    correctionOrigin: 'not_debited',
   });
+  assert.deepEqual(parseWithdrawMovement({
+    amount: 450,
+    creditToBalance: false,
+    correctionOrigin: 'debited',
+  }), {
+    amount: 450,
+    note: null,
+    creditToBalance: false,
+    correctionOrigin: 'debited',
+  });
+  assert.equal(status(() => parseWithdrawMovement({ amount: 150, creditToBalance: false })), 400);
+  assert.equal(status(() => parseWithdrawMovement({ amount: 150, correctionOrigin: 'debited' })), 400);
+  assert.equal(status(() => parseWithdrawMovement({ amount: 150, correctionOrigin: 'debited', creditToBalance: true })), 400);
+  assert.equal(status(() => parseWithdrawMovement({ amount: 150, creditToBalance: false, correctionOrigin: 'other' })), 400);
+  assert.equal(status(() => parseWithdrawMovement({ amount: 150, creditToBalance: false, correctionOrigin: null })), 400);
   assert.equal(status(() => parseWithdrawMovement({ amount: 5, creditToBalance: 'yes' })), 400);
   assert.equal(status(() => parseWithdrawMovement({ amount: 5, creditToBalance: null })), 400);
   assert.equal(status(() => parseWithdrawMovement({ amount: 5, deductFromBalance: false })), 400);

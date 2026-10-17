@@ -38,7 +38,9 @@ test('piggy deposits appear as cash debits, while discarding a wrong balance nev
     const second = await send(user.id, `/piggy-banks/${bank.id}/deposit`, 'POST', { amount: 150, deductFromBalance: false });
     assert.equal(second.status, 201);
 
-    const noCredit = await send(user.id, `/piggy-banks/${bank.id}/withdraw`, 'POST', { amount: 150, creditToBalance: false });
+    const noCredit = await send(user.id, `/piggy-banks/${bank.id}/withdraw`, 'POST', {
+      amount: 150, creditToBalance: false, correctionOrigin: 'not_debited',
+    });
     assert.equal(noCredit.status, 201);
     const noCreditTx = noCredit.data.transaction as { entryId: string | null; note: string | null };
     assert.equal(noCreditTx.entryId, null);
@@ -61,7 +63,9 @@ test('piggy deposits appear as cash debits, while discarding a wrong balance nev
     assert.equal(invalid.status, 400);
     const overdraft = await send(user.id, `/piggy-banks/${bank.id}/withdraw`, 'POST', { amount: 9000, creditToBalance: false });
     assert.ok(overdraft.status >= 400);
-    const foreign = await send(other.id, `/piggy-banks/${bank.id}/withdraw`, 'POST', { amount: 20, creditToBalance: false });
+    const foreign = await send(other.id, `/piggy-banks/${bank.id}/withdraw`, 'POST', {
+      amount: 20, creditToBalance: false, correctionOrigin: 'not_debited',
+    });
     assert.equal(foreign.status, 404);
     const txs = await prisma.piggyTransaction.findMany({ where: { userId: user.id } });
     assert.equal(txs.length, 4);

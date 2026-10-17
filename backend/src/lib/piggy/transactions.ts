@@ -136,20 +136,98 @@ type WithdrawParams = {
   piggyBankId: string;
   amount: number;
   creditToBalance?: boolean;
+  correctionOrigin?: 'debited' | 'not_debited';
   note?: string | null;
   date?: Date;
 };
+
+const CORRECTION_PREFIX = 'Correção de saldo incorreto';
+
+async function validateCorrectionSource(
+  tx: Prisma.TransactionClient,
+  bank: Awaited<ReturnType<typeof tx.piggyBank.findFirst>> & { transactions: Array<{
+    type: string;
+    source: string;
+    amount: Prisma.Decimal;
+    expenseId: string | null;
+    entryId: string | null;
+    note: string | null;
+  }> },
+  requested: Prisma.Decimal,
+  origin: 'debited' | 'not_debited',
+  userId: string,
+) {
+  if (bank.yieldEnabled || bank.interestAccruedThrough ||
+      bank.transactions.some((item) => item.type === 'interest')) {
+    throw new PiggyError('CORRECTION_YIELD_BLOCKED');
+  }
+  // Automatic deposits may still be pending. Corrections deliberately skip
+  // catch-up; accepting one for an auto-debit bank would risk stale source data.
+  if (bank.autoDebit || bank.transactions.some((item) =>
+    item.type === 'deposit' && item.source !== 'manual')) {
+    throw new PiggyError('CORRECTION_ORIGIN_AMBIGUOUS');
+  }
+
+  let spentDebited = decimal(0);
+  let spentNotDebited = decimal(0);
+  for (const movement of bank.transactions) {
+    if (movement.type !== 'withdraw') continue;
+    if (movement.note?.startsWith(CORRECTION_PREFIX + ' [origem:debited]') &&
+      movement.entryId) {
+      spentDebited = spentDebited.plus(movement.amount);
+    } else if (movement.note?.startsWith(CORRECTION_PREFIX + ' [origem:not_debited]') &&
+      !movement.entryId) {
+      spentNotDebited = spentNotDebited.plus(movement.amount);
+    } else {
+      // Old or ordinary withdrawals have no source allocation. Without a
+      // source link, a compensating credit might create artificial cash.
+      throw new PiggyError('CORRECTION_ORIGIN_AMBIGUOUS');
+    }
+  }
+  const linkedDeposits = bank.transactions.filter((item) =>
+    item.type === 'deposit' && item.expenseId !== null);
+  const linkedExpenseIds = linkedDeposits.map((item) => item.expenseId!);
+  const linkedExpenses = await tx.expense.findMany({
+    where: { id: { in: linkedExpenseIds }, userId, systemOrigin: 'piggy', archivedAt: null },
+    select: { id: true, amount: true, category: true, frequency: true },
+  });
+  const linkedExpenseById = new Map(linkedExpenses.map((expense) => [expense.id, expense]));
+  let totalDebited = decimal(0);
+  let totalNotDebited = decimal(0);
+  for (const deposit of bank.transactions) {
+    if (deposit.type !== 'deposit') continue;
+    if (deposit.expenseId === null) {
+      totalNotDebited = totalNotDebited.plus(deposit.amount);
+    } else {
+      const expense = linkedExpenseById.get(deposit.expenseId);
+      if (!expense || expense.category !== 'cofrinho' ||
+          expense.frequency !== 'unica' || !expense.amount.equals(deposit.amount)) {
+        throw new PiggyError('CORRECTION_ORIGIN_AMBIGUOUS');
+      }
+      totalDebited = totalDebited.plus(deposit.amount);
+    }
+  }
+
+  const available = origin === 'debited'
+    ? totalDebited.minus(spentDebited)
+    : totalNotDebited.minus(spentNotDebited);
+  if (available.lt(requested)) throw new PiggyError('CORRECTION_ORIGIN_INSUFFICIENT');
+}
 
 export async function withdrawFromPiggyBank({
   userId,
   piggyBankId,
   amount,
   creditToBalance = true,
+  correctionOrigin,
   note = null,
   date = new Date(),
 }: WithdrawParams) {
   const requested = toMoney(amount);
   const day = todayInSaoPaulo(date);
+  if ((!creditToBalance) !== (correctionOrigin !== undefined)) {
+    throw new PiggyError('CORRECTION_ORIGIN_AMBIGUOUS');
+  }
 
   return withUserWriteLockTransaction(userId, async (tx) => {
     const bank = await tx.piggyBank.findFirst({
@@ -164,16 +242,23 @@ export async function withdrawFromPiggyBank({
       throw new PiggyError('INSUFFICIENT_BALANCE');
     }
 
-    const entry = creditToBalance
+    if (correctionOrigin) {
+      await validateCorrectionSource(tx, bank, requested, correctionOrigin, userId);
+    }
+    const entry = (creditToBalance || correctionOrigin === 'debited')
       ? await tx.entry.create({
           data: {
             userId,
-            name: `Resgate · ${bank.name}`,
+            name: correctionOrigin === 'debited'
+              ? `Estorno de depósito · ${bank.name}` : `Resgate · ${bank.name}`,
             amount: requested,
             type: 'outro',
             frequency: 'unica',
             date: day,
             systemOrigin: 'piggy',
+            ...(correctionOrigin === 'debited' ? {
+              notes: CORRECTION_PREFIX + ' [origem:debited] (reversão do débito do depósito)',
+            } : {}),
           },
         })
       : null;
@@ -187,7 +272,10 @@ export async function withdrawFromPiggyBank({
         amount: requested,
         date: day,
         entryId: entry?.id ?? null,
-        note: creditToBalance ? note : note ?? 'Correção de saldo incorreto sem crédito na conta',
+        note: correctionOrigin
+          ? CORRECTION_PREFIX + ' [origem:' + correctionOrigin + ']' +
+            (note ? ' · ' + note : '')
+          : note,
       },
     });
 
