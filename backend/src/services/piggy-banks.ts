@@ -168,11 +168,21 @@ export function parseWithdrawMovement(body: Record<string, unknown>) {
   if (body.creditToBalance === null) {
     throw badRequest('Confirme se o saque deve ser creditado no saldo');
   }
+  if (body.correctionOrigin !== undefined &&
+      body.correctionOrigin !== 'debited' &&
+      body.correctionOrigin !== 'not_debited') {
+    throw badRequest('Origem da correção inválida; informe debited ou not_debited');
+  }
+  const creditToBalance = parseBoolean(body.creditToBalance, 'creditToBalance') ?? true;
+  if ((creditToBalance === false) !== (body.correctionOrigin !== undefined)) {
+    throw badRequest('Correção requer creditToBalance:false e correctionOrigin explícito');
+  }
   const { amount, note } = parseMoneyMovement(body);
   return {
     amount,
     note,
-    creditToBalance: parseBoolean(body.creditToBalance, 'creditToBalance') ?? true,
+    creditToBalance,
+    correctionOrigin: body.correctionOrigin as 'debited' | 'not_debited' | undefined,
   };
 }
 
@@ -423,17 +433,42 @@ export function depositToBank(
 export function withdrawFromBank(
   userId: string,
   id: string,
-  movement: { amount: number; note: string | null; creditToBalance?: boolean },
+  movement: {
+    amount: number;
+    note: string | null;
+    creditToBalance?: boolean;
+    correctionOrigin?: 'debited' | 'not_debited';
+  },
 ) {
-  return withFreshInterest(userId, () =>
+  if ((movement.creditToBalance === false) !== (movement.correctionOrigin !== undefined)) {
+    throw badRequest('Correção requer creditToBalance:false e correctionOrigin explícito');
+  }
+  const operation = () =>
     withdrawFromPiggyBank({
       userId,
       piggyBankId: id,
       amount: movement.amount,
       note: movement.note,
       creditToBalance: movement.creditToBalance ?? true,
-    }),
-  );
+      correctionOrigin: movement.correctionOrigin,
+    });
+  // A correction must not trigger CDI accrual or auto-debit before provenance
+  // verification rejects it; the target bank itself is checked under user lock.
+  if (movement.correctionOrigin) {
+    return operation().catch((error: unknown) => {
+      if (error instanceof PiggyError && error.code === 'CORRECTION_YIELD_BLOCKED') {
+        throw conflict('Correção indisponível para cofrinho com CDI ativo ou rendimento histórico');
+      }
+      if (error instanceof PiggyError && error.code === 'CORRECTION_ORIGIN_AMBIGUOUS') {
+        throw conflict('Origem do saldo ambígua: há saques anteriores, depósitos automáticos ou correções não identificadas');
+      }
+      if (error instanceof PiggyError && error.code === 'CORRECTION_ORIGIN_INSUFFICIENT') {
+        throw conflict('Origem informada não tem depósito suficiente para esta correção');
+      }
+      throw error;
+    });
+  }
+  return withFreshInterest(userId, operation);
 }
 
 export function processAutoDebit(userId: string) {
