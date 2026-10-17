@@ -6,6 +6,7 @@ import {
   todayKey,
 } from '@/lib/dates';
 import { expenseCashAmount } from '@/lib/expense-splits';
+import type { PiggyCashMovement } from '@/lib/piggy-api';
 import type {
   Income,
   MonthlySnapshot,
@@ -23,6 +24,22 @@ function monthFromTimestamp(value: string, now: Date) {
 function monthFromDateOnly(value: string | undefined, now: Date) {
   if (!value || !parseDayKey(value) || value > todayKey(now)) return null;
   return value.slice(0, 7);
+}
+
+/** Cash-only cofrinho movements: opt-out deposits and corrections are excluded by the API. */
+export function piggyCashContribution(
+  movements: PiggyCashMovement[],
+  month: string,
+  type: PiggyCashMovement['type'],
+  now: Date,
+) {
+  return movements.reduce(
+    (sum, movement) =>
+      movement.type === type && monthFromDateOnly(movement.date, now) === month
+        ? sum + movement.amount
+        : sum,
+    0,
+  );
 }
 
 function sumPaidExpenses(
@@ -79,6 +96,7 @@ export function buildMonthlyHistory(
   incomes: Income[],
   now = new Date(),
   monthCount = 6,
+  piggyMovements: PiggyCashMovement[] = [],
 ): MonthlySnapshot[] {
   if (monthCount <= 0) return [];
 
@@ -86,8 +104,10 @@ export function buildMonthlyHistory(
   const currentMonth = currentMonthKey(now);
   for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
     const monthKey = addMonths(currentMonth, -offset);
-    const income = sumReceivedIncome(incomes, monthKey, now);
-    const expense = sumPaidExpenses(expenses, monthKey, now);
+    const income = sumReceivedIncome(incomes, monthKey, now)
+      + piggyCashContribution(piggyMovements, monthKey, 'withdraw', now);
+    const expense = sumPaidExpenses(expenses, monthKey, now)
+      + piggyCashContribution(piggyMovements, monthKey, 'deposit', now);
 
     history.push({
       month: monthKey,

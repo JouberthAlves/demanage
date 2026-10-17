@@ -9,10 +9,12 @@ import {
   deletePiggyBank,
   depositToBank,
   listPiggyBanks,
+  listPiggyCashMovements,
   listPiggyTransactions,
   parseCreatePiggy,
   parseMoneyMovement,
   parseUpdatePiggy,
+  parseWithdrawMovement,
   updatePiggyBank,
   withdrawFromBank,
 } from '@/services/piggy-banks';
@@ -24,6 +26,10 @@ router.get('/', async (req, res) => {
   const includeArchived = queryString(req, 'includeArchived') === 'true';
   const banks = await listPiggyBanks(requireUserId(req), includeArchived);
   res.json(banks.map(serializePiggyBank));
+});
+
+router.get('/cash-movements', async (req, res) => {
+  res.json(await listPiggyCashMovements(requireUserId(req)));
 });
 
 router.get('/:id/transactions', async (req, res) => {
@@ -56,7 +62,7 @@ router.post('/:id/deposit', async (req, res) => {
 });
 
 router.post('/:id/withdraw', async (req, res) => {
-  const movement = parseMoneyMovement(bodyOf(req));
+  const movement = parseWithdrawMovement(bodyOf(req));
   const result = await withdrawFromBank(
     requireUserId(req),
     paramOf(req),

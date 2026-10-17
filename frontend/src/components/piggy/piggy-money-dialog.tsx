@@ -53,8 +53,8 @@ export function PiggyMoneyDialog({
                 ? `Restam ${formatCurrency(bank?.remaining ?? 0)} para a meta. O valor será descontado do saldo do mês, a menos que você escolha não descontar.`
                 : 'O valor será descontado do saldo do mês, a menos que você escolha não descontar.'
               : bank?.isEmergency
-                ? 'Atenção: este é um cofre de emergência. O valor volta ao saldo do mês.'
-                : 'O valor volta ao saldo do mês como entrada de resgate.'}
+                ? 'Atenção: cofre de emergência. Saques voltam ao saldo; correções removem sem creditar.'
+                : 'Sacar devolve o valor ao saldo. Excluir saldo incorreto remove apenas do cofrinho.'}
           </DialogDescription>
         </DialogHeader>
         {/* Content unmounts when closed; the key resets state per bank/mode. */}
@@ -82,6 +82,7 @@ function PiggyMoneyForm({
   const withdraw = useWithdrawPiggyBank();
   const [amount, setAmount] = useState('');
   const [skipBalanceDeduction, setSkipBalanceDeduction] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const submitting = deposit.isPending || withdraw.isPending;
 
   const monthlyHint = useMemo(() => {
@@ -95,8 +96,7 @@ function PiggyMoneyForm({
     };
   }, [bank, mode]);
 
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
+  async function submitAmount(creditToBalance: boolean) {
     if (!bank) return;
 
     const value = parseCurrencyInput(amount);
@@ -121,15 +121,20 @@ function PiggyMoneyForm({
           toast.success(`Meta de "${bank.name}" atingida!`);
         }
       } else {
-        await withdraw.mutateAsync({ id: bank.id, amount: value });
-        toast.success(
-          `Resgatado ${formatCurrency(value)} — valor voltou ao saldo`,
-        );
+        await withdraw.mutateAsync({ id: bank.id, amount: value, creditToBalance });
+        toast.success(creditToBalance
+          ? `Resgatado ${formatCurrency(value)} — valor voltou ao saldo`
+          : `Removido ${formatCurrency(value)} do cofrinho, sem crédito no saldo`);
       }
       onClose();
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Operação não concluída'));
     }
+  }
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    void submitAmount(!confirmDiscard);
   }
 
   const isDeposit = mode === 'deposit';
@@ -185,7 +190,8 @@ function PiggyMoneyForm({
                 className='text-xs text-muted-foreground'
               >
                 Marcando esta opção, o cofrinho recebe o valor sem criar uma
-                despesa no mês atual. Ao sacar, o resgate ainda volta ao saldo.
+                despesa no mês atual. Saques normais devolvem ao saldo; para
+                desfazer um depósito errado, use “Excluir saldo incorreto”.
               </p>
             </div>
           </div>
@@ -193,9 +199,29 @@ function PiggyMoneyForm({
       ) : null}
 
       {!isDeposit && bank ? (
-        <p className='text-sm text-muted-foreground'>
-          Disponível no cofre: {formatCurrency(bank.balance)}
-        </p>
+        <>
+          <p className='text-sm text-muted-foreground'>
+            Disponível no cofre: {formatCurrency(bank.balance)}
+          </p>
+          {confirmDiscard ? (
+            <div role='alert' className='rounded-lg border border-neon-green/40 bg-neon-green/10 p-3 text-sm'>
+              <p className='font-semibold text-neon-green'>Confirmar correção de saldo</p>
+              <p className='mt-1 text-muted-foreground'>
+                O valor será retirado do cofrinho sem entrar na sua conta. O histórico
+                da correção será preservado. Use apenas para saldo registrado por engano.
+              </p>
+              <p className='mt-2 text-muted-foreground'>
+                Esta opção não estorna uma despesa de depósito já descontada do saldo.
+                Se o problema era só a exibição no Dashboard, não exclua o valor.
+              </p>
+              {bank.yieldEnabled && bank.cdiPercent > 0 ? (
+                <p className='mt-2 text-muted-foreground'>
+                  Rendimentos CDI acumulados anteriormente não serão recalculados por esta correção.
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </>
       ) : null}
 
       <DialogFooter>
@@ -208,12 +234,24 @@ function PiggyMoneyForm({
         </Button>
         <Button
           type='submit'
-          variant={isDeposit ? 'default' : 'destructive'}
+          variant={isDeposit ? 'default' : confirmDiscard ? 'default' : 'destructive'}
+          className={!isDeposit && confirmDiscard ? 'bg-neon-green text-black hover:bg-neon-green/90' : undefined}
           disabled={submitting}
         >
           {submitting ? <Spinner data-icon='inline-start' /> : null}
-          {isDeposit ? 'Confirmar depósito' : 'Sacar'}
+          {isDeposit ? 'Confirmar depósito' : confirmDiscard ? 'Confirmar exclusão' : 'Sacar'}
         </Button>
+        {!isDeposit ? (
+          <Button
+            type='button'
+            variant='outline'
+            className={confirmDiscard ? undefined : 'border-neon-green/50 text-neon-green hover:bg-neon-green/10'}
+            disabled={submitting}
+            onClick={() => setConfirmDiscard((current) => !current)}
+          >
+            {confirmDiscard ? 'Voltar ao saque' : 'Excluir saldo incorreto'}
+          </Button>
+        ) : null}
       </DialogFooter>
     </form>
   );

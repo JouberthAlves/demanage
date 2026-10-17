@@ -1,6 +1,12 @@
 import { api } from '@/lib/api';
 import type { PiggyBank, PiggyTransaction } from '@/types/finance';
 
+export type PiggyCashMovement = {
+  type: 'deposit' | 'withdraw';
+  amount: number;
+  date: string;
+};
+
 export type PiggyBankPayload = {
   name: string;
   goalAmount: number | null;
@@ -17,6 +23,11 @@ export async function listPiggyBanks(includeArchived = false) {
   const { data } = await api.get<PiggyBank[]>('/piggy-banks', {
     params: includeArchived ? { includeArchived: true } : undefined,
   });
+  return data;
+}
+
+export async function listPiggyCashMovements() {
+  const { data } = await api.get<PiggyCashMovement[]>('/piggy-banks/cash-movements');
   return data;
 }
 
@@ -52,7 +63,7 @@ export async function depositPiggyBank(
 
 export async function withdrawPiggyBank(
   id: string,
-  payload: { amount: number; note?: string },
+  payload: { amount: number; note?: string; creditToBalance?: boolean },
 ) {
   const { data } = await api.post<{
     bank: PiggyBank;
