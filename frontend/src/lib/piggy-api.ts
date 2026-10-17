@@ -7,6 +7,8 @@ export type PiggyCashMovement = {
   date: string;
 };
 
+export type PiggyCorrectionOrigin = 'not_debited' | 'debited';
+
 export type PiggyBankPayload = {
   name: string;
   goalAmount: number | null;
@@ -63,7 +65,12 @@ export async function depositPiggyBank(
 
 export async function withdrawPiggyBank(
   id: string,
-  payload: { amount: number; note?: string; creditToBalance?: boolean },
+  payload: {
+    amount: number;
+    note?: string;
+    creditToBalance?: boolean;
+    correctionOrigin?: PiggyCorrectionOrigin;
+  },
 ) {
   const { data } = await api.post<{
     bank: PiggyBank;

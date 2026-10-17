@@ -13,6 +13,7 @@ import { ExpenseTable } from '@/components/expenses/expense-table';
 import { useExpenseActions } from '@/components/expenses/use-expense-actions';
 import { PageHeader } from '@/components/layout/page-header';
 import { SectionPanel } from '@/components/layout/section-panel';
+import { PiggyCashStatus } from '@/components/shared/piggy-cash-status';
 import {
   ListEmpty,
   ListError,
@@ -24,6 +25,7 @@ import { useCardList } from '@/hooks/use-cards';
 import { useExpenses } from '@/hooks/use-expenses';
 import { useFinancialNow } from '@/hooks/use-financial-now';
 import { useMonthlyExpenses } from '@/hooks/use-monthly-history';
+import { usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { matchesListFilter } from '@/lib/list-filter';
 import type { RecurringExpense } from '@/types/finance';
@@ -32,6 +34,7 @@ export function ExpensesPage() {
   const { data: expenses = [], isLoading, isError } = useExpenses();
   const cards = useCardList();
   const total = useMonthlyExpenses();
+  const piggyCash = usePiggyCashMovements();
   const now = useFinancialNow();
   const actions = useExpenseActions(now);
 
@@ -76,11 +79,19 @@ export function ExpensesPage() {
         }
       />
 
-      <ExpenseSummaryHero
-        count={expenses.length}
-        total={total}
-        filteredTotal={filteredTotal}
-      />
+      {!piggyCash.data || piggyCash.isError ? (
+        <PiggyCashStatus
+          isError={piggyCash.isError}
+          isFetching={piggyCash.isFetching}
+          onRetry={() => void piggyCash.refetch()}
+        />
+      ) : (
+        <ExpenseSummaryHero
+          count={expenses.length}
+          total={total}
+          filteredTotal={filteredTotal}
+        />
+      )}
 
       <SectionPanel>
         <ExpenseFiltersBar

@@ -11,6 +11,7 @@ import {
   listPiggyCashMovements,
   listPiggyTransactions,
   type PiggyBankPayload,
+  type PiggyCorrectionOrigin,
   processPiggyAutoDebit,
   updatePiggyBank,
   withdrawPiggyBank,
@@ -92,6 +93,7 @@ type MoneyMovement = {
   note?: string;
   deductFromBalance?: boolean;
   creditToBalance?: boolean;
+  correctionOrigin?: PiggyCorrectionOrigin;
 };
 
 export function useCreatePiggyBank() {
@@ -118,8 +120,8 @@ export function useDepositPiggyBank() {
 }
 
 export function useWithdrawPiggyBank() {
-  return usePiggyMutation(({ id, amount, note, creditToBalance }: MoneyMovement) =>
-    withdrawPiggyBank(id, { amount, note, creditToBalance }),
+  return usePiggyMutation(({ id, amount, note, creditToBalance, correctionOrigin }: MoneyMovement) =>
+    withdrawPiggyBank(id, { amount, note, creditToBalance, correctionOrigin }),
   );
 }
 
