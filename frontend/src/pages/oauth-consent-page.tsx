@@ -35,6 +35,7 @@ export function OAuthConsentPage() {
 
   return (
     <main className='flex min-h-screen items-center justify-center bg-background p-4 text-foreground'>
+      <meta name='referrer' content='same-origin' />
       <section className='w-full max-w-lg space-y-6 rounded-2xl border border-border bg-card p-7 shadow-lg'>
         <header className='space-y-2'>
           <p className='text-xs font-semibold uppercase tracking-wide text-emerald-400'>deManage · Integrações</p>
