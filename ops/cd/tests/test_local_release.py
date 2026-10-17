@@ -6,7 +6,7 @@ import json
 import sys
 import unittest
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,7 +20,7 @@ PREVIOUS = "b" * 40
 BACKEND = "ghcr.io/bielxdh3/demanage-backend@sha256:" + "c" * 64
 FRONTEND = "ghcr.io/bielxdh3/demanage-frontend@sha256:" + "d" * 64
 PROOF = "/opt/demanage/backups/cd-20261017T140000Z-" + TARGET[:12] + "/local-migration-rehearsal.json"
-BACKUP = str(Path(PROOF).parent / "demanage.dump")
+BACKUP = str(PurePosixPath(PROOF).parent / "demanage.dump")
 CHECKSUM = "e" * 64
 
 
@@ -112,6 +112,12 @@ class LocalReleaseApprovalTests(unittest.TestCase):
             loaded, checksum = approval.read_migration_proof(PROOF, PREVIOUS, TARGET, BACKEND)
         self.assertEqual(loaded, data)
         self.assertEqual(len(checksum), 64)
+
+    def test_rehearsal_uses_posix_path_even_on_windows(self):
+        self.assertEqual(
+            BACKUP,
+            "/opt/demanage/backups/cd-20261017T140000Z-" + TARGET[:12] + "/demanage.dump",
+        )
 
     def test_rehearsal_refuses_changed_dump(self):
         data = migration_evidence()
