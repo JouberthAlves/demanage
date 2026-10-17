@@ -163,6 +163,7 @@ $containerName = "demanage-ci-$sessionSuffix"
 $originalTz = [Environment]::GetEnvironmentVariable('TZ', 'Process')
 $originalJwtSecret = [Environment]::GetEnvironmentVariable('JWT_SECRET', 'Process')
 $originalAppUrl = [Environment]::GetEnvironmentVariable('APP_URL', 'Process')
+$ciCommit = $null
 
 try {
   Assert-NoInheritedDatabaseUrls
@@ -172,6 +173,12 @@ try {
   }
 
   Assert-CiTooling $backendDirectory
+  $ciCommit = (& git -C $repoRoot rev-parse HEAD).Trim()
+  if ($LASTEXITCODE -ne 0 -or $ciCommit -notmatch '^[0-9a-f]{40}$') { throw 'Cannot identify current Git commit.' }
+  & git -C $repoRoot diff --quiet
+  if ($LASTEXITCODE -ne 0) { throw 'Tracked worktree changes present: CI evidence requires a clean commit.' }
+  & git -C $repoRoot diff --cached --quiet
+  if ($LASTEXITCODE -ne 0) { throw 'Staged changes present: CI evidence requires a clean commit.' }
   Assert-MigrationTimestamps (Join-Path $backendDirectory 'prisma/migrations')
   if ([string]::IsNullOrWhiteSpace($LogDirectory)) {
     $LogDirectory = Join-Path $repoRoot "artifacts/ci-local/$([DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss'))-$sessionSuffix"
@@ -275,6 +282,32 @@ try {
   foreach ($step in $steps) {
     Invoke-CiStep -Name $step.Name -Executable $step.Executable -Arguments $step.Arguments -WorkingDirectory $step.WorkingDirectory -LogDirectory $LogDirectory
   }
+  if ((& git -C $repoRoot rev-parse HEAD).Trim() -cne $ciCommit) {
+    throw 'Git revision changed during the local CI run; refusing evidence.'
+  }
+  & git -C $repoRoot diff --quiet
+  if ($LASTEXITCODE -ne 0) { throw 'Tracked worktree changed during CI; refusing evidence.' }
+  & git -C $repoRoot diff --cached --quiet
+  if ($LASTEXITCODE -ne 0) { throw 'Git index changed during CI; refusing evidence.' }
+  # Evidence is emitted only after every selected gate passed; bind each log
+  # to the exact commit, making later local-release review tamper-evident.
+  $proofSteps = @()
+  foreach ($step in $steps) {
+    $logPath = Join-Path $LogDirectory ($step.Name + '.log')
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $logPath).Hash.ToLowerInvariant()
+    $proofSteps += @{ name = $step.Name; sha256 = $hash }
+  }
+  $ciEvidence = @{
+    version = 1
+    source_commit = $ciCommit
+    completed_at = [DateTime]::UtcNow.ToString('o')
+    image_builds = [bool]$BuildImages
+    steps = $proofSteps
+  }
+  $evidencePath = Join-Path $LogDirectory 'local-ci-evidence.json'
+  if (Test-Path -LiteralPath $evidencePath) { throw 'Refusing to replace an existing CI evidence file.' }
+  [IO.File]::WriteAllText($evidencePath, ($ciEvidence | ConvertTo-Json -Depth 12), (New-Object System.Text.UTF8Encoding($false)))
+  Write-Host "CI evidence: $evidencePath"
 } catch {
   Write-Error "FAIL: $($_.Exception.Message)"
   exit 1
