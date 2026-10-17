@@ -14,3 +14,18 @@ test('OAuth reverse proxy forwards the trusted public HTTPS scheme, not internal
   assert.doesNotMatch(nginx, /proxy_set_header\s+X-Forwarded-Proto\s+\$scheme;/);
   assert.doesNotMatch(nginx, /proxy_set_header\s+X-Forwarded-Proto\s+\$http_x_forwarded_proto;/);
 });
+
+test('OAuth interaction cookies are scoped to their public API endpoints', () => {
+  const apiLocation = nginx.split('  location /api/ {')[1]?.split('  location / {')[0];
+  assert.ok(apiLocation, 'API proxy location must exist');
+  assert.match(
+    apiLocation,
+    /proxy_cookie_path\s+\/oauth\/consent\s+\/api\/oauth\/interaction\/;/,
+    'Interaction cookie must reach the authenticated consent API, not the SPA route',
+  );
+  assert.match(
+    apiLocation,
+    /proxy_cookie_path\s+\/oauth\/auth\/\s+\/api\/oauth\/auth\/;/,
+    'Resume cookie must reach the public authorization continuation endpoint',
+  );
+});
