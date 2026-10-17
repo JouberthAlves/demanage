@@ -47,6 +47,11 @@ function transactionLabel(transaction: PiggyTransaction) {
     if (transaction.source === 'auto_debit') return 'Depósito automático';
     return transaction.expenseId === null ? 'Depósito sem desconto' : 'Depósito';
   }
+  if (transaction.note?.startsWith('Correção de saldo incorreto')) {
+    return transaction.entryId === null
+      ? 'Correção de saldo (sem desconto original)'
+      : 'Correção de saldo (desconto estornado)';
+  }
   return transaction.entryId === null ? 'Correção de saldo (sem crédito)' : 'Saque';
 }
 
@@ -318,7 +323,7 @@ export function PiggyPage() {
                                     ? ` · CDI ${transaction.cdiRate}% · ${transaction.cdiPercent ?? bank.cdiPercent}% aplicado`
                                     : ''}
                                 </p>
-                                {transaction.type === 'withdraw' && transaction.entryId === null && transaction.note ? (
+                                {transaction.type === 'withdraw' && transaction.note?.startsWith('Correção de saldo incorreto') ? (
                                   <p className='text-xs text-muted-foreground'>{transaction.note}</p>
                                 ) : null}
                                 {transaction.type === 'interest' && transaction.baseBalance != null ? (

@@ -8,6 +8,7 @@ import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { PatrimonyBaseForm } from '@/components/patrimony/patrimony-base-form';
 import { PatrimonyHistoryChart } from '@/components/patrimony/patrimony-history-chart';
+import { PiggyCashStatus } from '@/components/shared/piggy-cash-status';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
@@ -20,6 +21,7 @@ import {
   usePatrimonyHistory,
   usePatrimonySettings,
 } from '@/hooks/use-patrimony';
+import { usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import { todayKey } from '@/lib/dates';
 import { formatCurrency } from '@/lib/format';
 
@@ -61,6 +63,7 @@ function PatrimonyShell({ children }: { children: React.ReactNode }) {
 
 export function PatrimonyPage() {
   const now = useFinancialNow();
+  const piggyCash = usePiggyCashMovements();
   const settingsQuery = usePatrimonySettings();
   const settings = settingsQuery.data;
   const dashboardBalance = useMonthlyIncome() - useMonthlyExpenses();
@@ -112,6 +115,19 @@ export function PatrimonyPage() {
             </Button>
           </div>
         </SectionPanel>
+      </PatrimonyShell>
+    );
+  }
+
+  if (!piggyCash.data || piggyCash.isError) {
+    return (
+      <PatrimonyShell>
+        <PageHeader title='Patrimônio' description='Resumo patrimonial e movimentações' />
+        <PiggyCashStatus
+          isError={piggyCash.isError}
+          isFetching={piggyCash.isFetching}
+          onRetry={() => void piggyCash.refetch()}
+        />
       </PatrimonyShell>
     );
   }

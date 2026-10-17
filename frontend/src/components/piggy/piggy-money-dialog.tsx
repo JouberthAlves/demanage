@@ -22,6 +22,7 @@ import { getApiErrorMessage } from '@/lib/api-error';
 import { celebrateGoal } from '@/lib/confetti';
 import { formatCurrency, parseCurrencyInput } from '@/lib/format';
 import type { depositPiggyBank } from '@/lib/piggy-api';
+import type { PiggyCorrectionOrigin } from '@/lib/piggy-api';
 import { piggyHasGoal } from '@/lib/piggy-math';
 import type { PiggyBank } from '@/types/finance';
 
@@ -83,6 +84,7 @@ function PiggyMoneyForm({
   const [amount, setAmount] = useState('');
   const [skipBalanceDeduction, setSkipBalanceDeduction] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [correctionOrigin, setCorrectionOrigin] = useState<PiggyCorrectionOrigin | null>(null);
   const submitting = deposit.isPending || withdraw.isPending;
 
   const monthlyHint = useMemo(() => {
@@ -98,6 +100,10 @@ function PiggyMoneyForm({
 
   async function submitAmount(creditToBalance: boolean) {
     if (!bank) return;
+    if (!creditToBalance && !correctionOrigin) {
+      toast.error('Informe se o depósito original descontou do seu saldo');
+      return;
+    }
 
     const value = parseCurrencyInput(amount);
     if (!value || value <= 0) {
@@ -121,10 +127,17 @@ function PiggyMoneyForm({
           toast.success(`Meta de "${bank.name}" atingida!`);
         }
       } else {
-        await withdraw.mutateAsync({ id: bank.id, amount: value, creditToBalance });
+        await withdraw.mutateAsync({
+          id: bank.id,
+          amount: value,
+          creditToBalance,
+          correctionOrigin: creditToBalance ? undefined : correctionOrigin ?? undefined,
+        });
         toast.success(creditToBalance
           ? `Resgatado ${formatCurrency(value)} — valor voltou ao saldo`
-          : `Removido ${formatCurrency(value)} do cofrinho, sem crédito no saldo`);
+          : correctionOrigin === 'debited'
+            ? `Depósito incorreto desfeito: ${formatCurrency(value)} removidos e desconto anterior compensado`
+            : `Removido ${formatCurrency(value)} do cofrinho sem movimentar o saldo`);
       }
       onClose();
     } catch (err) {
@@ -207,16 +220,50 @@ function PiggyMoneyForm({
             <div role='alert' className='rounded-lg border border-neon-green/40 bg-neon-green/10 p-3 text-sm'>
               <p className='font-semibold text-neon-green'>Confirmar correção de saldo</p>
               <p className='mt-1 text-muted-foreground'>
-                O valor será retirado do cofrinho sem entrar na sua conta. O histórico
-                da correção será preservado. Use apenas para saldo registrado por engano.
+                O valor será retirado do cofrinho. Para manter seu saldo correto,
+                informe se o depósito original foi descontado. A correção ficará no histórico.
               </p>
-              <p className='mt-2 text-muted-foreground'>
-                Esta opção não estorna uma despesa de depósito já descontada do saldo.
-                Se o problema era só a exibição no Dashboard, não exclua o valor.
+              <fieldset className='mt-3 space-y-2'>
+                <legend className='font-medium'>Como o dinheiro entrou no cofrinho?</legend>
+                <label className='flex cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2'>
+                  <input
+                    type='radio'
+                    name='correction-origin'
+                    value='not_debited'
+                    checked={correctionOrigin === 'not_debited'}
+                    onChange={() => setCorrectionOrigin('not_debited')}
+                    className='mt-1 accent-green-500'
+                  />
+                  <span>
+                    <span className='font-medium'>Sem descontar do saldo</span>
+                    <span className='block text-xs text-muted-foreground'>
+                      Apaga o valor incorreto do cofrinho sem aumentar nem reduzir seu saldo.
+                    </span>
+                  </span>
+                </label>
+                <label className='flex cursor-pointer items-start gap-2 rounded-lg border border-border px-3 py-2'>
+                  <input
+                    type='radio'
+                    name='correction-origin'
+                    value='debited'
+                    checked={correctionOrigin === 'debited'}
+                    onChange={() => setCorrectionOrigin('debited')}
+                    className='mt-1 accent-green-500'
+                  />
+                  <span>
+                    <span className='font-medium'>O depósito descontou do meu saldo</span>
+                    <span className='block text-xs text-muted-foreground'>
+                      Desfaz o desconto antigo junto com o depósito, sem criar dinheiro extra.
+                    </span>
+                  </span>
+                </label>
+              </fieldset>
+              <p className='mt-2 text-xs text-muted-foreground'>
+                Se o erro era só o número exibido no Dashboard, não exclua um depósito válido.
               </p>
               {bank.yieldEnabled && bank.cdiPercent > 0 ? (
                 <p className='mt-2 text-muted-foreground'>
-                  Rendimentos CDI acumulados anteriormente não serão recalculados por esta correção.
+                  Cofrinhos com CDI exigem revisão dos juros antes de desfazer depósitos.
                 </p>
               ) : null}
             </div>
@@ -236,7 +283,7 @@ function PiggyMoneyForm({
           type='submit'
           variant={isDeposit ? 'default' : confirmDiscard ? 'default' : 'destructive'}
           className={!isDeposit && confirmDiscard ? 'bg-neon-green text-black hover:bg-neon-green/90' : undefined}
-          disabled={submitting}
+          disabled={submitting || (!isDeposit && confirmDiscard && correctionOrigin === null)}
         >
           {submitting ? <Spinner data-icon='inline-start' /> : null}
           {isDeposit ? 'Confirmar depósito' : confirmDiscard ? 'Confirmar exclusão' : 'Sacar'}
@@ -247,7 +294,10 @@ function PiggyMoneyForm({
             variant='outline'
             className={confirmDiscard ? undefined : 'border-neon-green/50 text-neon-green hover:bg-neon-green/10'}
             disabled={submitting}
-            onClick={() => setConfirmDiscard((current) => !current)}
+            onClick={() => {
+              setConfirmDiscard((current) => !current);
+              setCorrectionOrigin(null);
+            }}
           >
             {confirmDiscard ? 'Voltar ao saque' : 'Excluir saldo incorreto'}
           </Button>
