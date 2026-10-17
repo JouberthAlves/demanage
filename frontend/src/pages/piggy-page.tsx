@@ -47,7 +47,7 @@ function transactionLabel(transaction: PiggyTransaction) {
     if (transaction.source === 'auto_debit') return 'Depósito automático';
     return transaction.expenseId === null ? 'Depósito sem desconto' : 'Depósito';
   }
-  return 'Saque';
+  return transaction.entryId === null ? 'Correção de saldo (sem crédito)' : 'Saque';
 }
 
 export function PiggyPage() {
@@ -318,6 +318,9 @@ export function PiggyPage() {
                                     ? ` · CDI ${transaction.cdiRate}% · ${transaction.cdiPercent ?? bank.cdiPercent}% aplicado`
                                     : ''}
                                 </p>
+                                {transaction.type === 'withdraw' && transaction.entryId === null && transaction.note ? (
+                                  <p className='text-xs text-muted-foreground'>{transaction.note}</p>
+                                ) : null}
                                 {transaction.type === 'interest' && transaction.baseBalance != null ? (
                                   <p className='text-xs text-muted-foreground'>
                                     Base {formatCurrency(transaction.baseBalance)} → {formatCurrency(transaction.resultingBalance ?? transaction.baseBalance)}

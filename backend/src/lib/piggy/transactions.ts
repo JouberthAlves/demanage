@@ -135,6 +135,7 @@ type WithdrawParams = {
   userId: string;
   piggyBankId: string;
   amount: number;
+  creditToBalance?: boolean;
   note?: string | null;
   date?: Date;
 };
@@ -143,6 +144,7 @@ export async function withdrawFromPiggyBank({
   userId,
   piggyBankId,
   amount,
+  creditToBalance = true,
   note = null,
   date = new Date(),
 }: WithdrawParams) {
@@ -162,17 +164,19 @@ export async function withdrawFromPiggyBank({
       throw new PiggyError('INSUFFICIENT_BALANCE');
     }
 
-    const entry = await tx.entry.create({
-      data: {
-        userId,
-        name: `Resgate · ${bank.name}`,
-        amount: requested,
-        type: 'outro',
-        frequency: 'unica',
-        date: day,
-        systemOrigin: 'piggy',
-      },
-    });
+    const entry = creditToBalance
+      ? await tx.entry.create({
+          data: {
+            userId,
+            name: `Resgate · ${bank.name}`,
+            amount: requested,
+            type: 'outro',
+            frequency: 'unica',
+            date: day,
+            systemOrigin: 'piggy',
+          },
+        })
+      : null;
 
     const piggyTx = await tx.piggyTransaction.create({
       data: {
@@ -182,8 +186,8 @@ export async function withdrawFromPiggyBank({
         source: 'manual',
         amount: requested,
         date: day,
-        entryId: entry.id,
-        note,
+        entryId: entry?.id ?? null,
+        note: creditToBalance ? note : note ?? 'Correção de saldo incorreto sem crédito na conta',
       },
     });
 

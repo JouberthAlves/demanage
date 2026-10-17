@@ -10,6 +10,7 @@ import {
   parseCdiPercent,
   parseCreatePiggy,
   parseMoneyMovement,
+  parseWithdrawMovement,
   parseUpdatePiggy,
 } from './piggy-banks';
 
@@ -94,4 +95,20 @@ test('money movements need a positive amount and a text note', () => {
     status(() => parseMoneyMovement({ amount: 10, deductFromBalance: 'nope' })),
     400,
   );
+});
+
+test('withdrawal credits cash unless user explicitly chooses correction without credit', () => {
+  assert.deepEqual(parseWithdrawMovement({ amount: 450 }), {
+    amount: 450,
+    note: null,
+    creditToBalance: true,
+  });
+  assert.deepEqual(parseWithdrawMovement({ amount: 150, creditToBalance: false }), {
+    amount: 150,
+    note: null,
+    creditToBalance: false,
+  });
+  assert.equal(status(() => parseWithdrawMovement({ amount: 5, creditToBalance: 'yes' })), 400);
+  assert.equal(status(() => parseWithdrawMovement({ amount: 5, creditToBalance: null })), 400);
+  assert.equal(status(() => parseWithdrawMovement({ amount: 5, deductFromBalance: false })), 400);
 });

@@ -6,6 +6,7 @@ import {
 } from '@/http/errors';
 import { parseAmount, parseRequiredText } from '@/http/parsers';
 import { parseBoolean, parseOptionalNote } from '@/http/request';
+import { dayKeyOfDate } from '@/lib/civil-date';
 import { PiggyError } from '@/lib/errors';
 import {
   balanceFromTransactions,
@@ -160,6 +161,21 @@ export function parseMoneyMovement(body: Record<string, unknown>) {
   };
 }
 
+export function parseWithdrawMovement(body: Record<string, unknown>) {
+  if (body.deductFromBalance !== undefined) {
+    throw badRequest('Use creditToBalance para saque ou correção de saldo');
+  }
+  if (body.creditToBalance === null) {
+    throw badRequest('Confirme se o saque deve ser creditado no saldo');
+  }
+  const { amount, note } = parseMoneyMovement(body);
+  return {
+    amount,
+    note,
+    creditToBalance: parseBoolean(body.creditToBalance, 'creditToBalance') ?? true,
+  };
+}
+
 // -------------------------------------------------------------- operations
 
 export function listPiggyBanks(userId: string, includeArchived: boolean) {
@@ -168,6 +184,26 @@ export function listPiggyBanks(userId: string, includeArchived: boolean) {
     include: { transactions: true },
     orderBy: { createdAt: 'desc' },
   });
+}
+
+/** Only linked movements actually change the cash balance; no-double-counting. */
+export async function listPiggyCashMovements(userId: string) {
+  const transactions = await prisma.piggyTransaction.findMany({
+    where: {
+      userId,
+      OR: [
+        { type: 'deposit', expenseId: { not: null } },
+        { type: 'withdraw', entryId: { not: null } },
+      ],
+    },
+    select: { type: true, amount: true, date: true },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
+  });
+  return transactions.map((transaction) => ({
+    type: transaction.type,
+    amount: Number(transaction.amount),
+    date: dayKeyOfDate(transaction.date),
+  }));
 }
 
 export async function listPiggyTransactions(userId: string, id: string) {
@@ -387,7 +423,7 @@ export function depositToBank(
 export function withdrawFromBank(
   userId: string,
   id: string,
-  movement: { amount: number; note: string | null },
+  movement: { amount: number; note: string | null; creditToBalance?: boolean },
 ) {
   return withFreshInterest(userId, () =>
     withdrawFromPiggyBank({
@@ -395,6 +431,7 @@ export function withdrawFromBank(
       piggyBankId: id,
       amount: movement.amount,
       note: movement.note,
+      creditToBalance: movement.creditToBalance ?? true,
     }),
   );
 }

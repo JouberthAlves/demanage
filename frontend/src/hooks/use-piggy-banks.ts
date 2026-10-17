@@ -8,6 +8,7 @@ import {
   deletePiggyBank,
   depositPiggyBank,
   listPiggyBanks,
+  listPiggyCashMovements,
   listPiggyTransactions,
   type PiggyBankPayload,
   processPiggyAutoDebit,
@@ -65,6 +66,14 @@ export function usePiggyTransactions(piggyBankId: string | null) {
   });
 }
 
+export function usePiggyCashMovements() {
+  return useQuery({
+    queryKey: queryKeys.piggyBanks.cashMovements,
+    queryFn: listPiggyCashMovements,
+    staleTime: 60_000,
+  });
+}
+
 // Every piggy mutation can move money (deposits, withdrawals, deleting or
 // archiving a bank with a balance), so all of them refresh related ledgers.
 function usePiggyMutation<TVariables, TResult>(
@@ -82,6 +91,7 @@ type MoneyMovement = {
   amount: number;
   note?: string;
   deductFromBalance?: boolean;
+  creditToBalance?: boolean;
 };
 
 export function useCreatePiggyBank() {
@@ -108,8 +118,8 @@ export function useDepositPiggyBank() {
 }
 
 export function useWithdrawPiggyBank() {
-  return usePiggyMutation(({ id, amount, note }: MoneyMovement) =>
-    withdrawPiggyBank(id, { amount, note }),
+  return usePiggyMutation(({ id, amount, note, creditToBalance }: MoneyMovement) =>
+    withdrawPiggyBank(id, { amount, note, creditToBalance }),
   );
 }
 
