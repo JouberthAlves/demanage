@@ -10,8 +10,9 @@ import { TopExpensesBarChart } from '@/components/dashboard/top-expenses-bar-cha
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
+import { Button } from '@/components/ui/button';
 import { useFinanceSummary } from '@/hooks/use-monthly-history';
-import { usePiggyBanks } from '@/hooks/use-piggy-banks';
+import { usePiggyBanks, usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import {
   formatCurrencyCompact,
   formatPercent,
@@ -25,6 +26,7 @@ export function DashboardPage() {
   const { history, income, expenses, averageExpense, recurringShare } =
     useFinanceSummary();
   const { data: piggyBanks = [] } = usePiggyBanks();
+  const piggyCashQuery = usePiggyCashMovements();
   const balance = income - expenses;
   const hasHistory = history.slice(0, -1).some((month) => month.hasActivity);
   const piggyTotal = useMemo(
@@ -34,6 +36,27 @@ export function DashboardPage() {
   const balanceLabel = formatCurrencyCompact(balance);
   const piggyLabel = formatCurrencyCompact(piggyTotal);
   const shareLabel = formatPercent(recurringShare);
+
+  // Ordinary income/expense endpoints intentionally omit internal transfers.
+  // Without this query the displayed cash total is wrong, not genuinely zero.
+  if (piggyCashQuery.isError || !piggyCashQuery.data) {
+    return (
+      <div className='space-y-6'>
+        <title>Dashboard | deManage</title>
+        <PageHeader title={`Olá, ${getFirstName(userName)}`} description='Resumo financeiro até hoje' />
+        <div role={piggyCashQuery.isError ? 'alert' : 'status'} className='rounded-xl border border-border p-5 space-y-3'>
+          <p className='font-medium'>
+            {piggyCashQuery.isError
+              ? 'Saldo indisponível: não foi possível consultar as movimentações dos cofrinhos.'
+              : 'Atualizando o saldo com as movimentações dos cofrinhos…'}
+          </p>
+          {piggyCashQuery.isError ? (
+            <Button variant='outline' onClick={() => void piggyCashQuery.refetch()}>Tentar novamente</Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className='space-y-6'>

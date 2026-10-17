@@ -12,6 +12,7 @@ export const queryKeys = {
     all: ['piggy-banks'] as const,
     list: (includeArchived: boolean) =>
       ['piggy-banks', 'list', { includeArchived }] as const,
+    cashMovements: ['piggy-banks', 'cash-movements'] as const,
     transactions: (piggyBankId: string | null) =>
       ['piggy-banks', piggyBankId, 'transactions'] as const,
   },
