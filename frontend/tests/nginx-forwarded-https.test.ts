@@ -29,3 +29,19 @@ test('OAuth interaction cookies are scoped to their public API endpoints', () =>
     'Resume cookie must reach the public authorization continuation endpoint',
   );
 });
+
+test('OAuth resume redirects reach the public API without rewriting external client callbacks', () => {
+  const apiLocation = nginx.split('  location /api/ {')[1]?.split('  location / {')[0];
+  assert.ok(apiLocation, 'API proxy location must exist');
+  assert.match(
+    apiLocation,
+    /proxy_redirect\s+\$APP_URL\/oauth\/auth\/\s+\$APP_URL\/api\/oauth\/auth\/;/,
+    'Absolute provider resume redirects must stay on the public API origin',
+  );
+  assert.match(
+    apiLocation,
+    /proxy_redirect\s+\/oauth\/auth\/\s+\$APP_URL\/api\/oauth\/auth\/;/,
+    'Relative provider resume redirects must use the configured public HTTPS origin',
+  );
+  assert.doesNotMatch(apiLocation, /proxy_redirect\s+\/?\s+\/api\//);
+});
