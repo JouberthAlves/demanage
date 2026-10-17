@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from demanage_cd.local_ci import SHA, validate_ci_evidence
 from demanage_cd.manifest import validate_release
@@ -86,7 +86,8 @@ def read_migration_proof(path: str, previous: str, target: str, backend: str) ->
     if evidence["migration_count_after"] <= evidence["migration_count_before"]:
         raise RuntimeError("Required schema migrations were not applied in rehearsal")
     backup = evidence["backup_path"]
-    if backup != str(Path(path).parent / "demanage.dump"):
+    # Proof paths belong to the Debian server, not the Windows approval host.
+    if backup != str(PurePosixPath(path).parent / "demanage.dump"):
         raise RuntimeError("Rehearsed backup is not inside the private proof folder")
     checksum = evidence["backup_sha256"]
     if not isinstance(checksum, str) or not re.fullmatch(r"[0-9a-f]{64}", checksum):
