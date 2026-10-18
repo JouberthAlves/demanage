@@ -5,7 +5,16 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Client } from 'oidc-provider';
 
-import { allowedCimdHosts, isAllowedCimdClient, isAllowedCimdClientId } from './provider';
+import { allowedCimdHosts, classifyOAuthGrantFailure, isAllowedCimdClient, isAllowedCimdClientId } from './provider';
+
+test('OAuth grant diagnostic classifies auth failures without exposing assertion contents', () => {
+  assert.equal(classifyOAuthGrantFailure({ statusCode: 401, error_detail: 'the provided authentication mechanism does not match the registered client authentication method' }), 'auth_method_mismatch');
+  assert.equal(classifyOAuthGrantFailure({ statusCode: 401, error_detail: 'audience (aud) must equal the endpoint url, issuer identifier or token endpoint url' }), 'assertion_audience_mismatch');
+  assert.equal(classifyOAuthGrantFailure({ statusCode: 401, error_detail: 'alg mismatch' }), 'assertion_algorithm_mismatch');
+  assert.equal(classifyOAuthGrantFailure({ statusCode: 401, error_detail: 'client not found' }), 'client_not_found');
+  assert.equal(classifyOAuthGrantFailure({ statusCode: 401, error_detail: 'very secret JWT eyJhbGciOiJSUzI1NiJ9'}), 'other_client_auth_failure');
+  assert.equal(classifyOAuthGrantFailure({ statusCode: 400, error_detail: 'alg mismatch' }), null);
+});
 
 test('CIMD trusts the exact ChatGPT HTTPS hostname, without wildcard fetch trust', () => {
   const hosts = allowedCimdHosts();
