@@ -106,6 +106,21 @@ function requirePublicUrl(value: string, name: string) {
   return url.toString().replace(/\/$/, '');
 }
 
+/** Log only fixed OAuth client-auth categories, never assertions, claims, or keys. */
+export function classifyOAuthGrantFailure(error: unknown): string | null {
+  if (!error || typeof error !== 'object') return null;
+  const { statusCode, error_detail: detail } = error as { statusCode?: unknown; error_detail?: unknown };
+  if (statusCode !== 401) return null;
+  if (typeof detail !== 'string') return 'other_client_auth_failure';
+  if (detail.includes('authentication mechanism does not match')) return 'auth_method_mismatch';
+  if (detail.includes('audience (aud)')) return 'assertion_audience_mismatch';
+  if (detail.includes('alg mismatch')) return 'assertion_algorithm_mismatch';
+  if (detail.includes('client not found')) return 'client_not_found';
+  if (detail.includes('client assertion tokens must only be used once')) return 'assertion_replay';
+  if (detail.includes('signature') || detail.includes('key verification')) return 'assertion_signature_failure';
+  return 'other_client_auth_failure';
+}
+
 export function createOAuthProvider(options: OAuthOptions = {}) {
   const settings = oauthSettings();
   const issuer = requirePublicUrl(options.issuer ?? settings.issuer, 'MCP_ISSUER_URL');
@@ -183,6 +198,12 @@ export function createOAuthProvider(options: OAuthOptions = {}) {
   };
   const provider = new Provider(issuer, configuration);
   provider.proxy = true;
+  provider.on('grant.error', (ctx: unknown, error: unknown) => {
+    const reason = classifyOAuthGrantFailure(error);
+    if (!reason) return;
+    const params = (ctx as { oidc?: { params?: { client_assertion?: unknown } } }).oidc?.params;
+    console.warn(`[deManage] oauth-client-auth-rejected reason=${reason} signed_assertion=${typeof params?.client_assertion === 'string'}`);
+  });
   return provider;
 }
 
