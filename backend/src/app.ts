@@ -90,6 +90,9 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
   if (MCP_ENABLED) {
     app.use(createOAuthDiscoveryRouter());
     app.use('/oauth', createOAuthRouter());
+    // Keep the public token endpoint mounted at its advertised URL so
+    // private_key_jwt audiences are verified against the public token path.
+    app.use('/api/oauth', createOAuthRouter());
     startOAuthArtifactCleanup();
   }
 
