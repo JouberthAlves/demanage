@@ -45,3 +45,11 @@ test('OAuth resume redirects reach the public API without rewriting external cli
   );
   assert.doesNotMatch(apiLocation, /proxy_redirect\s+\/?\s+\/api\//);
 });
+
+test('OAuth token client JWT audience uses its public /api/oauth/token endpoint', () => {
+  const apiLocation = nginx.split('  location /api/ {')[1]?.split('  location / {')[0];
+  assert.ok(apiLocation);
+  assert.match(apiLocation, /rewrite\s+\^\/api\/oauth\/token\$\s+\/api\/oauth\/token\s+break;/);
+  assert.match(apiLocation, /rewrite\s+\^\/api\/\(\.\*\)\$\s+\/\$1\s+break;/);
+  assert.ok(apiLocation.indexOf('rewrite ^/api/oauth/token$') < apiLocation.indexOf('rewrite ^/api/(.*)$'), 'Public OAuth token path must take precedence');
+});
