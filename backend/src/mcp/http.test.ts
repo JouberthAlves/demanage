@@ -76,9 +76,12 @@ test('protected MCP discovery, request origin, user auth and read-only tools/lis
       'execute_financial_operation',
       'get_financial_overview',
       'get_operation_status',
+      'list_financial_operation_history',
       'list_income_tags',
       'list_piggy_banks',
       'preview_financial_operation',
+      'preview_undo_financial_operation',
+      'undo_financial_operation',
     ]);
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));

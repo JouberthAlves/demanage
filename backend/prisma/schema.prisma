@@ -102,6 +102,7 @@ model User {
   piggyBanks            PiggyBank[]
   piggyTransactions     PiggyTransaction[]
   financeMcpOperations  FinanceMcpOperation[]
+  financeMcpUndos       FinanceMcpUndo[]
   oauthConnections      OAuthConnection[]
   assetTransactions     AssetTransaction[]
   patrimonySettings     PatrimonySettings?
@@ -164,9 +165,26 @@ model FinanceMcpOperation {
   result         Json
   committedAt    DateTime @default(now())
   user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  undo           FinanceMcpUndo?
 
   @@unique([userId, clientId, idempotencyKey])
   @@unique([userId, clientId, intentNonce])
+}
+
+// A separate immutable undo receipt preserves the original operation history.
+// An undo only applies to rows created by the exact original MCP operation.
+model FinanceMcpUndo {
+  id           String   @id @default(uuid())
+  userId       String
+  clientId     String
+  intentNonce  String
+  operationId  String   @unique
+  undoneAt     DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  operation    FinanceMcpOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, clientId, intentNonce])
+  @@index([userId, clientId, undoneAt])
 }
 
 // The OIDC adapter stores opaque, short-lived protocol objects. Do not log payloads.
