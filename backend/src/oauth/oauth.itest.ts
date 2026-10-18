@@ -100,12 +100,14 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
       resource, state: `state-${randomUUID()}`,
     }).toString();
     let response = await request(url.toString(), jar);
+    const observedSteps: string[] = [];
     for (let attempts = 0; attempts < 8; attempts++) {
       assert.equal(response.status, 303, `OAuth flow unexpected status ${response.status}: ${(await response.clone().text()).slice(0, 300)}`);
       const redirect = response.headers.get('location');
       assert.ok(redirect, 'OAuth flow requires redirect');
       const destination = new URL(redirect, base);
       if (destination.origin === new URL(redirectUri).origin && destination.pathname === new URL(redirectUri).pathname) {
+        assert.deepEqual(observedSteps, ['account', 'permissions'], 'OAuth must expose identity then consent as distinct steps');
         assert.equal(destination.searchParams.get('iss'), `${base}/oauth`, 'RFC 9207 issuer must match discovery');
         const code = destination.searchParams.get('code');
         assert.ok(code, `OAuth rejected: ${destination.searchParams.get('error')}`);
@@ -116,7 +118,8 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
         assert.ok(uid);
         const details = await request(`${base}/oauth/interaction/${encodeURIComponent(uid)}`, jar);
         assert.equal(details.status, 200, `Consent details: ${await details.clone().text()}`);
-        const info = await details.json() as { csrf: string; scopes: string[] };
+        const info = await details.json() as { csrf: string; scopes: string[]; step: string };
+        observedSteps.push(info.step);
         assert.ok(info.scopes.includes(scope.split(' ').find((value) => value.startsWith('finance:'))!));
         response = await request(`${base}/oauth/interaction/${encodeURIComponent(uid)}/finish`, jar, {
           method: 'POST',
