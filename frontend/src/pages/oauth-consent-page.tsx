@@ -80,10 +80,11 @@ export function OAuthConsentPage() {
               setSubmitting(true);
             }}>
               <input type='hidden' name='csrf' value={request.csrf} />
-              <button disabled={submitting} className='rounded-lg bg-primary px-5 py-3 font-semibold text-primary-foreground disabled:opacity-50' type='submit' name='decision' value='approve'>
+              {/* Keep named submitters enabled: native form POST must include decision=approve/deny. */}
+              <button aria-disabled={submitting} className={`rounded-lg bg-primary px-5 py-3 font-semibold text-primary-foreground ${submitting ? 'pointer-events-none opacity-50' : ''}`} type='submit' name='decision' value='approve'>
                 {submitting ? 'Continuando…' : isAccountStep ? 'Confirmar e continuar' : 'Autorizar e continuar'}
               </button>
-              <button disabled={submitting} className='rounded-lg border border-border px-5 py-3 disabled:opacity-50' type='submit' name='decision' value='deny'>Negar</button>
+              <button aria-disabled={submitting} className={`rounded-lg border border-border px-5 py-3 ${submitting ? 'pointer-events-none opacity-50' : ''}`} type='submit' name='decision' value='deny'>Negar</button>
             </form>
           </>
         )}

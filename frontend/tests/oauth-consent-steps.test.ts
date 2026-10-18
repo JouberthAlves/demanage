@@ -16,7 +16,11 @@ test('OAuth consent distinguishes identity confirmation from permission approval
 test('OAuth consent blocks repeated submit while redirecting', () => {
   assert.match(consent, /onSubmit=\{/);
   assert.match(consent, /preventDefault\(\)/);
-  assert.match(consent, /disabled=\{submitting\}/);
+  // Native form serialization must still include the clicked named submitter
+  // (decision=approve/deny) after React handles onSubmit.
+  assert.doesNotMatch(consent, /<button\s+disabled=\{submitting\}/);
+  assert.match(consent, /<button[^>]*name='decision' value='approve'/);
+  assert.match(consent, /<button[^>]*name='decision' value='deny'/);
 });
 
 test('Integrations distinguish granted consent from completed third-party installation', () => {
