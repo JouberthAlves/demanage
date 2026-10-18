@@ -88,6 +88,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
   });
   app.use(createOAuthDiscoveryRouter(provider));
   app.use('/oauth', createOAuthRouter(provider));
+  app.use('/api/oauth', createOAuthRouter(provider));
 
   async function authorize(userIndex: number, scope: string, oauthClientId = clientId, redirectUri = callback) {
     const user = users[userIndex];
@@ -133,13 +134,13 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     throw new Error('OAuth consent flow did not terminate');
   }
 
-  async function exchange(code: string, pkceVerifier: string, oauthClientId = clientId, redirectUri = callback, assertion?: string) {
+  async function exchange(code: string, pkceVerifier: string, oauthClientId = clientId, redirectUri = callback, assertion?: string, tokenPath = '/oauth/token') {
     const body = new URLSearchParams({ grant_type: 'authorization_code', client_id: oauthClientId, redirect_uri: redirectUri, code, code_verifier: pkceVerifier, resource });
     if (assertion) {
       body.set('client_assertion_type', 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer');
       body.set('client_assertion', assertion);
     }
-    return fetch(`${base}/oauth/token`, {
+    return fetch(`${base}${tokenPath}`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
       body,
@@ -241,6 +242,16 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.deepEqual(await getOAuthGrantSubject(chatgptToken, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
     });
+
+    // The browser sees /api/oauth/token behind nginx, while the old internal
+    // /oauth/token mount generates the wrong accepted private_key_jwt audience.
+    const publicAuth = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
+    const publicAudienceExchange = await exchange(
+      publicAuth.code, publicAuth.pkceVerifier, chatgptClientId, chatgptCallback,
+      signedChatgptAssertion(chatgptKey.privateKey, { aud: `${base}/api/oauth/token` }),
+      '/api/oauth/token',
+    );
+    assert.equal(publicAudienceExchange.status, 200, 'Signed public token audience must succeed on the public token path');
 
     const duplicateAssertion = signedChatgptAssertion();
     const signedOnce = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
