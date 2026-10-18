@@ -222,6 +222,17 @@ export async function undoFinanceOperation(input: UndoFinanceInput) {
     const result = persistedResult(original.result);
     const amount = new Prisma.Decimal(result.amountCents).div(100);
     const changed = () => conflict('Desfazer bloqueado: o lançamento foi alterado ou possui uma dependência posterior');
+    if (
+      result.kind !== original.actionKind ||
+      result.amountCents <= 0 ||
+      BigInt(result.amountCents) !== original.amountCents ||
+      (result.kind === 'receive_income' &&
+        (!result.entryId || !result.receiptId || result.piggyTransactionId || result.expenseId)) ||
+      (result.kind === 'receive_and_save' &&
+        (!result.entryId || !result.receiptId || !result.piggyTransactionId || !result.expenseId)) ||
+      (result.kind === 'deposit_existing_cash' &&
+        (!result.piggyTransactionId || result.entryId || result.receiptId || result.tagId))
+    ) throw changed();
 
     let bankId: string | null = null;
     let bankWasCompleted = false;

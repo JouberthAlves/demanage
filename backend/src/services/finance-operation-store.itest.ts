@@ -348,3 +348,68 @@ test('undo cannot access another client and refuses dependent records without ch
     await removeTestUser(user.id);
   }
 });
+
+test('undo refuses inconsistent persisted operation identity and linked fields without deleting funds', async () => {
+  const user = await createTestUser();
+  const bank = await prisma.piggyBank.create({ data: { userId: user.id, name: 'Integrity test', monthlyGoal: 0 } });
+  try {
+    const command = input(user.id, { ...gift(bank.id), dateKey: todayKeyInSaoPaulo() });
+    const saved = await commitFinanceOperation(command);
+    const op = (await getRecentFinanceOperations(user.id, command.clientId))[0];
+    const undo = () => undoFinanceOperation({
+      userId: user.id, clientId: command.clientId, operationId: op.operationId,
+      originalKey: command.idempotencyKey, intentNonce: 'undo-' + randomUUID(),
+    });
+    await prisma.financeMcpOperation.update({
+      where: { id: op.operationId },
+      data: { result: { ...saved.result, amountCents: 100 } },
+    });
+    await assert.rejects(undo(), /alterad|inconsistente|bloquead/i);
+    await prisma.financeMcpOperation.update({
+      where: { id: op.operationId },
+      data: { result: { ...saved.result, kind: 'receive_income' } },
+    });
+    await assert.rejects(undo(), /alterad|inconsistente|bloquead/i);
+    await prisma.financeMcpOperation.update({
+      where: { id: op.operationId },
+      data: { result: { ...saved.result, expenseId: null } },
+    });
+    await assert.rejects(undo(), /alterad|inconsistente|bloquead/i);
+    assert.equal(await prisma.entry.count({ where: { userId: user.id } }), 1);
+    assert.equal(await prisma.expense.count({ where: { userId: user.id } }), 1);
+    assert.equal(await prisma.piggyTransaction.count({ where: { userId: user.id } }), 1);
+    assert.equal(await prisma.financeMcpUndo.count({ where: { userId: user.id } }), 0);
+  } finally {
+    await removeTestUser(user.id);
+  }
+});
+
+test('undo handles MCP cash deposits with and without cash debit without changing other records', async () => {
+  const user = await createTestUser();
+  const bank = await prisma.piggyBank.create({
+    data: { userId: user.id, name: 'Disposable deposit test', monthlyGoal: 0 },
+  });
+  try {
+    for (const deductFromBalance of [false, true]) {
+      const command = input(user.id, {
+        kind: 'deposit_existing_cash', amountCents: 1234, bankId: bank.id,
+        dateKey: todayKeyInSaoPaulo(), deductFromBalance, note: null,
+      });
+      const created = await commitFinanceOperation(command);
+      assert.equal(Boolean(created.result.expenseId), deductFromBalance);
+      const operation = (await getRecentFinanceOperations(user.id, command.clientId))
+        .find((row) => row.idempotencyKey === command.idempotencyKey);
+      assert.ok(operation);
+      assert.equal((await undoFinanceOperation({
+        userId: user.id, clientId: command.clientId,
+        operationId: operation.operationId, originalKey: command.idempotencyKey,
+        intentNonce: 'undo-' + randomUUID(),
+      })).status, 'undone');
+      assert.equal(await prisma.expense.count({ where: { userId: user.id } }), 0);
+      assert.equal(await prisma.piggyTransaction.count({ where: { userId: user.id } }), 0);
+    }
+    assert.equal(await prisma.financeMcpUndo.count({ where: { userId: user.id } }), 2);
+  } finally {
+    await removeTestUser(user.id);
+  }
+});
