@@ -80,8 +80,14 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
         return;
       }
       const client = await provider.Client.find(interaction.clientId);
+      const prompt = interaction.details.prompt.name;
+      if (prompt !== 'login' && prompt !== 'consent') {
+        res.status(400).json({ error: 'Etapa de autoriza\u00e7\u00e3o inv\u00e1lida' });
+        return;
+      }
       res.json({
         uid: interaction.details.uid,
+        step: prompt === 'login' ? 'account' : 'permissions',
         clientId: interaction.clientId,
         clientName: client?.clientName || interaction.clientId,
         scopes: interaction.scopes.filter((scope) => ALLOWED_SCOPES.has(scope)),
