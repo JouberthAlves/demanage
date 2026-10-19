@@ -16,6 +16,9 @@ import { previewFinanceOperation, verifyIntentWithNonce } from './finance-previe
 import { commitUndoFinanceOperation, previewUndoFinanceOperation } from './finance-undo';
 import { getFinancialOverview } from './financial-overview';
 
+const READ_ONLY_ANNOTATIONS = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
+const FINANCIAL_WRITE_ANNOTATIONS = { readOnlyHint: false, destructiveHint: true, openWorldHint: false };
+
 function response(value: unknown) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(value) }] };
 }
@@ -39,6 +42,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'get_financial_overview',
     {
       description: 'Consultar saldo até hoje no mês, igual ao Dashboard, e patrimônio opcional. O saldo do mês não é saldo bancário absoluto.',
+      annotations: READ_ONLY_ANNOTATIONS,
       inputSchema: {},
     },
     async () => {
@@ -55,6 +59,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'list_piggy_banks',
     {
       description: 'Listar seus cofrinhos, nomes, IDs, saldos e metas. Use o ID exato para operações. Não escolha entre cofrinhos ambíguos.',
+      annotations: READ_ONLY_ANNOTATIONS,
       inputSchema: {},
     },
     async () => {
@@ -78,6 +83,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'list_income_tags',
     {
       description: 'Listar tags de entradas da sua conta. Distingua tag (categoria) de descrição livre. Quando clara, a tag pode ser criada durante uma nova entrada.',
+      annotations: READ_ONLY_ANNOTATIONS,
       inputSchema: {},
     },
     async () => {
@@ -95,6 +101,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'preview_financial_operation',
     {
       description: 'Validar uma intenção financeira sem lançar valores. Envie draft estruturado: kind receive_income, receive_and_save ou deposit_existing_cash, amountCents (centavos), dateKey YYYY-MM-DD, descrição e tag (distintas), e bankName/bankId quando cabível. Sempre pergunte ao usuário se houver dupla interpretação, incluindo a origem do dinheiro e se deve descontar do saldo. Nunca execute com clarification_required.',
+      annotations: READ_ONLY_ANNOTATIONS,
       inputSchema: { draft: z.record(z.string(), z.unknown()) },
     },
     async ({ draft }) => {
@@ -111,6 +118,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'execute_financial_operation',
     {
       description: 'EXECUTAR UMA VEZ a operação previamente validada e assinada. Exige intentToken retornado pela prévia e idempotencyKey UUID estável. Se houver timeout, consulte get_operation_status e reutilize a MESMA chave; nunca crie outra chave para repetir o lançamento. Apenas confirme sucesso quando status committed.',
+      annotations: FINANCIAL_WRITE_ANNOTATIONS,
       inputSchema: { intentToken: z.string().min(20).max(8192), idempotencyKey: z.string().uuid() },
     },
     async ({ intentToken, idempotencyKey }) => {
@@ -136,6 +144,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'get_operation_status',
     {
       description: 'Consultar se uma operação financeira com a chave original foi confirmada. Resultado ausente NÃO significa que se pode repetir com uma nova chave; use a mesma.',
+      annotations: READ_ONLY_ANNOTATIONS,
       inputSchema: { idempotencyKey: z.string().uuid() },
     },
     async ({ idempotencyKey }) => {
@@ -153,6 +162,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'list_financial_operation_history',
     {
       description: 'Listar até 20 operações financeiras recentes que ESTE aplicativo MCP executou, inclusive as desfeitas. Use a chave original antes de solicitar undo. Nunca inclui lançamentos feitos manualmente no deManage.',
+      annotations: READ_ONLY_ANNOTATIONS,
       inputSchema: {},
     },
     async () => {
@@ -169,6 +179,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'preview_undo_financial_operation',
     {
       description: 'Preparar SEM ALTERAR DADOS o desfazer de uma operação do histórico deste aplicativo MCP. Exige chave original. Mostre o resumo e obtenha confirmação explícita do usuário antes de executar.',
+      annotations: READ_ONLY_ANNOTATIONS,
       inputSchema: { idempotencyKey: z.string().uuid() },
     },
     async ({ idempotencyKey }) => {
@@ -185,6 +196,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'undo_financial_operation',
     {
       description: 'Desfazer de modo atômico UMA operação criada pelo mesmo cliente MCP, previamente revisada e confirmada pelo usuário. Exige undoIntentToken da prévia. Não altera outras operações, não pode apagar lançamentos manuais e falha se houver dependências posteriores. Em caso de timeout consulte get_operation_status.',
+      annotations: FINANCIAL_WRITE_ANNOTATIONS,
       inputSchema: { undoIntentToken: z.string().min(20).max(8192) },
     },
     async ({ undoIntentToken }) => {
