@@ -251,3 +251,18 @@ test('month boundaries and timestamps follow the São Paulo financial calendar',
   assert.deepEqual(history.map((month) => month.month), ['2026-08', '2026-09']);
   assert.equal(history.at(-1)?.expense, 80);
 });
+
+test('piggy cash transfer debits only when linked to an expense and normal withdrawal credits once', () => {
+  const now = new Date('2026-10-17T12:00:00.000Z');
+  const movements = [
+    { type: 'deposit' as const, amount: 300, date: '2026-10-16' },
+    { type: 'withdraw' as const, amount: 50, date: '2026-10-17' },
+    { type: 'deposit' as const, amount: 90, date: '2026-09-10' },
+    { type: 'deposit' as const, amount: 500, date: '2026-10-20' },
+  ];
+  const history = buildMonthlyHistory([], [], now, 2, movements);
+  assert.deepEqual(history, [
+    { month: '2026-09', income: 0, expense: 90, hasActivity: true },
+    { month: '2026-10', income: 50, expense: 300, hasActivity: true },
+  ]);
+});

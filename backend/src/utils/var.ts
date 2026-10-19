@@ -25,3 +25,16 @@ export const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN ?? '7d';
 
 /** Override: `lax` | `none`. Empty = auto (none when FE host ≠ API host in prod). */
 export const COOKIE_SAME_SITE = process.env.COOKIE_SAME_SITE?.toLowerCase();
+
+/** MCP remains off by default; an enabled issuer must have its own signing secret. */
+export const MCP_ENABLED = process.env.MCP_ENABLED === 'true';
+
+export function getMcpIntentSecret(): string {
+  const secret = process.env.MCP_INTENT_SECRET;
+  if (!secret || Buffer.byteLength(secret, 'utf8') < 32) {
+    throw new Error('[deManage] MCP_INTENT_SECRET must be at least 32 bytes');
+  }
+  return secret;
+}
+
+if (MCP_ENABLED) getMcpIntentSecret();

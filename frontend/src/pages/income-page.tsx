@@ -11,6 +11,7 @@ import { IncomeTable } from '@/components/income/income-table';
 import { useIncomeActions } from '@/components/income/use-income-actions';
 import { PageHeader } from '@/components/layout/page-header';
 import { SectionPanel } from '@/components/layout/section-panel';
+import { PiggyCashStatus } from '@/components/shared/piggy-cash-status';
 import {
   ListEmpty,
   ListError,
@@ -21,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { useEntries } from '@/hooks/use-entries';
 import { useFinancialNow } from '@/hooks/use-financial-now';
 import { useMonthlyIncome } from '@/hooks/use-monthly-history';
+import { usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import { incomeContributionThisMonth } from '@/lib/income-schedule';
 import { matchesListFilter } from '@/lib/list-filter';
 import type { Income } from '@/types/finance';
@@ -28,6 +30,7 @@ import type { Income } from '@/types/finance';
 export function IncomePage() {
   const { data: incomes = [], isLoading, isError } = useEntries();
   const total = useMonthlyIncome();
+  const piggyCash = usePiggyCashMovements();
   const now = useFinancialNow();
   const actions = useIncomeActions(now);
 
@@ -76,11 +79,19 @@ export function IncomePage() {
         }
       />
 
-      <IncomeSummaryHero
-        count={incomes.length}
-        total={total}
-        filteredTotal={filteredTotal}
-      />
+      {!piggyCash.data || piggyCash.isError ? (
+        <PiggyCashStatus
+          isError={piggyCash.isError}
+          isFetching={piggyCash.isFetching}
+          onRetry={() => void piggyCash.refetch()}
+        />
+      ) : (
+        <IncomeSummaryHero
+          count={incomes.length}
+          total={total}
+          filteredTotal={filteredTotal}
+        />
+      )}
 
       <SectionPanel>
         <IncomeFiltersBar

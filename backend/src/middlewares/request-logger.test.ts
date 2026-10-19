@@ -1,27 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { formatLogLine, sanitizeLogValue } from '@/middlewares/request-logger';
+import { sanitizeLogValue, sanitizeRequestTargetForLog } from './request-logger';
 
-test('log values cannot inject lines, terminal controls, or unbounded text', () => {
-  assert.equal(
-    sanitizeLogValue('path\r\nforged\u001b[31m'),
-    'path??forged?[31m',
-  );
-  assert.equal(sanitizeLogValue('x'.repeat(10), 4), 'xxxx');
+test('request log fields cannot inject lines, terminal controls or secrets', () => {
+  assert.equal(sanitizeLogValue('safe\r\nINJECTED\x1b[31m'), 'safe??INJECTED?[31m');
+  assert.equal(sanitizeLogValue('123456789', 5), '12345');
+  assert.equal(sanitizeRequestTargetForLog('/oauth\nINJECTED?code=private'), '/oauth?INJECTED');
 });
 
-test('log lines are plain text without chalk and colored status is optional', () => {
-  const line = formatLogLine(
-    {
-      time: '10:00:00,000',
-      ip: '127.0.0.1',
-      method: 'GET',
-      url: '/health',
-      status: 503,
-      durationMs: '1.23',
-    },
-    null,
+test('request logs never expose OAuth codes or query credentials', () => {
+  assert.equal(
+    sanitizeRequestTargetForLog('/oauth/callback?code=secret&state=nonce'),
+    '/oauth/callback',
   );
-  assert.equal(line, '10:00:00,000 127.0.0.1 - GET /health 503 - 1.23ms');
+  assert.equal(
+    sanitizeRequestTargetForLog('/oauth/authorize?redirect_uri=https%3A%2F%2Fexample.com&client_id=xyz'),
+    '/oauth/authorize',
+  );
+  assert.equal(sanitizeRequestTargetForLog('/mcp?access_token=secret'), '/mcp');
+  assert.equal(sanitizeRequestTargetForLog('/health'), '/health');
+  assert.equal(sanitizeRequestTargetForLog('/auth/reset#fragment'), '/auth/reset');
 });
