@@ -28,6 +28,8 @@ Não é um ERP nem um open banking. É o controle do mês: o que entra, o que sa
 
 Faturas de cartão fecham no dia configurado (fuso America/Sao_Paulo). Recuperação de senha usa código de alta entropia gerado no Perfil — sem e-mail.
 
+**Integração MCP (outubro de 2026):** o backend inclui ferramentas opcionais de finanças para clientes compatíveis com MCP, com autorização OAuth 2.1, consentimento e escopos. As operações incluem consulta do resumo financeiro mensal e histórico, prévia e reversão controlada de operações criadas pelo próprio MCP. A integração permanece **desligada por padrão** (`MCP_ENABLED=false`); código mesclado não significa ativação ou validação em produção. Veja [a configuração segura do MCP](./docs/mcp-finance-setup.md) e os PRs [#62](https://github.com/bielxdh3/demanage/pull/62), [#74](https://github.com/bielxdh3/demanage/pull/74) e [#76](https://github.com/bielxdh3/demanage/pull/76).
+
 ## Como é feito
 
 Monorepo `frontend/` + `backend/`, no mesmo espírito de outros apps do autor — **sem** pacotes corporativos (`@crediari`, SSO, etc.).
