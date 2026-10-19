@@ -42,7 +42,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'get_financial_overview',
     {
       description: 'Consultar saldo até hoje no mês, igual ao Dashboard, e patrimônio opcional. O saldo do mês não é saldo bancário absoluto.',
-      annotations: READ_ONLY_ANNOTATIONS,
+      annotations: { ...READ_ONLY_ANNOTATIONS, openWorldHint: true },
       inputSchema: {},
     },
     async () => {
@@ -118,7 +118,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
     'execute_financial_operation',
     {
       description: 'EXECUTAR UMA VEZ a operação previamente validada e assinada. Exige intentToken retornado pela prévia e idempotencyKey UUID estável. Se houver timeout, consulte get_operation_status e reutilize a MESMA chave; nunca crie outra chave para repetir o lançamento. Apenas confirme sucesso quando status committed.',
-      annotations: FINANCIAL_WRITE_ANNOTATIONS,
+      annotations: { ...FINANCIAL_WRITE_ANNOTATIONS, openWorldHint: true },
       inputSchema: { intentToken: z.string().min(20).max(8192), idempotencyKey: z.string().uuid() },
     },
     async ({ intentToken, idempotencyKey }) => {

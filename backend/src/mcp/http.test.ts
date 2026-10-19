@@ -89,7 +89,7 @@ test('protected MCP discovery, request origin, user auth and read-only tools/lis
     ]);
     const byName = new Map(reply.result?.tools?.map((tool) => [tool.name, tool]));
     for (const name of [
-      'get_financial_overview', 'list_piggy_banks', 'list_income_tags',
+      'list_piggy_banks', 'list_income_tags',
       'preview_financial_operation', 'get_operation_status',
       'list_financial_operation_history', 'preview_undo_financial_operation',
     ]) {
@@ -97,11 +97,15 @@ test('protected MCP discovery, request origin, user auth and read-only tools/lis
         readOnlyHint: true, destructiveHint: false, openWorldHint: false,
       }, `${name} is explicitly read-only and limited to this account`);
     }
-    for (const name of ['execute_financial_operation', 'undo_financial_operation']) {
-      assert.deepEqual(byName.get(name)?.annotations, {
-        readOnlyHint: false, destructiveHint: true, openWorldHint: false,
-      }, `${name} is explicitly classified as a sensitive financial write`);
-    }
+    assert.deepEqual(byName.get('get_financial_overview')?.annotations, {
+      readOnlyHint: true, destructiveHint: false, openWorldHint: true,
+    }, 'patrimony reports may query external market sources');
+    assert.deepEqual(byName.get('execute_financial_operation')?.annotations, {
+      readOnlyHint: false, destructiveHint: true, openWorldHint: true,
+    }, 'posting may refresh CDI from external market sources');
+    assert.deepEqual(byName.get('undo_financial_operation')?.annotations, {
+      readOnlyHint: false, destructiveHint: true, openWorldHint: false,
+    }, 'undo is a sensitive local financial write');
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }
