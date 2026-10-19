@@ -78,6 +78,8 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 
   res.on('finish', () => {
     const [seconds, nanoseconds] = process.hrtime(start);
+    // Every request-controlled field below is stripped of control characters.
+    // codeql[js/log-injection] URL parameters and fragments are also discarded.
     const parts: LogParts = {
       time: timeFormatter.format(new Date()),
       ip: sanitizeLogValue(req.ip || 'unknown', 128),

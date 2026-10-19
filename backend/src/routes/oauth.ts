@@ -110,6 +110,9 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
         res.status(400).send('Solicitação OAuth inválida');
         return;
       }
+      // The choice is user consent, not a privilege check. Session, origin,
+      // signed CSRF token, and OAuth interaction were validated first.
+      // codeql[js/user-controlled-bypass] Explicit approval is the protected action itself.
       if (req.body.decision !== 'approve') {
         await provider.interactionFinished(req, res, { error: 'access_denied' }, { mergeWithLastSubmission: false });
         return;
