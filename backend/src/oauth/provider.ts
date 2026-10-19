@@ -40,6 +40,11 @@ export function allowedCimdHosts(configuredHosts = process.env.MCP_OAUTH_CLIENT_
 
 const CHATGPT_CIMD = 'https://chatgpt.com/oauth/client.json';
 const CHATGPT_JWKS = 'https://chatgpt.com/oauth/jwks.json';
+const DAY_SECONDS = 86_400;
+
+function isSignedChatGptClient(client: Client) {
+  return client.clientId === CHATGPT_CIMD && client.clientAuthMethod === 'private_key_jwt';
+}
 
 /** A CIMD URL is the identity. Never accept public keys from a different host. */
 export function isAllowedCimdClient(client: Client, hosts: ReadonlySet<string>) {
@@ -178,9 +183,34 @@ export function createOAuthProvider(options: OAuthOptions = {}) {
       long: { secure: issuer.startsWith('https:'), sameSite: 'lax' },
       short: { secure: issuer.startsWith('https:'), sameSite: 'lax' },
     },
-    ttl: { AccessToken: 900, AuthorizationCode: 120, Interaction: 300, Session: 3600, Grant: 7 * 86400, RefreshToken: 7 * 86400 },
+    ttl: {
+      AccessToken: 900,
+      AuthorizationCode: 120,
+      Interaction: 300,
+      Session: 3600,
+      Grant(_ctx, grant) {
+        return grant.clientId === CHATGPT_CIMD ? 90 * DAY_SECONDS : 7 * DAY_SECONDS;
+      },
+      RefreshToken(_ctx, _token, client) {
+        return isSignedChatGptClient(client) ? 30 * DAY_SECONDS : 7 * DAY_SECONDS;
+      },
+    },
+    expiresWithSession(ctx, source) {
+      // ChatGPT uses authenticated refresh tokens without requesting offline_access.
+      return !source.scopes.has('offline_access') &&
+        !(ctx.oidc.client && isSignedChatGptClient(ctx.oidc.client));
+    },
     issueRefreshToken(_ctx, client) {
       return client.grantTypeAllowed('refresh_token');
+    },
+    rotateRefreshToken(ctx) {
+      const token = ctx.oidc.entities.RefreshToken;
+      const client = ctx.oidc.entities.Client;
+      if (!token || !client) return false;
+      if (token.totalLifetime() >= 365.25 * DAY_SECONDS) return false;
+      if (isSignedChatGptClient(client)) return true;
+      if (client.clientAuthMethod === 'none' && !token.isSenderConstrained()) return true;
+      return token.ttlPercentagePassed() >= 70;
     },
     interactions: {
       url(_ctx, interaction) {
