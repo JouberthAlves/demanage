@@ -1,7 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { sanitizeRequestTargetForLog } from './request-logger';
+import { sanitizeLogValue, sanitizeRequestTargetForLog } from './request-logger';
+
+test('request log fields cannot inject lines, terminal controls or secrets', () => {
+  assert.equal(sanitizeLogValue('safe\r\nINJECTED\x1b[31m'), 'safe??INJECTED?[31m');
+  assert.equal(sanitizeLogValue('123456789', 5), '12345');
+  assert.equal(sanitizeRequestTargetForLog('/oauth\nINJECTED?code=private'), '/oauth?INJECTED');
+});
 
 test('request logs never expose OAuth codes or query credentials', () => {
   assert.equal(
