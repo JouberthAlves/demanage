@@ -4,9 +4,11 @@ import { CurrenciesPage } from '@/pages/currencies-page';
 import { DashboardPage } from '@/pages/dashboard-page';
 import { ExpensesPage } from '@/pages/expenses-page';
 import { IncomePage } from '@/pages/income-page';
+import { IntegrationsPage } from '@/pages/integrations-page';
 import { AppLayout } from '@/pages/layout/app-layout';
 import { AuthGuard } from '@/pages/layout/auth-guard';
 import { LoginPage } from '@/pages/login-page';
+import { OAuthConsentPage } from '@/pages/oauth-consent-page';
 import { PatrimonyPage } from '@/pages/patrimony-page';
 import { PiggyPage } from '@/pages/piggy-page';
 import { ProfilePage } from '@/pages/profile-page';
@@ -20,12 +22,14 @@ export const router = createBrowserRouter([
   {
     element: <AuthGuard />,
     children: [
+      { path: '/oauth/consent', element: <OAuthConsentPage /> },
       {
         path: '/',
         element: <AppLayout />,
         children: [
           { index: true, element: <DashboardPage /> },
           { path: 'perfil', element: <ProfilePage /> },
+          { path: 'integracoes', element: <IntegrationsPage /> },
           { path: 'despesas', element: <ExpensesPage /> },
           { path: 'cofrinho', element: <PiggyPage /> },
           { path: 'entradas', element: <IncomePage /> },

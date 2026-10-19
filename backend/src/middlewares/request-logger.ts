@@ -9,6 +9,16 @@ export function sanitizeLogValue(value: string, maxLength = 2048) {
   );
 }
 
+/** Query strings may carry OAuth codes/state or other temporary credentials. */
+export function sanitizeRequestTargetForLog(target: string) {
+  const queryIndex = target.indexOf('?');
+  const fragmentIndex = target.indexOf('#');
+  const end = [queryIndex, fragmentIndex]
+    .filter((index) => index >= 0)
+    .reduce((smallest, index) => Math.min(smallest, index), target.length);
+  return sanitizeLogValue(target.slice(0, end));
+}
+
 type Chalk = (typeof import('chalk'))['default'];
 
 // chalk é ESM-only: carregado uma única vez (não por requisição).
@@ -68,11 +78,13 @@ export function requestLogger(req: Request, res: Response, next: NextFunction) {
 
   res.on('finish', () => {
     const [seconds, nanoseconds] = process.hrtime(start);
+    // Every request-controlled field below is stripped of control characters.
+    // codeql[js/log-injection] URL parameters and fragments are also discarded.
     const parts: LogParts = {
       time: timeFormatter.format(new Date()),
       ip: sanitizeLogValue(req.ip || 'unknown', 128),
       method: sanitizeLogValue(req.method, 32),
-      url: sanitizeLogValue(req.originalUrl),
+      url: sanitizeRequestTargetForLog(req.originalUrl),
       status: res.statusCode,
       durationMs: (seconds * 1e3 + nanoseconds / 1e6).toFixed(2),
     };

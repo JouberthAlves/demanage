@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, useNavigate } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate } from 'react-router';
 import { isAxiosError } from 'axios';
 import { toast } from 'sonner';
 
@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
 import { getApiErrorMessage } from '@/lib/api-error';
+import { loginRedirect } from '@/lib/login-redirect';
 import { useAuthStore } from '@/stores/auth-store';
 
 const TRANSIENT_MESSAGE =
@@ -32,6 +33,8 @@ function isTransientFailure(err: unknown) {
 
 export function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const redirect = loginRedirect(location.state);
   const login = useAuthStore((state) => state.login);
   const fetchMe = useAuthStore((state) => state.fetchMe);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
@@ -49,7 +52,7 @@ export function LoginPage() {
   if (isLoading) return <AuthLoading />;
 
   if (isAuthenticated) {
-    return <Navigate to='/' replace />;
+    return <Navigate to={redirect} replace />;
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -60,7 +63,7 @@ export function LoginPage() {
     try {
       await login(email.trim(), password);
       toast.success('Login realizado');
-      navigate('/', { replace: true });
+      navigate(redirect, { replace: true });
     } catch (err) {
       const message = isTransientFailure(err)
         ? TRANSIENT_MESSAGE

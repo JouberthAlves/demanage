@@ -126,6 +126,7 @@ export type EntryReceiptOccurrence = {
 export type Income = {
   id: string;
   name: string;
+  notes?: string | null;
   amount: number;
   type: IncomeType;
   frequency: IncomeFrequency;
