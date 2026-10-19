@@ -72,6 +72,8 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
   );
 
   if (logRequests) app.use(requestLogger);
+  // All authenticated unsafe requests pass through csrfProtection below.
+  // codeql[js/missing-token-validation] Custom strict Origin/Referer CSRF protection.
   app.use(cookieParser());
   // Separate bearer-only MCP transport from the browser cookie/CSRF boundary.
   // The regular website routes retain their original CSRF protection.
