@@ -66,6 +66,7 @@
   "pnpm": {
     "overrides": {
       "browserslist": "4.28.7",
+      "follow-redirects": "1.16.1",
       "picomatch@2": "2.3.2",
       "source-map-js": "^1.2.2"
     }
