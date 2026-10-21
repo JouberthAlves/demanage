@@ -166,8 +166,14 @@ export function parseRecoverPassword(
 }
 
 /** Troca a senha com o código de recuperação, revoga sessões e gira o código. */
-export async function recoverPassword(input: RecoverPasswordInput) {
-  const user = await prisma.user.findUnique({ where: { email: input.email } });
+export async function recoverPassword(
+  input: RecoverPasswordInput,
+  userStore: Pick<
+    typeof prisma.user,
+    'findUnique' | 'updateMany'
+  > = prisma.user,
+) {
+  const user = await userStore.findUnique({ where: { email: input.email } });
   if (
     !user?.recoveryCodeHash ||
     !verifyRecoveryCode(input.recoveryCode, user.recoveryCodeHash)
@@ -177,8 +183,9 @@ export async function recoverPassword(input: RecoverPasswordInput) {
 
   const passwordHash = await hashPassword(input.newPassword);
   const nextRecoveryCode = generateRecoveryCode();
-  await prisma.user.update({
-    where: { id: user.id },
+  const { count } = await userStore.updateMany({
+    // Compare-and-consume atomically; concurrent reuse must not reset the password.
+    where: { id: user.id, recoveryCodeHash: user.recoveryCodeHash },
     data: {
       passwordHash,
       recoveryCodeHash: hashRecoveryCode(nextRecoveryCode),
@@ -186,5 +193,6 @@ export async function recoverPassword(input: RecoverPasswordInput) {
       sessionVersion: { increment: 1 },
     },
   });
+  if (count !== 1) throw unauthorized(INVALID_RECOVERY_MESSAGE);
   return nextRecoveryCode;
 }
