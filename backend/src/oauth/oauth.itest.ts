@@ -238,10 +238,72 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     const chatgptValid = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
     const tokenFromChatgpt = await exchange(chatgptValid.code, chatgptValid.pkceVerifier, chatgptClientId, chatgptCallback, signedChatgptAssertion());
     assert.equal(tokenFromChatgpt.status, 200, `ChatGPT private_key_jwt exchange: ${await tokenFromChatgpt.clone().text()}`);
-    const { access_token: chatgptToken } = await tokenFromChatgpt.json() as { access_token: string };
+    const { access_token: chatgptToken, refresh_token: chatgptRefresh } = await tokenFromChatgpt.json() as { access_token: string; refresh_token: string };
     assert.deepEqual(await getOAuthGrantSubject(chatgptToken, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
     });
+
+    const refreshArtifact = await provider.RefreshToken.find(chatgptRefresh);
+    assert.ok(refreshArtifact, 'ChatGPT receives a refresh token');
+    assert.notEqual(refreshArtifact.expiresWithSession, true, 'refresh cannot depend on browser session');
+    const grantArtifact = await provider.Grant.find(refreshArtifact.grantId!);
+    assert.ok(grantArtifact);
+    const days = 86_400;
+    const nowSeconds = Math.floor(Date.now() / 1_000);
+    assert.ok(refreshArtifact.exp && refreshArtifact.exp - nowSeconds >= 29 * days, '30-day idle window');
+    assert.ok(grantArtifact.exp && grantArtifact.exp - nowSeconds >= 89 * days, '90-day consent window');
+    const shortSession = await provider.Session.findByUid(refreshArtifact.sessionUid!);
+    assert.ok(shortSession);
+    await shortSession.destroy();
+    const renew = await fetch(`${base}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token', client_id: chatgptClientId,
+        refresh_token: chatgptRefresh,
+        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+        client_assertion: signedChatgptAssertion(chatgptKey.privateKey, { aud: `${base}/api/oauth/token` }),
+      }),
+    });
+    assert.equal(renew.status, 200, 'refresh after the browser session ends');
+    const refreshed = await renew.json() as { access_token: string; refresh_token: string };
+    assert.notEqual(refreshed.refresh_token, chatgptRefresh, 'rotating refresh token');
+    assert.deepEqual(await getOAuthGrantSubject(refreshed.access_token, resource, provider), {
+      userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+    });
+    const concurrentRefresh = await Promise.all([0, 1].map(() => fetch(`${base}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token', client_id: chatgptClientId,
+        refresh_token: refreshed.refresh_token,
+        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+        client_assertion: signedChatgptAssertion(chatgptKey.privateKey, { aud: `${base}/api/oauth/token` }),
+      }),
+    })));
+    assert.deepEqual(concurrentRefresh.map((response) => response.status).sort(), [200, 400]);
+    const concurrentWinner = concurrentRefresh.find((response) => response.status === 200)!;
+    const concurrentPayload = await concurrentWinner.json() as { access_token: string; refresh_token: string };
+    assert.ok(await getOAuthGrantSubject(concurrentPayload.access_token, resource, provider),
+      'a parallel refresh must not revoke the successful client grant');
+    assert.deepEqual(await getOAuthGrantSubject(chatgptToken, resource, provider), {
+      userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+    });
+    const revokedChatGpt = await revokeClientGrant(users[0].id, chatgptClientId);
+    assert.equal(revokedChatGpt, true);
+    assert.equal(await getOAuthGrantSubject(refreshed.access_token, resource, provider), null,
+      'revocation immediately invalidates the refreshed access token');
+    const renewalAfterRevoke = await fetch(`${base}/api/oauth/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token', client_id: chatgptClientId,
+        refresh_token: concurrentPayload.refresh_token,
+        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+        client_assertion: signedChatgptAssertion(chatgptKey.privateKey, { aud: `${base}/api/oauth/token` }),
+      }),
+    });
+    assert.equal(renewalAfterRevoke.status, 400, 'revocation blocks future refresh');
 
     // The browser sees /api/oauth/token behind nginx, while the old internal
     // /oauth/token mount generates the wrong accepted private_key_jwt audience.
