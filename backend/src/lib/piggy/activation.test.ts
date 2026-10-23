@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  autoDebitEnabledAtAfterGoalReopened,
   interestAccruedThroughOnActivation,
   nextAutoDebitEnabledAt,
 } from '@/lib/piggy/activation';
@@ -32,6 +33,13 @@ test('auto-debit enabled date: set on enable, kept while on, cleared when off', 
     nextAutoDebitEnabledAt({ autoDebit: true, autoDebitEnabledAt: null }, true, NOW),
     null,
   );
+});
+
+test('F03: reopening a reached goal resets auto-debit start; other withdrawals do not', () => {
+  assert.equal(autoDebitEnabledAtAfterGoalReopened(true, true, OLD, NOW), NOW);
+  assert.equal(autoDebitEnabledAtAfterGoalReopened(true, false, OLD, NOW), OLD);
+  assert.equal(autoDebitEnabledAtAfterGoalReopened(false, true, OLD, NOW), OLD);
+  assert.equal(autoDebitEnabledAtAfterGoalReopened(true, true, null, NOW), NOW);
 });
 
 test('yield activation starts accrual from São Paulo yesterday', () => {

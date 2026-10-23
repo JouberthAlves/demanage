@@ -5,6 +5,7 @@ import { PiggyError } from '@/lib/errors';
 import { toMoney } from '@/lib/money';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
+import { autoDebitEnabledAtAfterGoalReopened } from './activation';
 import { balanceDecimalFromTransactions } from './ledger';
 
 export type DepositParams = {
@@ -282,13 +283,20 @@ export async function withdrawFromPiggyBank({
     const goalAmount =
       bank.goalAmount == null ? null : decimal(bank.goalAmount);
     const nextBalance = currentBalance.minus(requested);
+    const reopenedGoal = goalAmount != null && nextBalance.lt(goalAmount);
     const updatedBank = await tx.piggyBank.update({
       where: { id: bank.id },
       data: {
-        completedAt:
-          goalAmount != null && nextBalance.lt(goalAmount)
-            ? null
-            : bank.completedAt,
+        completedAt: reopenedGoal ? null : bank.completedAt,
+        // Resume at the withdrawal, never charging the months spent complete.
+        autoDebitEnabledAt: bank.autoDebit
+          ? autoDebitEnabledAtAfterGoalReopened(
+              bank.completedAt != null,
+              reopenedGoal,
+              bank.autoDebitEnabledAt,
+              date,
+            )
+          : bank.autoDebitEnabledAt,
       },
       include: { transactions: true },
     });
