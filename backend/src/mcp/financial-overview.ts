@@ -2,8 +2,6 @@ import { Prisma } from '@/generated/prisma/client';
 import { dayKeyInSaoPaulo, dayKeyOfDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { getPatrimonyHistory } from '@/lib/patrimony';
 import { prisma } from '@/lib/prisma';
-import { listEntries } from '@/services/entries';
-import { listExpenses } from '@/services/expenses';
 import { listPiggyCashMovements } from '@/services/piggy-banks';
 
 type Day = string | Date | null | undefined;
@@ -17,6 +15,8 @@ type IncomeRow = {
   date?: Day;
   receiptHoldForMonth?: string | null;
   receivedForMonth?: string | null;
+  archivedAt?: Day;
+  receipts?: Array<{ month: string; amount: Prisma.Decimal | number; receivedAt: Day }>;
 };
 type ExpenseRow = {
   amount: Prisma.Decimal | number;
@@ -28,8 +28,9 @@ type ExpenseRow = {
   paidForMonth?: string | null;
   cardId?: string | null;
   isInvoice?: boolean;
+  archivedAt?: Day;
   splits?: Array<{ kind: string; amount: Prisma.Decimal | number }>;
-  payments?: Array<{ paidAt: Day; amount: Prisma.Decimal | number }>;
+  payments?: Array<{ month?: string; paidAt: Day; amount: Prisma.Decimal | number }>;
 };
 type PiggyCashMovement = { type: string; amount: Prisma.Decimal | number; date: Day };
 
@@ -53,7 +54,7 @@ function cash(expense: ExpenseRow) {
   return expense.cardId ? new Prisma.Decimal(0) : new Prisma.Decimal(expense.amount);
 }
 
-/** Same current-month schedule and cash-share semantics as the Dashboard. */
+/** Current-month schedule fallback, overridden by immutable cash event records. */
 export function calculateMonthlyCash({ today, entries, expenses, movements }: {
   today: string;
   entries: IncomeRow[];
@@ -73,13 +74,23 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
   let income = new Prisma.Decimal(0);
   let outflow = new Prisma.Decimal(0);
   for (const entry of entries) {
+    for (const receipt of entry.receipts ?? []) {
+      const receivedDay = timestampKey(receipt.receivedAt);
+      if (receivedDay?.slice(0, 7) === month && receivedDay <= today) {
+        income = income.plus(receipt.amount);
+      }
+    }
+    // Archived records remain in the ledger, but create no future schedule.
+    if (entry.archivedAt) continue;
     if (entry.frequency === 'unica') {
+      if (entry.receipts?.length) continue;
       const day = key(entry.date);
       if (day && day.slice(0, 7) === month && day <= today) income = income.plus(entry.amount);
       continue;
     }
     const day = scheduled(entry.receiveDay);
     const salary = entry.type === 'salario' && entry.frequency === 'mensal';
+    if (salary && entry.receipts?.some((receipt) => receipt.month === month)) continue;
     if (salary && entry.receivedForMonth === month) {
       income = income.plus(frequencyAmount(entry.amount, entry.frequency));
       continue;
@@ -92,20 +103,21 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
     }
   }
   for (const expense of expenses) {
-    if (expense.isInvoice) {
-      for (const payment of expense.payments ?? []) {
-        const paidDay = timestampKey(payment.paidAt);
-        if (paidDay?.slice(0, 7) === month && paidDay <= today) {
-          outflow = outflow.plus(payment.amount);
-        }
+    for (const payment of expense.payments ?? []) {
+      const paidDay = timestampKey(payment.paidAt);
+      if (paidDay?.slice(0, 7) === month && paidDay <= today) {
+        outflow = outflow.plus(payment.amount);
       }
-      continue;
     }
+    if (expense.archivedAt || expense.isInvoice) continue;
     if (expense.frequency === 'unica') {
+      if (expense.payments?.length) continue;
       const day = key(expense.occurredAt);
       if (day && day.slice(0, 7) === month && day <= today) outflow = outflow.plus(cash(expense));
       continue;
     }
+    // A cycle paid early belongs to its paidAt month, never to its due month.
+    if (expense.payments?.some((payment) => payment.month === month)) continue;
     const day = scheduled(expense.dueDay);
     if (active(day, expense) && (day <= today || expense.paidForMonth === month)) {
       outflow = outflow.plus(frequencyAmount(cash(expense), expense.frequency));
@@ -125,10 +137,29 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
   };
 }
 
-/** No market quote or PatrimonySettings prerequisite for Dashboard's monthly balance. */
+/** Read the full manual cash ledger, including archived parents, separately from CRUD lists. */
 export async function getFinancialOverview(userId: string, now = new Date()) {
   const [entries, expenses, movements, settings] = await Promise.all([
-    listEntries(userId), listExpenses(userId), listPiggyCashMovements(userId),
+    prisma.entry.findMany({
+      where: { userId, systemOrigin: 'manual' },
+      select: {
+        amount: true, frequency: true, type: true, receiveDay: true,
+        startsAt: true, endsAt: true, date: true, archivedAt: true,
+        receiptHoldForMonth: true, receivedForMonth: true,
+        receipts: { select: { month: true, amount: true, receivedAt: true } },
+      },
+    }),
+    prisma.expense.findMany({
+      where: { userId, systemOrigin: 'manual' },
+      select: {
+        amount: true, frequency: true, dueDay: true, startsAt: true,
+        endsAt: true, occurredAt: true, paidForMonth: true, cardId: true,
+        isInvoice: true, archivedAt: true,
+        splits: { select: { kind: true, amount: true } },
+        payments: { select: { month: true, amount: true, paidAt: true } },
+      },
+    }),
+    listPiggyCashMovements(userId),
     prisma.patrimonySettings.findUnique({ where: { userId }, select: { id: true } }),
   ]);
   const monthly = calculateMonthlyCash({ today: todayKeyInSaoPaulo(now), entries, expenses, movements });
