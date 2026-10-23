@@ -94,6 +94,10 @@ jobs:
           fi
           git cat-file -e "$PREVIOUS_SHA^{commit}"
           git merge-base --is-ancestor "$PREVIOUS_SHA" origin/master
+          if ! git merge-base --is-ancestor "$PREVIOUS_SHA" "$TARGET_SHA"; then
+            echo "::error::Normal production promotion must be a fast-forward from the live release; use a separately reviewed rollback procedure."
+            exit 1
+          fi
           if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
             backend/prisma backend/prisma.config.ts backend/entrypoint.sh docker-compose.prod.yml; then
             # Strictly scoped, single-release exception: this exact SHA was
