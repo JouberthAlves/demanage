@@ -84,7 +84,6 @@ test('F01: a settled PIX one-off cannot be moved to card or repriced; descriptiv
       expense.id,
       parseUpdateExpense({
         amount: 100,
-        splits: [{ kind: 'pix', percent: 100 }],
       }),
     );
     assert.equal(Number(renamed.amount), 100);
@@ -328,7 +327,12 @@ test('F01: a billed card-only one-off remains immutable even with no cash paymen
     for (const change of [
       { amount: 110 },
       { cardId: otherCard.id },
-      { splits: [{ kind: 'pix', percent: 100 }] },
+      {
+        splits: [
+          { kind: 'pix', percent: 50 },
+          { kind: 'card', cardId: otherCard.id, percent: 50 },
+        ],
+      },
     ]) {
       await assert.rejects(
         () => updateExpense(user.id, expense.id, parseUpdateExpense(change)),
