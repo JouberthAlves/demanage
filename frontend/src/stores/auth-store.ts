@@ -2,6 +2,10 @@ import { create } from 'zustand';
 
 import { api, onSessionExpired } from '@/lib/api';
 import { getApiErrorCode, getApiErrorStatus } from '@/lib/api-error';
+import {
+  publishAuthSessionChange,
+  subscribeAuthSessionChanges,
+} from '@/stores/auth-session-sync';
 import type { AuthUser } from '@/types/auth';
 
 type UpdateProfileInput = {
@@ -32,6 +36,7 @@ type AuthState = {
   updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
   generateRecoveryCode: (currentPassword: string) => Promise<string>;
   logout: () => Promise<void>;
+  externalSessionChanged: () => void;
 };
 
 // An earlier /auth/me response must never restore a previous user's session
@@ -57,8 +62,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
     sessionRevision: 0,
 
     setUser: (user) => {
+      const previousUser = get().user;
       ++meRequestVersion;
       setSessionUser(user);
+      if (previousUser && !user) publishAuthSessionChange();
     },
 
     fetchMe: async () => {
@@ -89,6 +96,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       });
       ++meRequestVersion;
       setSessionUser(data.user, true);
+      publishAuthSessionChange();
       return data.user;
     },
 
@@ -101,6 +109,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       });
       ++meRequestVersion;
       setSessionUser(data.user, true);
+      publishAuthSessionChange();
       return data;
     },
 
@@ -147,13 +156,31 @@ export const useAuthStore = create<AuthState>((set, get) => {
         if (clearLocalSession) {
           ++meRequestVersion;
           setSessionUser(null, true);
+          publishAuthSessionChange();
         }
       }
+    },
+    externalSessionChanged: () => {
+      // Drop the previous account immediately; only /auth/me can establish
+      // which account currently owns the shared cookie.
+      ++meRequestVersion;
+      setSessionUser(null, true);
+      void get().fetchMe();
     },
   };
 });
 
-onSessionExpired(() => {
-  const { user, setUser } = useAuthStore.getState();
-  if (user) setUser(null);
-}, () => useAuthStore.getState().sessionRevision);
+/** Register once at application entry; returns cleanup for deterministic tests. */
+export function startAuthSessionSync() {
+  return subscribeAuthSessionChanges(() => {
+    useAuthStore.getState().externalSessionChanged();
+  });
+}
+
+onSessionExpired(
+  () => {
+    const { user, setUser } = useAuthStore.getState();
+    if (user) setUser(null);
+  },
+  () => useAuthStore.getState().sessionRevision,
+);
