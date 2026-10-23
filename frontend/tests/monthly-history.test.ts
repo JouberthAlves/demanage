@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { buildMonthlyHistory } from '@/lib/monthly-history';
 import type { Income, RecurringExpense } from '@/types/finance';
+import type { AssetTransaction } from '@/types/patrimony';
 
 function expense(overrides: Partial<RecurringExpense> = {}): RecurringExpense {
   return {
@@ -29,6 +30,64 @@ function income(overrides: Partial<Income> = {}): Income {
     ...overrides,
   };
 }
+
+function assetTransaction(
+  overrides: Partial<AssetTransaction>,
+): AssetTransaction {
+  return {
+    id: 'asset-transaction-1',
+    asset: 'BTC',
+    type: 'BUY',
+    quantity: '0.01',
+    cashAmountBrl: '1000',
+    feeAmountBrl: '0',
+    feePercent: null,
+    costBasisKnown: true,
+    date: '2026-09-02',
+    note: null,
+    expenseId: 'linked-internal-expense',
+    entryId: null,
+    createdAt: '2026-09-02T12:00:00.000Z',
+    ...overrides,
+  };
+}
+
+test('F08: asset cash purchases and sales enter dashboard cash exactly once, without adjustments', () => {
+  const now = new Date('2026-09-10T16:00:00.000Z');
+  const transactions: AssetTransaction[] = [
+    assetTransaction({ id: 'buy', cashAmountBrl: '1000', date: '2026-09-02' }),
+    assetTransaction({
+      id: 'sell',
+      type: 'SELL',
+      cashAmountBrl: '350',
+      expenseId: null,
+      entryId: 'internal-sale',
+      date: '2026-09-03',
+    }),
+    assetTransaction({
+      id: 'adjust',
+      type: 'MANUAL_ADJUSTMENT',
+      cashAmountBrl: '9999',
+      expenseId: null,
+      entryId: null,
+    }),
+    assetTransaction({
+      id: 'future',
+      type: 'SELL',
+      cashAmountBrl: '5000',
+      expenseId: null,
+      entryId: 'future-sale',
+      date: '2026-09-15',
+    }),
+  ];
+  const history = buildMonthlyHistory([], [], now, 6, [], transactions);
+  assert.deepEqual(history.at(-1), {
+    month: '2026-09',
+    income: 350,
+    expense: 1000,
+    hasActivity: true,
+  });
+});
 
 test('histórico ignora itens vencidos sem pagamento ou recebimento registrado', () => {
   const now = new Date(2026, 8, 9, 12);
@@ -248,7 +307,10 @@ test('month boundaries and timestamps follow the São Paulo financial calendar',
     2,
   );
 
-  assert.deepEqual(history.map((month) => month.month), ['2026-08', '2026-09']);
+  assert.deepEqual(
+    history.map((month) => month.month),
+    ['2026-08', '2026-09'],
+  );
   assert.equal(history.at(-1)?.expense, 80);
 });
 

@@ -12,6 +12,7 @@ import type {
   MonthlySnapshot,
   RecurringExpense,
 } from '@/types/finance';
+import type { AssetTransaction } from '@/types/patrimony';
 
 /** Month of a past timestamp; timestamps after today are ignored. */
 function monthFromTimestamp(value: string, now: Date) {
@@ -40,6 +41,29 @@ export function piggyCashContribution(
         : sum,
     0,
   );
+}
+
+/** Asset trades create an internal ledger expense/entry hidden from normal CRUD.
+ * Count the source transaction once, only if its cash ledger movement exists.
+ * Manual position adjustments have no cash impact.
+ */
+export function assetCashContribution(
+  transactions: AssetTransaction[],
+  month: string,
+  type: 'BUY' | 'SELL',
+  now: Date,
+) {
+  return transactions.reduce((sum, transaction) => {
+    if (
+      transaction.type !== type ||
+      monthFromDateOnly(transaction.date, now) !== month ||
+      (type === 'BUY' ? !transaction.expenseId : !transaction.entryId)
+    ) {
+      return sum;
+    }
+    const cash = Number(transaction.cashAmountBrl);
+    return sum + (Number.isFinite(cash) && cash > 0 ? cash : 0);
+  }, 0);
 }
 
 function sumPaidExpenses(
@@ -97,6 +121,7 @@ export function buildMonthlyHistory(
   now = new Date(),
   monthCount = 6,
   piggyMovements: PiggyCashMovement[] = [],
+  assetTransactions: AssetTransaction[] = [],
 ): MonthlySnapshot[] {
   if (monthCount <= 0) return [];
 
@@ -104,10 +129,14 @@ export function buildMonthlyHistory(
   const currentMonth = currentMonthKey(now);
   for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
     const monthKey = addMonths(currentMonth, -offset);
-    const income = sumReceivedIncome(incomes, monthKey, now)
-      + piggyCashContribution(piggyMovements, monthKey, 'withdraw', now);
-    const expense = sumPaidExpenses(expenses, monthKey, now)
-      + piggyCashContribution(piggyMovements, monthKey, 'deposit', now);
+    const income =
+      sumReceivedIncome(incomes, monthKey, now) +
+      piggyCashContribution(piggyMovements, monthKey, 'withdraw', now) +
+      assetCashContribution(assetTransactions, monthKey, 'SELL', now);
+    const expense =
+      sumPaidExpenses(expenses, monthKey, now) +
+      piggyCashContribution(piggyMovements, monthKey, 'deposit', now) +
+      assetCashContribution(assetTransactions, monthKey, 'BUY', now);
 
     history.push({
       month: monthKey,
