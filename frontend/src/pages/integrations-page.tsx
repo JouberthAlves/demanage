@@ -62,7 +62,7 @@ export function IntegrationsPage() {
     <div className='space-y-7'>
       <title>Integrações | deManage</title>
       <PageHeader title='Integrações' description='Gerencie os aplicativos autorizados a acessar seus dados financeiros.' />
-      <p className='text-sm text-muted-foreground'>A emissão de um token confirma a etapa OAuth no deManage, mas não comprova a instalação no aplicativo externo.</p>
+      <p className='text-sm text-muted-foreground'>A emissão de um token confirma a etapa OAuth no deManage, mas não confirma a instalação no aplicativo externo.</p>
       {error && <p role='alert' className='text-sm text-destructive'>{error}</p>}
       {loading ? <p>Carregando integrações…</p> : connections.length === 0 ? (
         <div className='rounded-xl border border-border p-6 text-sm text-muted-foreground'>Você não possui aplicativos autorizados.</div>
