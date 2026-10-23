@@ -45,6 +45,8 @@ export function runDailyMaintenance<T>(
   const registry = byKind;
 
   const old = registry.get(kind);
+  // A stale observer must never retire maintenance for a newer day.
+  if (old && old.day > day) return;
   if (old?.day === day) return;
   if (old) {
     old.retired = true;
