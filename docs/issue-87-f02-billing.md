@@ -1,35 +1,16 @@
-# Issue #87 · F02 — fechamento atrasado de despesas de cartão
+﻿# Issue #87 — F02: competências históricas de despesas no cartão
 
-O schema atual guarda apenas o valor, a agenda e os splits **atuais** da
-despesa. O fechamento percorre competências anteriores e aplica esses campos
-atuais a todas elas. Portanto, editar em outubro uma obrigação de agosto e
-setembro ainda não faturada pode alterar silenciosamente os valores passados.
+## Contrato de segurança implementado
 
-## Política segura implementada (sem migração)
+- O fechamento de cartão usa versões de obrigação por competência (`ExpenseObligationVersion`), preservando valor e divisões em centavos. Alterações financeiras recorrentes geram uma versão com vigência no mês da alteração; o backfill não pode projetar valores novos sobre competências anteriores com snapshots existentes.
+- Para linhas legadas sem prova histórica suficiente, alterações potencialmente destrutivas permanecem bloqueadas até executar `POST /cards/process-billing`. Faturas liquidadas não podem ser reescritas; alterações de frequência/agenda com pagamentos confirmados continuam bloqueadas.
+- Um cadastro **novo** de despesa recorrente com cartão que possua ocorrências já cobertas por `card.lastInvoicedOn` recebe **409** antes de qualquer INSERT. Isso evita perder silenciosamente competências anteriores. Exemplo: cartão fechou 05/09; em 10/09, mensal R$100 com início 01/09 e dia 1 é recusada, porque setembro já foi fechado. Uma recorrência com início 07/09 e vencimento no dia 10 segue permitida.
+- A verificação considera a criação e a última fatura de cada cartão envolvido, com contagem semanal e ajuste do dia 31 idênticos aos cálculos do planejador. Split com dois cartões também precisa passar em ambos. A guarda roda sob o lock transacional do usuário.
 
-- `PATCH /expenses/:id` que altera valor, frequência, agenda ou splits/cartão
-  recebe **409** enquanto qualquer cartão afetado tiver fechamento pendente.
-- `DELETE /expenses/:id` (arquivamento) obedece à mesma regra para preservar
-  cobranças passadas. Edições apenas de nome/notas/categoria não recalculam
-  cobranças e continuam disponíveis.
-- O usuário deve executar `POST /cards/process-billing` e então repetir a
-  operação. O bloqueio e o fechamento usam o mesmo lock por usuário.
-- Exemplo: cartão fecha dia 31; obrigação de R$ 100 com cartão 60% em agosto e
-  setembro; tentativa de editar em outubro para R$ 200/cartão 75% é bloqueada
-  até emitir agosto e setembro (R$ 60 cada). Depois, outubro em aberto emite
-  R$ 150 no cartão após a edição.
+## Verificação e limites
 
-## Limites
+`backend/src/lib/billing/retroactive-recurring.test.ts` cobre os limites dos ciclos; `retroactive-recurring.itest.ts` cobre 409 atômico e um cadastro permitido no PostgreSQL. A integração real exige PostgreSQL descartável e deve passar no CI antes de liberação.
 
-Esta política **não reconstrói** versões históricas já perdidas, nem corrige
-faturas produzidas anteriormente com valores incorretos. Ela impede nova
-reescrita decorrente de edições pelo serviço. Caso o fechamento do próprio mês
-da edição já esteja vencido, ele também precisa ser emitido com o valor anterior;
-o novo valor passará a valer nos ciclos abertos seguintes. Editar diretamente o
-PostgreSQL ou por outros escritores fora do serviço não é coberto pela trava.
+O contrato **não** recupera valores históricos que tenham sido sobrescritos antes da implantação da versão por competência, nem edita automaticamente faturas já fechadas. Para efetivar um débito retroativo desse tipo, é necessário um fluxo contábil separado com ajuste auditável, autorizado e idempotente — não um POST recorrente que altera o passado. Nenhuma migração deve imputar valores passados sem evidência.
 
-Para permitir edição retroativa por competência sem fechamento prévio seria
-necessário persistir revisões atômicas e imutáveis de valor, splits e agenda,
-com vigência explícita por competência, adaptar o planejador e definir o
-tratamento de dados legados sem histórico. Uma migração que atribua um valor
-histórico presumido aos ciclos anteriores não é segura.
+Sem merge ou deploy de produção antes de CI, revisão e aprovação.

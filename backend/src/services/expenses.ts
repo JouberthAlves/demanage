@@ -5,6 +5,7 @@ import {
   obligationSplitSnapshot,
   parseObligationVersions,
 } from '@/lib/billing/obligation-versions';
+import { hasRetroactiveClosedCardCharge } from '@/lib/billing/retroactive-recurring';
 import { todayInSaoPaulo } from '@/lib/card-billing';
 import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { dateKey } from '@/lib/decimal';
@@ -214,6 +215,30 @@ export async function createExpense(userId: string, input: CreateExpenseInput) {
       tx,
     });
 
+    // A retroactive recurring card charge after a closed cycle would never be
+    // billed by the incremental planner. Reject atomically instead of silently
+    // dropping the historical competence or mutating an immutable invoice.
+    if (input.frequency !== 'unica') {
+      const recurringFrequency = input.frequency;
+      const cardIds = [...new Set(resolvedSplits
+        .filter((split) => split.kind === 'card' && split.cardId)
+        .map((split) => split.cardId!))];
+      if (cardIds.length) {
+        const cards = await tx.card.findMany({
+          where: { userId, id: { in: cardIds }, archivedAt: null },
+          select: { createdAt: true, lastInvoicedOn: true },
+        });
+        if (cards.some((card) => hasRetroactiveClosedCardCharge(card, {
+          frequency: recurringFrequency,
+          amount: input.amount,
+          startsAt: schedule.startsAt ?? null,
+          endsAt: schedule.endsAt ?? null,
+          dueDay: schedule.day ?? null,
+        }))) {
+          throw conflict('Recorrência retroativa inclui competência já faturada; use um ajuste auditável, não altere fatura fechada');
+        }
+      }
+    }
     const created = await tx.expense.create({
       data: {
         userId,
