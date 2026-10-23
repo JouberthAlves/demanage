@@ -233,6 +233,7 @@ test('F02: delayed closes preserve old monthly amount/split before October-equiv
         amount: 100,
         category: 'outro',
         frequency: 'mensal',
+        dueDay: 1,
         startsAt: firstOfOldMonth,
         createdAt: firstOfOldMonth,
         splits: {
