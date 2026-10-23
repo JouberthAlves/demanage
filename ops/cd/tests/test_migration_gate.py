@@ -97,6 +97,11 @@ class MigrationGateTests(unittest.TestCase):
         self.assertNotIn('ON UPDATE CASCADE NOT VALID', sql)
         self.assertEqual(sql.count('ON UPDATE NO ACTION NOT VALID'), 2)
         self.assertIn('references: [id, userId], onDelete: Cascade, onUpdate: NoAction', schema)
+    def test_f02_obligation_version_ddl_is_atomic(self):
+        root = Path(__file__).resolve().parents[3]
+        sql = (root / 'backend/prisma/migrations/20261023213000_expense_obligation_versions/migration.sql').read_text(encoding='utf-8').strip()
+        self.assertTrue(sql.startswith('BEGIN;'), 'F02 DDL must start explicit transaction')
+        self.assertTrue(sql.endswith('COMMIT;'), 'F02 DDL must finish in the same transaction')
     def test_parser_is_mandatory_without_installed_dependency(self):
         from unittest import mock
 
