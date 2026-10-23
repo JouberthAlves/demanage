@@ -18,6 +18,7 @@ import {
   percentDiff,
   withTodayPoint,
 } from '@/lib/patrimony-calc';
+import { readPatrimonySnapshot } from '@/lib/patrimony-snapshot';
 import { prisma } from '@/lib/prisma';
 
 // Pure maths lives in lib/patrimony-calc.ts; re-exported for callers.
@@ -38,12 +39,8 @@ export async function getPatrimonyHistory(
   toInput?: string,
   now = new Date(),
 ) {
-  const settings = await prisma.patrimonySettings.findUnique({
-    where: { userId },
-  });
-  if (!settings) {
-    throw new PatrimonyError('Patrimônio ainda não configurado');
-  }
+  const { settings, expenses, entries, assetTransactions, piggyTransactions } =
+    await readPatrimonySnapshot(prisma, userId);
 
   const today = patrimonyToday(now);
   const base = new Date(
@@ -64,23 +61,6 @@ export async function getPatrimonyHistory(
     requestedFrom < calculationBase ? calculationBase : requestedFrom;
   const to = requestedTo > today ? today : requestedTo;
   if (from > to) throw new PatrimonyError('Período inválido');
-
-  const [expenses, entries, assetTransactions, piggyTransactions] =
-    await Promise.all([
-      prisma.expense.findMany({
-        where: { userId },
-        include: { splits: true, payments: true },
-      }),
-      prisma.entry.findMany({ where: { userId }, include: { receipts: true } }),
-      prisma.assetTransaction.findMany({
-        where: { userId },
-        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-      }),
-      prisma.piggyTransaction.findMany({
-        where: { userId },
-        orderBy: [{ date: 'asc' }, { createdAt: 'asc' }],
-      }),
-    ]);
 
   const internalExpenseIds = new Set<string>();
   const internalEntryIds = new Set<string>();
