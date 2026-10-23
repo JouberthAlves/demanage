@@ -2,8 +2,10 @@ import type { Prisma } from '@/generated/prisma/client';
 import { badRequest, conflict, notFound } from '@/http/errors';
 import { cardsWithUnclosedBilling } from '@/lib/billing/guard';
 import {
+  legacyBaselineMonth,
   obligationSplitSnapshot,
   parseObligationVersions,
+  scheduleMovesEarlier,
 } from '@/lib/billing/obligation-versions';
 import { hasRetroactiveClosedCardCharge } from '@/lib/billing/retroactive-recurring';
 import { todayInSaoPaulo } from '@/lib/card-billing';
@@ -403,6 +405,10 @@ export async function updateExpense(
         (schedule.endsAt ? dateKey(schedule.endsAt) : null) !==
         (existing.endsAt ? dateKey(existing.endsAt) : null))
     );
+    if (existing.frequency !== 'unica' && nextFrequency !== 'unica' &&
+      scheduleMovesEarlier(existing.startsAt, schedule.startsAt)) {
+      throw conflict('Não é possível antecipar o início de uma despesa recorrente; crie um ajuste auditável para competências anteriores');
+    }
     if (oldScheduleChanged && existing.payments.length) {
       throw conflict('Despesa com pagamento registrado não pode alterar recorrência ou agenda');
     }
@@ -556,7 +562,7 @@ export async function updateExpense(
           data: {
             expenseId: id,
             sequence: 1,
-            effectiveMonth,
+            effectiveMonth: legacyBaselineMonth(existing.startsAt, existing.createdAt),
             amount: existing.amount,
             cardId: existing.cardId,
             splits: obligationSplitSnapshot(existing.splits),

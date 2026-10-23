@@ -134,7 +134,7 @@ test('F02: old expenses without recorded versions must first settle overdue invo
       where: { expenseId: legacy.id }, orderBy: { sequence: 'asc' },
     });
     assert.deepEqual(versions.map((row) => [row.effectiveMonth, Number(row.amount)]), [
-      ['2026-10', 100], ['2026-10', 200],
+      ['2026-08', 100], ['2026-10', 200],
     ]);
     assert.deepEqual(await processUserCardBilling(user.id, at('2026-11-01')), { createdCount: 1 });
     const invoices = await prisma.expense.findMany({

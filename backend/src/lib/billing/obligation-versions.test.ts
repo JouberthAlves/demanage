@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import type { ExpenseObligationVersion } from '@/generated/prisma/client';
 
-import { obligationSplitSnapshot, parseObligationVersions } from './obligation-versions';
+import { legacyBaselineMonth, obligationSplitSnapshot, parseObligationVersions, scheduleMovesEarlier } from './obligation-versions';
 
 function stored(splits: unknown): ExpenseObligationVersion {
   return {
@@ -36,4 +36,18 @@ test('F02: malformed historical split must fail closed, never use a current pric
   ]) {
     assert.throws(() => parseObligationVersions([stored(splits)]), /Invalid|match/);
   }
+});
+
+test('P1 Codex review: legacy baseline begins in first open-cycle obligation month, not edit month', () => {
+  const at = (value: string) => new Date(`${value}T12:00:00.000Z`);
+  assert.equal(legacyBaselineMonth(at('2026-01-01'), at('2025-12-01')), '2026-01');
+  assert.equal(legacyBaselineMonth(null, at('2026-01-15')), '2026-01');
+});
+
+test('P2 Codex review: moving recurring startsAt earlier is a financial schedule backdate', () => {
+  const at = (value: string) => new Date(`${value}T12:00:00.000Z`);
+  assert.equal(scheduleMovesEarlier(at('2026-12-01'), at('2026-10-01')), true);
+  assert.equal(scheduleMovesEarlier(at('2026-12-01'), at('2026-12-01')), false);
+  assert.equal(scheduleMovesEarlier(at('2026-12-01'), at('2027-01-01')), false);
+  assert.equal(scheduleMovesEarlier(at('2026-12-01'), undefined), false);
 });
