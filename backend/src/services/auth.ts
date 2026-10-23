@@ -108,26 +108,56 @@ export function parseCurrentPassword(body: Record<string, unknown>) {
   return password;
 }
 
-export async function rotateRecoveryCode(
+/**
+ * Validate and publish one recovery-code rotation against the same credential
+ * snapshot. A password reset or session revocation between read and write
+ * makes the CAS fail instead of publishing a code from stale authentication.
+ */
+export async function rotateRecoveryCodeInTransaction(
   userId: string,
   currentPassword: string,
+  userStore: Pick<typeof prisma.user, 'findUnique' | 'updateMany'>,
 ) {
-  const user = await prisma.user.findUnique({
+  const user = await userStore.findUnique({
     where: { id: userId },
-    select: { passwordHash: true },
+    select: {
+      passwordHash: true,
+      sessionVersion: true,
+      recoveryCodeHash: true,
+    },
   });
   if (!user || !(await comparePassword(currentPassword, user.passwordHash))) {
     throw unauthorized('Senha atual inválida');
   }
 
   const recoveryCode = generateRecoveryCode();
-  await prisma.user.update({
-    where: { id: userId },
+  const { count } = await userStore.updateMany({
+    // The snapshot is authenticated but may already have been superseded.
+    // All credential/session fields must still match when this update commits.
+    where: {
+      id: userId,
+      passwordHash: user.passwordHash,
+      sessionVersion: user.sessionVersion,
+      recoveryCodeHash: user.recoveryCodeHash,
+    },
     data: {
       recoveryCodeHash: hashRecoveryCode(recoveryCode),
       recoveryCodeCreatedAt: new Date(),
     },
   });
+  if (count !== 1) throw unauthorized('Senha atual inválida');
+
+  return recoveryCode;
+}
+
+export async function rotateRecoveryCode(
+  userId: string,
+  currentPassword: string,
+) {
+  const recoveryCode = await prisma.$transaction(
+    (tx) => rotateRecoveryCodeInTransaction(userId, currentPassword, tx.user),
+    { maxWait: 10_000, timeout: 15_000 },
+  );
 
   console.info('[security] recovery_code_rotated', {
     userId,
