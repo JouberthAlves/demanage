@@ -2,6 +2,7 @@ import { isIP } from 'node:net';
 import Provider, { type Client, type ClientMetadata, type Configuration, errors } from 'oidc-provider';
 
 import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { APP_URL } from '@/utils/var';
 
 import { OAuthPrismaAdapter } from './adapter';
@@ -247,6 +248,7 @@ export type OAuthGrantSubject = {
   userId: string;
   clientId: string;
   scopes: Set<FinanceScope>;
+  oauthGrantId: string;
 };
 
 /** Verify opaque bearer credentials against the provider's DB and live user consent. */
@@ -274,15 +276,15 @@ export async function getOAuthGrantSubject(
     provider.Grant.find(token.grantId),
     prisma.user.findUnique({ where: { id: token.accountId }, select: { id: true } }),
   ]);
-  return grant && user ? { userId: user.id, clientId: token.clientId, scopes } : null;
+  return grant && user ? { userId: user.id, clientId: token.clientId, scopes, oauthGrantId: token.grantId } : null;
 }
 
 export async function revokeClientGrant(userId: string, clientId: string) {
-  const connection = await prisma.oAuthConnection.findUnique({ where: { userId_clientId: { userId, clientId } } });
-  if (!connection || connection.revokedAt) return false;
-  await prisma.$transaction([
-    prisma.oAuthConnection.update({ where: { id: connection.id }, data: { revokedAt: new Date() } }),
-    prisma.oAuthArtifact.deleteMany({ where: { OR: [{ grantId: connection.grantId }, { model: 'Grant', id: connection.grantId }] } }),
-  ]);
-  return true;
+  return withUserWriteLockTransaction(userId, async (tx) => {
+    const connection = await tx.oAuthConnection.findUnique({ where: { userId_clientId: { userId, clientId } } });
+    if (!connection || connection.revokedAt) return false;
+    await tx.oAuthConnection.update({ where: { id: connection.id }, data: { revokedAt: new Date() } });
+    await tx.oAuthArtifact.deleteMany({ where: { OR: [{ grantId: connection.grantId }, { model: 'Grant', id: connection.grantId }] } });
+    return true;
+  });
 }

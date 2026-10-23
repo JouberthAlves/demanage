@@ -39,7 +39,8 @@ export function createSignedFinanceIntent(
   const nonce = randomBytes(24).toString('base64url');
   const envelope: FinanceIntentEnvelope = {
     version: INTENT_VERSION,
-    ...identity,
+    userId: identity.userId,
+    clientId: identity.clientId,
     nonce,
     issuedAtMs: nowMs,
     expiresAtMs: nowMs + INTENT_LIFETIME_MS,

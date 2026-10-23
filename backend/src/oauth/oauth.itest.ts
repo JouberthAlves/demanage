@@ -266,6 +266,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     const { access_token: chatgptToken, refresh_token: chatgptRefresh } = await tokenFromChatgpt.json() as { access_token: string; refresh_token: string };
     assert.deepEqual(await getOAuthGrantSubject(chatgptToken, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(chatgptToken))!.grantId,
     });
 
     const refreshArtifact = await provider.RefreshToken.find(chatgptRefresh);
@@ -295,6 +296,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.notEqual(refreshed.refresh_token, chatgptRefresh, 'rotating refresh token');
     assert.deepEqual(await getOAuthGrantSubject(refreshed.access_token, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(refreshed.access_token))!.grantId,
     });
     assert.equal((await connectionsFor(0)).find((entry) => entry.clientId === chatgptClientId)?.connectedAt,
       initialConnectionTime, 'refresh should not change the original connection time');
@@ -315,6 +317,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
       'a parallel refresh must not revoke the successful client grant');
     assert.deepEqual(await getOAuthGrantSubject(chatgptToken, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(chatgptToken))!.grantId,
     });
     const revokedChatGpt = await revokeClientGrant(users[0].id, chatgptClientId);
     assert.equal(revokedChatGpt, true);
@@ -386,6 +389,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.ok(firstToken);
     assert.deepEqual(await getOAuthGrantSubject(firstToken, resource, provider), {
       userId: users[0].id, clientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(firstToken))!.grantId,
     });
     assert.equal(await getOAuthGrantSubject(firstToken, `${resource}/other`, provider), null);
 
@@ -395,6 +399,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     const { access_token: secondToken } = await secondResponse.json() as { access_token: string };
     assert.deepEqual(await getOAuthGrantSubject(secondToken, resource, provider), {
       userId: users[1].id, clientId, scopes: new Set(['finance:write']),
+      oauthGrantId: (await provider.AccessToken.find(secondToken))!.grantId,
     });
     const signedPreRecovery = await authorize(1, 'finance:read', chatgptClientId, chatgptCallback);
     const signedPreRecoveryResponse = await exchange(signedPreRecovery.code, signedPreRecovery.pkceVerifier,
@@ -423,6 +428,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.equal(exchangedAfterRecovery.status, 400, 'codes issued before password recovery must be invalid');
     assert.deepEqual(await getOAuthGrantSubject(firstToken, resource, provider), {
       userId: users[0].id, clientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(firstToken))!.grantId,
     });
     assert.equal(await revokeClientGrant(users[0].id, clientId), true);
     assert.equal(await getOAuthGrantSubject(firstToken, resource, provider), null);
