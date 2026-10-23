@@ -68,7 +68,7 @@ class MigrationGateTests(unittest.TestCase):
         '''
         validate_additive_sql(safe, "backend/prisma/migrations/20261023000100_test/migration.sql")
 
-    def test_exactly_reviewed_migrations_allow_documented_data_backfill_and_trigger(self):
+    def test_exactly_reviewed_migrations_allow_documented_backfill_and_trigger(self):
         root = Path(__file__).resolve().parents[3]
         for folder in (
             '20261023210000_piggy_correction_origin',
@@ -82,6 +82,13 @@ class MigrationGateTests(unittest.TestCase):
                     validate_additive_sql(sql + '\nSELECT 1;', path)
                 with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
                     validate_additive_sql(sql, 'backend/prisma/migrations/20261023000100_unreviewed/migration.sql')
+
+    def test_unsafe_c04_owner_fk_update_cascade_remains_blocked(self):
+        root = Path(__file__).resolve().parents[1]
+        path = 'backend/prisma/migrations/20261023211000_c04_owner_composite_fks/migration.sql'
+        sql = (root / 'tests/fixtures/20261023211000_c04_owner_composite_fks.sql').read_text(encoding='utf-8')
+        with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
+            validate_additive_sql(sql, path)
 
     def test_parser_is_mandatory_without_installed_dependency(self):
         from unittest import mock
