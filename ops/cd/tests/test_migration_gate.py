@@ -90,6 +90,13 @@ class MigrationGateTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
             validate_additive_sql(sql, path)
 
+    def test_c04_migration_cannot_reparent_child_owner_by_update_cascade(self):
+        root = Path(__file__).resolve().parents[3]
+        sql = (root / 'backend/prisma/migrations/20261023211000_c04_owner_composite_fks/migration.sql').read_text(encoding='utf-8')
+        schema = (root / 'backend/prisma/schema.prisma').read_text(encoding='utf-8')
+        self.assertNotIn('ON UPDATE CASCADE NOT VALID', sql)
+        self.assertEqual(sql.count('ON UPDATE NO ACTION NOT VALID'), 2)
+        self.assertIn('references: [id, userId], onDelete: Cascade, onUpdate: NoAction', schema)
     def test_parser_is_mandatory_without_installed_dependency(self):
         from unittest import mock
 

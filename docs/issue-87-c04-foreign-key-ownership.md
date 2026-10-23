@@ -53,3 +53,16 @@ Next review: check actual preflight results on disposable/staging PostgreSQL,
 exercise delete cascades and migrations, and address nullable `SET NULL`
 relations in a dedicated milestone. No production DB, deploy or merge is
 authorized by this audit.
+
+### Owner rotation safety
+
+The original unshipped migration declared `ON UPDATE CASCADE` on the new
+compound foreign keys. A database writer could then change `PiggyBank.userId`
+or `FinanceMcpOperation.userId` and automatically move historical child rows to
+the new account. The revised SQL and Prisma schema use **ON UPDATE NO ACTION**.
+Adversarial PostgreSQL tests attempt both reparentings with existing financial
+children and must fail without rewriting either child owner. Ordinary deletes
+still cascade as specified. The old unsafe SQL remains a blocked fixture.
+
+The restrictive production migration gate remains closed until the new SQL bytes
+receive explicit review and a disposable PostgreSQL migration rehearsal.

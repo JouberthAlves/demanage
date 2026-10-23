@@ -43,16 +43,18 @@ CREATE UNIQUE INDEX "FinanceMcpUndo_operationId_userId_key"
 -- Add the new ownership checks before dropping the original single-ID FKs.
 -- NOT VALID reduces the initial validation lock; new writes are checked
 -- immediately. VALIDATE must succeed before the old FKs can be dropped.
+-- ON UPDATE NO ACTION prevents silently transferring financial children to a
+-- newly assigned owner if the parent userId is ever changed.
 ALTER TABLE "PiggyTransaction"
   ADD CONSTRAINT "PiggyTransaction_piggyBankId_userId_fkey"
   FOREIGN KEY ("piggyBankId", "userId")
   REFERENCES "PiggyBank"("id", "userId")
-  ON DELETE CASCADE ON UPDATE CASCADE NOT VALID;
+  ON DELETE CASCADE ON UPDATE NO ACTION NOT VALID;
 ALTER TABLE "FinanceMcpUndo"
   ADD CONSTRAINT "FinanceMcpUndo_operationId_userId_fkey"
   FOREIGN KEY ("operationId", "userId")
   REFERENCES "FinanceMcpOperation"("id", "userId")
-  ON DELETE CASCADE ON UPDATE CASCADE NOT VALID;
+  ON DELETE CASCADE ON UPDATE NO ACTION NOT VALID;
 
 ALTER TABLE "PiggyTransaction"
   VALIDATE CONSTRAINT "PiggyTransaction_piggyBankId_userId_fkey";
