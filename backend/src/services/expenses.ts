@@ -1,5 +1,6 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { badRequest, conflict, notFound } from '@/http/errors';
+import { cardsWithUnclosedBilling } from '@/lib/billing/guard';
 import { todayInSaoPaulo } from '@/lib/card-billing';
 import { dateKey } from '@/lib/decimal';
 import {
@@ -30,6 +31,29 @@ export const expenseInclude = {
   customTag: { select: customTagSelect },
   ...expenseSplitInclude,
 } satisfies Prisma.ExpenseInclude;
+
+/**
+ * Until obligation revisions are stored per competence, editing or removing a
+ * card charge before pending closes would rewrite historical invoice amounts.
+ * The billing endpoint acquires the same user lock and can settle these first.
+ */
+async function assertAffectedCardsCaughtUp(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  cardIds: Array<string | null | undefined>,
+) {
+  const ids = [...new Set(cardIds.filter((id): id is string => !!id))];
+  if (ids.length === 0) return;
+
+  const cards = await tx.card.findMany({
+    where: { userId, id: { in: ids }, archivedAt: null },
+  });
+  if (cardsWithUnclosedBilling(cards).length > 0) {
+    throw conflict(
+      'Feche as faturas pendentes do cartão antes de editar ou excluir esta despesa; depois tente novamente',
+    );
+  }
+}
 
 type ExpenseWithRelations = Prisma.ExpenseGetPayload<{
   include: { splits: true; payments: true };
@@ -243,6 +267,23 @@ export async function updateExpense(
       nextFrequency,
     });
 
+    const changesCardHistory =
+      input.amount !== undefined ||
+      input.frequency !== undefined ||
+      input.cardId !== undefined ||
+      input.splits !== undefined ||
+      input.schedule.day !== undefined ||
+      input.schedule.startsAt !== undefined ||
+      input.schedule.endsAt !== undefined ||
+      input.schedule.date !== undefined;
+    if (changesCardHistory) {
+      await assertAffectedCardsCaughtUp(tx, userId, [
+        existing.cardId,
+        ...existing.splits.map((split) => split.cardId),
+        ...(nextSplits ?? []).map((split) => split.cardId),
+      ]);
+    }
+
     // updatedAt como guarda otimista contra escritores fora do lock do usuário.
     const { count } = await tx.expense.updateMany({
       where: { id, userId, updatedAt: existing.updatedAt },
@@ -369,6 +410,7 @@ export async function archiveExpense(userId: string, id: string) {
   await withUserWriteLockTransaction(userId, async (tx) => {
     const existing = await tx.expense.findFirst({
       where: { id, userId, archivedAt: null },
+      include: { splits: true },
     });
     if (!existing) throw notFound(NOT_FOUND_MESSAGE);
     if (existing.systemOrigin !== 'manual') {
@@ -381,6 +423,11 @@ export async function archiveExpense(userId: string, id: string) {
         'Faturas preservam o histórico do ciclo e não podem ser excluídas',
       );
     }
+
+    await assertAffectedCardsCaughtUp(tx, userId, [
+      existing.cardId,
+      ...existing.splits.map((split) => split.cardId),
+    ]);
 
     await tx.expense.update({
       where: { id },
