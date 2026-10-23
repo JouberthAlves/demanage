@@ -3,11 +3,11 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import { AppError } from '@/http/errors';
-import { comparePassword } from '@/lib/auth';
+import { comparePassword, hashPassword } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { hashRecoveryCode } from '@/lib/recovery-code';
 
-import { recoverPassword } from './auth';
+import { recoverPassword, rotateRecoveryCodeInTransaction } from './auth';
 
 test('PostgreSQL permits only one recovery per code, rotating it and revoking sessions', async () => {
   const recoveryCode = '23456-789AB-CDEFG-HJKLM';
@@ -52,6 +52,62 @@ test('PostgreSQL permits only one recovery per code, rotating it and revoking se
       true,
     );
   } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
+test('PostgreSQL rejects a rotation after a concurrent password reset commits', async () => {
+  const code = '23456-789AB-CDEFG-HJKLM';
+  const email = `rotate-race-${randomUUID()}@example.invalid`;
+  const originalPassword = 'OriginalPassword123!';
+  const newPassword = 'UpdatedPassword123!';
+  const user = await prisma.user.create({
+    data: {
+      name: 'Rotation race',
+      email,
+      passwordHash: await hashPassword(originalPassword),
+      recoveryCodeHash: hashRecoveryCode(code),
+    },
+  });
+
+  let resume = () => {};
+  const canResume = new Promise<void>((resolve) => { resume = resolve; });
+  let observed = () => {};
+  const readCompleted = new Promise<void>((resolve) => { observed = resolve; });
+
+  const rotation = prisma.$transaction(async (tx) => {
+    const store = {
+      async findUnique() {
+        const snapshot = await tx.user.findUnique({
+          where: { id: user.id },
+          select: { passwordHash: true, sessionVersion: true, recoveryCodeHash: true },
+        });
+        observed();
+        await canResume;
+        return snapshot;
+      },
+      updateMany: (args: Parameters<typeof tx.user.updateMany>[0]) => tx.user.updateMany(args),
+    } as unknown as Pick<typeof prisma.user, 'findUnique' | 'updateMany'>;
+    return rotateRecoveryCodeInTransaction(user.id, originalPassword, store);
+  }, { maxWait: 10_000, timeout: 30_000 });
+
+  try {
+    await readCompleted;
+    const nextCode = await recoverPassword({ email, recoveryCode: code, newPassword });
+    resume();
+    await assert.rejects(rotation, (error: unknown) => {
+      assert.ok(error instanceof AppError);
+      assert.equal(error.status, 401);
+      return true;
+    });
+
+    const updated = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    assert.equal(updated.sessionVersion, user.sessionVersion + 1);
+    assert.equal(updated.recoveryCodeHash, hashRecoveryCode(nextCode));
+    assert.equal(await comparePassword(newPassword, updated.passwordHash), true);
+  } finally {
+    resume();
+    await rotation.catch(() => {});
     await prisma.user.delete({ where: { id: user.id } });
   }
 });
