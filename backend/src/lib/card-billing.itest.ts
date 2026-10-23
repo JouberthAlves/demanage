@@ -142,6 +142,75 @@ test('pending closing-day change skips a cycle shorter than 28 days', async () =
   }
 });
 
+test('F10: persisted dueDay 31 survives February clamping and a pending closing-day change', async () => {
+  const user = await prisma.user.create({
+    data: {
+      name: 'F10 due-day billing test',
+      email: `card-due31-${randomUUID()}@example.invalid`,
+      passwordHash: 'test-only-not-a-login-hash',
+    },
+  });
+
+  try {
+    const card = await prisma.card.create({
+      data: {
+        userId: user.id,
+        name: 'F10 card',
+        closingDay: 31,
+        pendingClosingDay: 29,
+        pendingClosingDaySetAt: new Date('2026-01-10T12:00:00.000Z'),
+        createdAt: new Date('2026-01-01T12:00:00.000Z'),
+      },
+    });
+    await prisma.expense.create({
+      data: {
+        userId: user.id,
+        cardId: card.id,
+        name: 'Day 31 subscription',
+        amount: 75,
+        category: 'outro',
+        frequency: 'mensal',
+        dueDay: 31,
+        startsAt: new Date('2026-02-28T00:00:00.000Z'),
+      },
+    });
+
+    const now = new Date('2026-04-30T16:00:00.000Z');
+    assert.deepEqual(await processUserCardBilling(user.id, now), {
+      createdCount: 2,
+    });
+    assert.deepEqual(await processUserCardBilling(user.id, now), {
+      createdCount: 0,
+    });
+
+    const invoices = await prisma.expense.findMany({
+      where: { userId: user.id, isInvoice: true },
+      orderBy: { billingPeriodEnd: 'asc' },
+    });
+    assert.deepEqual(
+      invoices.map((invoice) => [
+        invoice.billingPeriodEnd?.toISOString().slice(0, 10),
+        Number(invoice.amount),
+      ]),
+      [
+        ['2026-02-28', 75],
+        ['2026-04-29', 75],
+      ],
+    );
+    const savedCard = await prisma.card.findUniqueOrThrow({
+      where: { id: card.id },
+    });
+    assert.equal(savedCard.closingDay, 29);
+    assert.equal(savedCard.pendingClosingDay, null);
+    assert.equal(
+      savedCard.lastInvoicedOn?.toISOString().slice(0, 10),
+      '2026-04-29',
+    );
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
 test('billing includes a purchase entered after a cycle closed without billing it twice', async () => {
   const user = await prisma.user.create({
     data: {
