@@ -26,8 +26,14 @@ import { useAuthStore } from '@/stores/auth-store';
 
 export function DashboardPage() {
   const userName = useAuthStore((state) => state.user?.name ?? '');
-  const { history, income, expenses, averageExpense, recurringShare } =
-    useFinanceSummary();
+  const {
+    history,
+    income,
+    expenses,
+    averageExpense,
+    recurringShare,
+    historyQuery,
+  } = useFinanceSummary();
   const { data: piggyBanks = [] } = usePiggyBanks();
   const piggyCashQuery = usePiggyCashMovements();
   const assetCashQuery = useAssetCashTransactions();
@@ -47,9 +53,12 @@ export function DashboardPage() {
     piggyCashQuery.isError ||
     !piggyCashQuery.data ||
     assetCashQuery.isError ||
-    assetCashQuery.isPending
+    assetCashQuery.isPending ||
+    historyQuery.isError ||
+    !historyQuery.data
   ) {
-    const failed = piggyCashQuery.isError || assetCashQuery.isError;
+    const failed =
+      piggyCashQuery.isError || assetCashQuery.isError || historyQuery.isError;
     return (
       <div className='space-y-6'>
         <title>Dashboard | deManage</title>
@@ -63,8 +72,8 @@ export function DashboardPage() {
         >
           <p className='font-medium'>
             {failed
-              ? 'Saldo indisponível: não foi possível consultar as movimentações dos cofrinhos ou dos ativos.'
-              : 'Atualizando o saldo com as movimentações dos cofrinhos e dos ativos…'}
+              ? 'Saldo indisponível: não foi possível consultar todas as movimentações financeiras.'
+              : 'Atualizando o saldo com as movimentações financeiras…'}
           </p>
           {failed ? (
             <Button
@@ -73,6 +82,7 @@ export function DashboardPage() {
                 void Promise.all([
                   piggyCashQuery.refetch(),
                   assetCashQuery.refetch(),
+                  historyQuery.refetch(),
                 ])
               }
             >

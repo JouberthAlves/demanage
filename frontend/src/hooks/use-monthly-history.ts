@@ -1,23 +1,36 @@
 import { useMemo } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
-import { useIncomeList } from '@/hooks/use-entries';
-import { useExpenseList } from '@/hooks/use-expenses';
 import { useFinancialNow } from '@/hooks/use-financial-now';
 import { useAssetTransactions } from '@/hooks/use-patrimony';
 import { usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import { currentMonthKey } from '@/lib/dates';
-import { expenseContributionThisMonth } from '@/lib/expense-schedule';
-import { incomeContributionThisMonth } from '@/lib/income-schedule';
+import { listFinancialHistory } from '@/lib/financial-history-api';
 import {
   assetCashContribution,
   buildMonthlyHistory,
+  financialExpenseThisMonth,
+  financialIncomeThisMonth,
   piggyCashContribution,
 } from '@/lib/monthly-history';
 import type { PiggyCashMovement } from '@/lib/piggy-api';
+import { queryKeys } from '@/lib/query-keys';
+import type { Income, RecurringExpense } from '@/types/finance';
 import type { AssetTransaction } from '@/types/patrimony';
 
 const NO_PIGGY_MOVEMENTS: PiggyCashMovement[] = [];
 const NO_ASSET_TRANSACTIONS: AssetTransaction[] = [];
+const NO_EXPENSES: RecurringExpense[] = [];
+const NO_INCOMES: Income[] = [];
+
+/** Separate read-only history source includes archived manual cash events. */
+export function useFinancialHistory() {
+  return useQuery({
+    queryKey: queryKeys.financialHistory,
+    queryFn: listFinancialHistory,
+    staleTime: 60_000,
+  });
+}
 
 /** Shared React Query keys deduplicate the two asset queries across dashboard cards. */
 export function useAssetCashTransactions() {
@@ -39,8 +52,9 @@ export function useAssetCashTransactions() {
 }
 
 export function useMonthlyHistory() {
-  const expenses = useExpenseList();
-  const incomes = useIncomeList();
+  const { data } = useFinancialHistory();
+  const expenses = data?.expenses ?? NO_EXPENSES;
+  const incomes = data?.incomes ?? NO_INCOMES;
   const piggyMovements = usePiggyCashMovements().data ?? NO_PIGGY_MOVEMENTS;
   const { transactions } = useAssetCashTransactions();
   const now = useFinancialNow();
@@ -60,16 +74,13 @@ export function useMonthlyHistory() {
 
 /** Expenses debited in the current month. */
 export function useMonthlyExpenses() {
-  const expenses = useExpenseList();
+  const expenses = useFinancialHistory().data?.expenses ?? NO_EXPENSES;
   const piggyMovements = usePiggyCashMovements().data ?? NO_PIGGY_MOVEMENTS;
   const { transactions } = useAssetCashTransactions();
   const now = useFinancialNow();
   return useMemo(
     () =>
-      expenses.reduce(
-        (sum, expense) => sum + expenseContributionThisMonth(expense, now),
-        0,
-      ) +
+      financialExpenseThisMonth(expenses, now) +
       piggyCashContribution(
         piggyMovements,
         currentMonthKey(now),
@@ -83,16 +94,13 @@ export function useMonthlyExpenses() {
 
 /** Incomes received in the current month. */
 export function useMonthlyIncome() {
-  const incomes = useIncomeList();
+  const incomes = useFinancialHistory().data?.incomes ?? NO_INCOMES;
   const piggyMovements = usePiggyCashMovements().data ?? NO_PIGGY_MOVEMENTS;
   const { transactions } = useAssetCashTransactions();
   const now = useFinancialNow();
   return useMemo(
     () =>
-      incomes.reduce(
-        (sum, income) => sum + incomeContributionThisMonth(income, now),
-        0,
-      ) +
+      financialIncomeThisMonth(incomes, now) +
       piggyCashContribution(
         piggyMovements,
         currentMonthKey(now),
@@ -106,6 +114,7 @@ export function useMonthlyIncome() {
 
 /** Dashboard figures, all derived from the same query data and clock. */
 export function useFinanceSummary() {
+  const historicalQuery = useFinancialHistory();
   const history = useMonthlyHistory();
   const income = useMonthlyIncome();
   const expenses = useMonthlyExpenses();
@@ -122,6 +131,7 @@ export function useFinanceSummary() {
       expenses,
       averageExpense,
       recurringShare: income > 0 ? expenses / income : 0,
+      historyQuery: historicalQuery,
     };
-  }, [history, income, expenses]);
+  }, [history, income, expenses, historicalQuery]);
 }
