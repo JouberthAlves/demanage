@@ -98,6 +98,9 @@ export function parseUpdateExpense(
   if (category !== undefined && !isValidExpenseCategory(category)) {
     throw badRequest('Categoria inválida');
   }
+  if (category === 'investimento') {
+    throw badRequest('Investimentos são lançados pelas abas Cofrinho ou Moedas');
+  }
   if (frequency !== undefined && !isValidFrequency(frequency)) {
     throw badRequest('Frequência inválida');
   }
