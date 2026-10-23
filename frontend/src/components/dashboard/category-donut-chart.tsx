@@ -6,11 +6,15 @@ import {
   EXPENSE_CATEGORY_LABELS,
 } from '@/data/labels';
 import { useFinancialNow } from '@/hooks/use-financial-now';
-import { useFinancialHistory } from '@/hooks/use-monthly-history';
+import {
+  useAssetCashTransactions,
+  useFinancialHistory,
+} from '@/hooks/use-monthly-history';
 import { usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import { currentMonthKey } from '@/lib/dates';
 import { formatCurrencyCompact } from '@/lib/format';
 import {
+  assetCashContribution,
   financialExpenseThisMonth,
   piggyCashContribution,
 } from '@/lib/monthly-history';
@@ -30,6 +34,7 @@ type DonutItem = {
 export function CategoryDonutChart() {
   const expenses = useFinancialHistory().data?.expenses ?? EMPTY_EXPENSES;
   const piggyMovements = usePiggyCashMovements().data ?? EMPTY_MOVEMENTS;
+  const { transactions } = useAssetCashTransactions();
   const now = useFinancialNow();
   const [active, setActive] = useState<DonutItem | null>(null);
 
@@ -73,6 +78,20 @@ export function CategoryDonutChart() {
       };
     }
 
+    const assetPurchases = assetCashContribution(
+      transactions,
+      currentMonthKey(now),
+      'BUY',
+      now,
+    );
+    if (assetPurchases > 0) {
+      grouped.investimento = {
+        name: EXPENSE_CATEGORY_LABELS.investimento,
+        color: EXPENSE_CATEGORY_COLORS.investimento,
+        value: (grouped.investimento?.value ?? 0) + assetPurchases,
+      };
+    }
+
     const items: DonutItem[] = Object.entries(grouped).map(([key, item]) => ({
       key,
       ...item,
@@ -82,7 +101,7 @@ export function CategoryDonutChart() {
       data: items,
       total: items.reduce((sum, item) => sum + item.value, 0),
     };
-  }, [expenses, now, piggyMovements]);
+  }, [expenses, now, piggyMovements, transactions]);
   const totalLabel = formatCurrencyCompact(total);
 
   return (
