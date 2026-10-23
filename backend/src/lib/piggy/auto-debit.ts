@@ -108,6 +108,37 @@ export function listDueAutoDebitCycles(
   return cycles.slice(-MAX_AUTO_DEBIT_CATCH_UP_CYCLES);
 }
 
+/**
+ * A queued cycle may have been calculated before another request changed the
+ * debit day or activation date. Recheck it against the locked, current bank
+ * row immediately before posting. Exact dates are compared to prevent a stale
+ * cycle for the same month from posting on its old day.
+ */
+export function isScheduledAutoDebitCycleStillDue(
+  cycle: AutoDebitCycle,
+  now: Date,
+  bank: {
+    createdAt: Date;
+    autoDebitDay: number;
+    autoDebitEnabledAt: Date | null;
+  },
+): boolean {
+  const due = parseDayKey(dayKeyInSaoPaulo(cycle.dueOn));
+  if (!due) return false;
+  const current = cycleForMonth(
+    due.year,
+    due.monthIndex,
+    todayKeyInSaoPaulo(now),
+    dayKeyInSaoPaulo(bank.createdAt),
+    bank.autoDebitDay,
+    bank.autoDebitEnabledAt ? dayKeyInSaoPaulo(bank.autoDebitEnabledAt) : null,
+  );
+  return current !== null &&
+    current.dueOn.getTime() === cycle.dueOn.getTime() &&
+    current.monthStart.getTime() === cycle.monthStart.getTime() &&
+    current.monthEnd.getTime() === cycle.monthEnd.getTime();
+}
+
 export function hasAutoDebitInCycle(
   transactions: Pick<PiggyTransaction, 'type' | 'source' | 'date'>[],
   cycle: AutoDebitCycle | null,
