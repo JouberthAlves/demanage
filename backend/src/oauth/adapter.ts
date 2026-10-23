@@ -18,10 +18,32 @@ export class OAuthPrismaAdapter implements Adapter {
       uid: payload.uid ?? null,
       expiresAt,
     };
-    await prisma.oAuthArtifact.upsert({
+    const writeArtifact = (tx: Pick<typeof prisma, 'oAuthArtifact'>) => tx.oAuthArtifact.upsert({
       where: { model_id: { model: this.model, id } },
       create: { model: this.model, id, ...data },
       update: data,
+    });
+    if (this.model !== 'AccessToken' || !payload.grantId || !payload.accountId || !payload.clientId) {
+      await writeArtifact(prisma);
+      return;
+    }
+
+    // The OAuth consent UI records authorization, while only durable access-token
+    // issuance marks the external client's token exchange as completed. Keep
+    // both writes atomic and bind them to the live, unrevoked grant to prevent
+    // late tokens for an old grant marking a fresh consent as connected.
+    await prisma.$transaction(async (tx) => {
+      await writeArtifact(tx);
+      await tx.oAuthConnection.updateMany({
+        where: {
+          grantId: payload.grantId,
+          userId: payload.accountId,
+          clientId: payload.clientId,
+          revokedAt: null,
+          connectedAt: null,
+        },
+        data: { connectedAt: new Date() },
+      });
     });
   }
 

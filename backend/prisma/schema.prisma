@@ -218,6 +218,7 @@ model OAuthConnection {
   grantId    String    @unique
   scopes     String
   createdAt  DateTime  @default(now())
+  connectedAt DateTime?
   revokedAt  DateTime?
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 

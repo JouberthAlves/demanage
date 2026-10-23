@@ -3,8 +3,10 @@ import { type Request,Router, urlencoded } from 'express';
 import type Provider from 'oidc-provider';
 
 import { requireUserId } from '@/http/request';
+import { AUTH_COOKIE_NAME, verifyAuthToken } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
+import { persistOAuthConsentForSession } from '@/oauth/connection';
 import {
   getOAuthProvider,
   oauthSettings,
@@ -55,11 +57,12 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
     const connections = await prisma.oAuthConnection.findMany({
       where: { userId: requireUserId(req), revokedAt: null },
       orderBy: { createdAt: 'desc' },
-      select: { clientId: true, clientName: true, scopes: true, createdAt: true },
+      select: { clientId: true, clientName: true, scopes: true, createdAt: true, connectedAt: true },
     });
     res.json({ connections: connections.map((connection) => ({
       ...connection,
       scopes: connection.scopes.split(' '),
+      status: connection.connectedAt ? 'token_issued' : 'authorization_pending',
     })) });
   });
 
@@ -136,11 +139,22 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
       const grantId = await grant.save();
       const client = await provider.Client.find(clientId);
       const clientName = client?.clientName || clientId;
-      await prisma.oAuthConnection.upsert({
-        where: { userId_clientId: { userId, clientId } },
-        create: { userId, clientId, clientName, grantId, scopes: financeScopes.join(' ') },
-        update: { clientName, grantId, scopes: financeScopes.join(' '), revokedAt: null, createdAt: new Date() },
+      // Authentication was checked by requireAuth before this interaction, but
+      // account recovery can revoke the session before the consent is persisted.
+      // Serialize with recovery and revalidate inside the user's write lock.
+      const cookie: unknown = req.cookies?.[AUTH_COOKIE_NAME];
+      const claims = typeof cookie === 'string' ? verifyAuthToken(cookie) : null;
+      if (claims?.userId !== userId || !Number.isSafeInteger(claims.sessionVersion ?? 0)) {
+        res.status(401).send('Sessão expirada');
+        return;
+      }
+      const persisted = await persistOAuthConsentForSession(userId, claims.sessionVersion ?? 0, {
+        clientId, clientName, grantId, scopes: financeScopes,
       });
+      if (!persisted) {
+        res.status(401).send('Sessão expirada');
+        return;
+      }
       // Existing access tokens are invalidated immediately by grantId mismatch
       // in getOAuthGrantSubject; leave old provider interactions to expire.
       await provider.interactionFinished(req, res, { consent: { grantId } }, { mergeWithLastSubmission: false });

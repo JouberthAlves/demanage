@@ -8,6 +8,8 @@ type Connection = {
   clientName: string;
   scopes: string[];
   createdAt: string;
+  connectedAt: string | null;
+  status: 'authorization_pending' | 'token_issued';
 };
 
 export function IntegrationsPage() {
@@ -60,7 +62,7 @@ export function IntegrationsPage() {
     <div className='space-y-7'>
       <title>Integrações | deManage</title>
       <PageHeader title='Integrações' description='Gerencie os aplicativos autorizados a acessar seus dados financeiros.' />
-      <p className='text-sm text-muted-foreground'>Esta lista mostra permissões concedidas no deManage; ela não confirma a instalação no aplicativo externo.</p>
+      <p className='text-sm text-muted-foreground'>A emissão de um token confirma a etapa OAuth no deManage, mas não comprova a instalação no aplicativo externo.</p>
       {error && <p role='alert' className='text-sm text-destructive'>{error}</p>}
       {loading ? <p>Carregando integrações…</p> : connections.length === 0 ? (
         <div className='rounded-xl border border-border p-6 text-sm text-muted-foreground'>Você não possui aplicativos autorizados.</div>
@@ -72,6 +74,11 @@ export function IntegrationsPage() {
                 <h2 className='font-semibold'>{connection.clientName}</h2>
                 <p className='break-all text-xs text-muted-foreground'>{connection.clientId}</p>
                 <p className='text-xs text-muted-foreground'>Permissões: {connection.scopes.join(', ')}</p>
+                <p className='text-xs text-muted-foreground'>
+                  {connection.status === 'token_issued'
+                    ? 'Token emitido · conexão OAuth concluída no deManage'
+                    : 'Autorização concedida · aguardando troca do código por token'}
+                </p>
               </div>
               <button
                 type='button'
