@@ -76,6 +76,10 @@ test('create input enforces required fields and category rules', () => {
     400,
   );
   assert.equal(
+    status(() => parseCreateExpense({ ...base, category: 'investimento' })),
+    400,
+  );
+  assert.equal(
     status(() => parseCreateExpense({ ...base, frequency: 'diaria' })),
     400,
   );
@@ -103,6 +107,10 @@ test('update input keeps absent fields undefined', () => {
   );
   assert.equal(
     status(() => parseUpdateExpense({ category: 'x' })),
+    400,
+  );
+  assert.equal(
+    status(() => parseUpdateExpense({ category: 'investimento' })),
     400,
   );
 });
