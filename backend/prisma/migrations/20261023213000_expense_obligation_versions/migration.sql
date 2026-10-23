@@ -1,3 +1,4 @@
+BEGIN;
 -- New recorded versions apply only from their chosen competence forward.
 -- Existing expenses are intentionally NOT backfilled using today's mutable
 -- values: prior edits may have destroyed evidence of historical amounts.
@@ -29,3 +30,5 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER "ExpenseObligationVersion_append_only"
 BEFORE UPDATE ON "ExpenseObligationVersion"
 FOR EACH ROW EXECUTE FUNCTION prevent_expense_obligation_version_update();
+
+COMMIT;
