@@ -83,9 +83,9 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
     // Archived records remain in the ledger, but create no future schedule.
     if (entry.archivedAt) continue;
     if (entry.frequency === 'unica') {
-      if (entry.receipts?.length) continue;
-      const day = key(entry.date);
-      if (day && day.slice(0, 7) === month && day <= today) income = income.plus(entry.amount);
+      // F09: a one-off receivable is only a forecast. Its settlement is
+      // accounted for above using immutable receipt amount and receivedAt.
+      // A due date alone is never evidence of realized cash.
       continue;
     }
     const day = scheduled(entry.receiveDay);

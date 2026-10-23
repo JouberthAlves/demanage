@@ -16,7 +16,21 @@ test('dashboard balance includes scheduled income, cash expense and linked piggy
     ],
     movements: [{ type: 'deposit', amount: 25, date: '2026-10-17' }, { type: 'withdraw', amount: 5, date: '2026-10-17' }],
   });
-  assert.deepEqual(result, { month: '2026-10', incomeBrl: '335.00', expensesBrl: '145.00', balanceBrl: '190.00' });
+  assert.deepEqual(result, { month: '2026-10', incomeBrl: '305.00', expensesBrl: '145.00', balanceBrl: '160.00' });
+});
+
+test('F09: MCP cash realized excludes unreceived one-off income regardless of due date', () => {
+  const result = calculateMonthlyCash({
+    today: '2026-10-18',
+    entries: [
+      { amount: 700, frequency: 'unica', type: 'outro', date: '2026-10-02', receipts: [] },
+      { amount: 900, frequency: 'unica', type: 'outro', date: '2026-10-03', receipts: [{ month: '2026-10', amount: 250, receivedAt: new Date('2026-10-07T17:00:00.000Z') }] },
+    ],
+    expenses: [],
+    movements: [],
+  });
+  assert.equal(result.incomeBrl, '250.00');
+  assert.equal(result.balanceBrl, '250.00');
 });
 
 test('dashboard balance excludes future/held salaries, card-only payments and out-of-month events', () => {
