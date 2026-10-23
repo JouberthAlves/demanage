@@ -48,6 +48,14 @@ test('C04: a user cannot persist a piggy transaction against a foreign bank', as
       data: { ...movement, piggyBankId: ownBank.id },
     });
     assert.equal(accepted.userId, owner.id);
+    await assert.rejects(
+      prisma.piggyBank.update({
+        where: { id: ownBank.id },
+        data: { userId: other.id },
+      }),
+      foreignKeyViolation,
+    );
+    assert.equal((await prisma.piggyTransaction.findUniqueOrThrow({ where: { id: accepted.id } })).userId, owner.id);
     await prisma.piggyBank.delete({ where: { id: ownBank.id } });
     assert.equal(
       await prisma.piggyTransaction.count({ where: { id: accepted.id } }),
@@ -105,6 +113,14 @@ test('C04: undo receipt must reference an MCP operation of the same user', async
       },
     });
     assert.equal(accepted.operationId, original.id);
+    await assert.rejects(
+      prisma.financeMcpOperation.update({
+        where: { id: original.id },
+        data: { userId: owner.id },
+      }),
+      foreignKeyViolation,
+    );
+    assert.equal((await prisma.financeMcpUndo.findUniqueOrThrow({ where: { id: accepted.id } })).userId, other.id);
     await prisma.financeMcpOperation.delete({ where: { id: original.id } });
     assert.equal(
       await prisma.financeMcpUndo.count({ where: { id: accepted.id } }),

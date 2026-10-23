@@ -188,7 +188,7 @@ model FinanceMcpUndo {
   operationId  String   @unique
   undoneAt     DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  operation    FinanceMcpOperation @relation(fields: [operationId, userId], references: [id, userId], onDelete: Cascade)
+  operation    FinanceMcpOperation @relation(fields: [operationId, userId], references: [id, userId], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([userId, clientId, intentNonce])
   // Prisma needs the exact compound relation fields unique for 1:1.
@@ -406,7 +406,7 @@ model PiggyTransaction {
   resultingBalance Decimal?               @db.Decimal(18, 8)
   interestKey      String?                @unique
   createdAt        DateTime               @default(now())
-  piggyBank        PiggyBank              @relation(fields: [piggyBankId, userId], references: [id, userId], onDelete: Cascade)
+  piggyBank        PiggyBank              @relation(fields: [piggyBankId, userId], references: [id, userId], onDelete: Cascade, onUpdate: NoAction)
   user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   expense          Expense?               @relation(fields: [expenseId], references: [id], onDelete: SetNull)
   entry            Entry?                 @relation(fields: [entryId], references: [id], onDelete: SetNull)
