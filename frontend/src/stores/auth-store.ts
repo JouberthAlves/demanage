@@ -156,4 +156,4 @@ export const useAuthStore = create<AuthState>((set, get) => {
 onSessionExpired(() => {
   const { user, setUser } = useAuthStore.getState();
   if (user) setUser(null);
-});
+}, () => useAuthStore.getState().sessionRevision);
