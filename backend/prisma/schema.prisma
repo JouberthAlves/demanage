@@ -174,6 +174,8 @@ model FinanceMcpOperation {
 
   @@unique([userId, clientId, idempotencyKey])
   @@unique([userId, clientId, intentNonce])
+  // Composite FK from FinanceMcpUndo verifies the operation's owner.
+  @@unique([id, userId])
 }
 
 // A separate immutable undo receipt preserves the original operation history.
@@ -186,9 +188,11 @@ model FinanceMcpUndo {
   operationId  String   @unique
   undoneAt     DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  operation    FinanceMcpOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operation    FinanceMcpOperation @relation(fields: [operationId, userId], references: [id, userId], onDelete: Cascade)
 
   @@unique([userId, clientId, intentNonce])
+  // Prisma needs the exact compound relation fields unique for 1:1.
+  @@unique([operationId, userId])
   @@index([userId, clientId, undoneAt])
 }
 
@@ -362,6 +366,8 @@ model PiggyBank {
 
   // Leading-userId composite below also serves userId-only lookups.
   @@index([userId, archivedAt])
+  // Composite FK from PiggyTransaction verifies the bank's owner.
+  @@unique([id, userId])
 }
 
 model PiggyTransaction {
@@ -382,7 +388,7 @@ model PiggyTransaction {
   resultingBalance Decimal?               @db.Decimal(18, 8)
   interestKey      String?                @unique
   createdAt        DateTime               @default(now())
-  piggyBank        PiggyBank              @relation(fields: [piggyBankId], references: [id], onDelete: Cascade)
+  piggyBank        PiggyBank              @relation(fields: [piggyBankId, userId], references: [id, userId], onDelete: Cascade)
   user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   expense          Expense?               @relation(fields: [expenseId], references: [id], onDelete: SetNull)
   entry            Entry?                 @relation(fields: [entryId], references: [id], onDelete: SetNull)
