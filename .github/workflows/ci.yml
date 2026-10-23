@@ -17,6 +17,10 @@ concurrency:
 
 jobs:
   backend:
+    # 'backend' is a required master check. Keep the O04 backup/restore
+    # regression on its critical path even before it becomes a ruleset check.
+    needs: backup-restore
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -45,6 +49,11 @@ jobs:
       JWT_SECRET: ci-secret-not-for-production
       APP_URL: http://localhost:5180
     steps:
+      - name: Enforce required O04 backup/restore result
+        if: needs.backup-restore.result != 'success'
+        run: |
+          echo '::error::Real PostgreSQL O04 backup/restore check did not succeed'
+          exit 1
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
@@ -86,6 +95,56 @@ jobs:
         run: pnpm test:integration
       - name: Build
         run: pnpm build
+
+  backup-restore:
+    # O04: exercising backup-db.ps1 against a real but disposable PostgreSQL
+    # instance, never a service or volume from the Debian production host.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    env:
+      CI: 'true'
+      DEMANAGE_O04_OWNER: ${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Start isolated O04 PostgreSQL
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Name is required by the existing backup script; no port publishing
+          # and no shared Docker volumes or networks.
+          docker run -d --name demanage-db --network none \
+            --label "org.demanage.o04.owner=$DEMANAGE_O04_OWNER" \
+            -e POSTGRES_USER=demanage \
+            -e POSTGRES_PASSWORD=demanage-o04-only \
+            -e POSTGRES_DB=demanage \
+            postgres:18.6-alpine3.24@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+          for attempt in $(seq 1 60); do
+            if docker exec demanage-db pg_isready -U demanage -d demanage >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo '::error::Disposable O04 PostgreSQL failed its readiness check'
+          exit 1
+      - name: Real PowerShell pg_dump and pg_restore regression
+        shell: pwsh
+        run: ./scripts/tests/backup-db.e2e.ps1
+      - name: Remove only this job's disposable PostgreSQL
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          owner="$(docker inspect --format '{{ index .Config.Labels "org.demanage.o04.owner" }}' demanage-db 2>/dev/null || true)"
+          if [[ "$owner" == "$DEMANAGE_O04_OWNER" ]]; then
+            docker rm --force --volumes demanage-db
+          elif [[ -n "$owner" ]]; then
+            echo '::error::Refusing to remove an O04-unowned container'
+            exit 1
+          fi
 
   frontend:
     runs-on: ubuntu-latest
