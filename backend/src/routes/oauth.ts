@@ -7,6 +7,7 @@ import { AUTH_COOKIE_NAME, verifyAuthToken } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
 import { persistOAuthConsentForSession } from '@/oauth/connection';
+import { parseConsentDecision } from '@/oauth/consent-decision';
 import {
   getOAuthProvider,
   oauthSettings,
@@ -113,10 +114,15 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
         res.status(400).send('Solicitação OAuth inválida');
         return;
       }
-      // The choice is user consent, not a privilege check. Session, origin,
-      // signed CSRF token, and OAuth interaction were validated first.
-      // codeql[js/user-controlled-bypass] Explicit approval is the protected action itself.
-      if (req.body.decision !== 'approve') {
+      // User intent must match a fixed, expected action. It is not used to
+      // bypass authorization: session, origin, signed CSRF and interaction
+      // identity are all verified above, for BOTH approve and deny.
+      const decision = parseConsentDecision(req.body?.decision);
+      if (decision === null) {
+        res.status(400).send('Escolha de autorização inválida');
+        return;
+      }
+      if (decision === 'deny') {
         await provider.interactionFinished(req, res, { error: 'access_denied' }, { mergeWithLastSubmission: false });
         return;
       }
