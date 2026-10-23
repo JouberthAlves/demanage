@@ -355,9 +355,37 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.deepEqual(await getOAuthGrantSubject(secondToken, resource, provider), {
       userId: users[1].id, clientId, scopes: new Set(['finance:write']),
     });
+    const signedPreRecovery = await authorize(1, 'finance:read', chatgptClientId, chatgptCallback);
+    const signedPreRecoveryResponse = await exchange(signedPreRecovery.code, signedPreRecovery.pkceVerifier,
+      chatgptClientId, chatgptCallback, signedChatgptAssertion());
+    assert.equal(signedPreRecoveryResponse.status, 200);
+    const signedPreRecoveryTokens = await signedPreRecoveryResponse.json() as { access_token: string; refresh_token: string };
+    const pendingCode = await authorize(1, 'finance:write');
+    const recoveryCode = '23456-789AB-CDEFG-HJKLM';
+    const { hashRecoveryCode } = await import('@/lib/recovery-code');
+    const { recoverPassword } = await import('@/services/auth');
+    await prisma.user.update({ where: { id: users[1].id }, data: { recoveryCodeHash: hashRecoveryCode(recoveryCode) } });
+    await recoverPassword({ email: users[1].email, recoveryCode, newPassword: 'SecurePassword123!' });
+    assert.equal(await getOAuthGrantSubject(secondToken, resource, provider), null);
+    assert.equal(await getOAuthGrantSubject(signedPreRecoveryTokens.access_token, resource, provider), null);
+    const refreshAfterReset = await fetch(`${base}/api/oauth/token`, {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token', client_id: chatgptClientId,
+        refresh_token: signedPreRecoveryTokens.refresh_token,
+        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+        client_assertion: signedChatgptAssertion(chatgptKey.privateKey, { aud: `${base}/api/oauth/token` }),
+      }),
+    });
+    assert.equal(refreshAfterReset.status, 400, 'pre-recovery refresh tokens must be invalid');
+    const exchangedAfterRecovery = await exchange(pendingCode.code, pendingCode.pkceVerifier);
+    assert.equal(exchangedAfterRecovery.status, 400, 'codes issued before password recovery must be invalid');
+    assert.deepEqual(await getOAuthGrantSubject(firstToken, resource, provider), {
+      userId: users[0].id, clientId, scopes: new Set(['finance:read']),
+    });
     assert.equal(await revokeClientGrant(users[0].id, clientId), true);
     assert.equal(await getOAuthGrantSubject(firstToken, resource, provider), null);
-    assert.notEqual(await getOAuthGrantSubject(secondToken, resource, provider), null);
+    assert.equal(await getOAuthGrantSubject(secondToken, resource, provider), null);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

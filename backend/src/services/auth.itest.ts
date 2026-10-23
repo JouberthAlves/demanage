@@ -111,3 +111,37 @@ test('PostgreSQL rejects a rotation after a concurrent password reset commits', 
     await prisma.user.delete({ where: { id: user.id } });
   }
 });
+
+test('password recovery revokes all OAuth consent and grant artifacts atomically', async () => {
+  const recoveryCode = '23456-789AB-CDEFG-HJKLM';
+  const email = `oauth-recover-${randomUUID()}@example.invalid`;
+  const user = await prisma.user.create({
+    data: {
+      name: 'OAuth recovery test user', email, passwordHash: 'old-test-only-hash',
+      recoveryCodeHash: hashRecoveryCode(recoveryCode),
+    },
+  });
+  const grants = [`grant-${randomUUID()}`, `grant-${randomUUID()}`];
+  try {
+    for (let i = 0; i < grants.length; i++) {
+      await prisma.oAuthConnection.create({ data: {
+        userId: user.id, clientId: `client-${i}`, clientName: `Client ${i}`,
+        grantId: grants[i], scopes: 'finance:read',
+      } });
+      await prisma.oAuthArtifact.createMany({ data: [
+        { model: 'Grant', id: grants[i], payload: { accountId: user.id } },
+        { model: 'AccessToken', id: `token-${i}`, grantId: grants[i], payload: { grantId: grants[i] } },
+        { model: 'RefreshToken', id: `refresh-${i}`, grantId: grants[i], payload: { grantId: grants[i] } },
+      ] });
+    }
+    await recoverPassword({ email, recoveryCode, newPassword: 'SecureNewPassword123!' });
+    assert.equal(await prisma.oAuthConnection.count({ where: { userId: user.id, revokedAt: null } }), 0);
+    assert.equal(await prisma.oAuthArtifact.count({ where: { OR: [
+      { grantId: { in: grants } }, { model: 'Grant', id: { in: grants } },
+    ] } }), 0);
+    const connections = await prisma.oAuthConnection.findMany({ where: { userId: user.id } });
+    assert.ok(connections.every((connection) => connection.revokedAt !== null));
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
