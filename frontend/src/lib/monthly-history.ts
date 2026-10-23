@@ -6,6 +6,7 @@ import {
   todayKey,
 } from '@/lib/dates';
 import { expenseCashAmount } from '@/lib/expense-splits';
+import { incomeReceiptsInMonth } from '@/lib/income-schedule';
 import type { PiggyCashMovement } from '@/lib/piggy-api';
 import type {
   Income,
@@ -101,18 +102,10 @@ function sumPaidExpenses(
 }
 
 function sumReceivedIncome(incomes: Income[], month: string, now: Date) {
-  return incomes.reduce((sum, income) => {
-    const receipts = income.receipts ?? [];
-    const receivedAmount = receipts.reduce((received, receipt) => {
-      if (monthFromTimestamp(receipt.receivedAt, now) !== month) {
-        return received;
-      }
-      const amount = Number(receipt.amount);
-      return received + (Number.isFinite(amount) && amount > 0 ? amount : 0);
-    }, 0);
-
-    return sum + receivedAmount;
-  }, 0);
+  return incomes.reduce(
+    (sum, income) => sum + incomeReceiptsInMonth(income, month, now),
+    0,
+  );
 }
 
 export function buildMonthlyHistory(
