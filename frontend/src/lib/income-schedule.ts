@@ -109,6 +109,21 @@ export function incomeContributionThisMonth(
   if (income.frequency === 'unica') {
     return incomeReceiptsInMonth(income, incomeMonthKey(now), now);
   }
+  if (income.type === 'salario' && income.frequency === 'mensal') {
+    const month = incomeMonthKey(now);
+    const receivedCash = incomeReceiptsInMonth(income, month, now);
+    // A confirmed cycle has a frozen amount/date; later profile edits must
+    // never replace it with the current salary or double-count the schedule.
+    // Receipts of older cycles paid now remain additional cash this month.
+    const currentCycleHasReceipt = (income.receipts ?? []).some(
+      (receipt) => receipt.month === month,
+    );
+    const scheduledCash =
+      !currentCycleHasReceipt && isIncomeReceivedThisMonth(income, now)
+        ? monthlyAmount(income.amount, income.frequency)
+        : 0;
+    return receivedCash + scheduledCash;
+  }
   if (!isIncomeReceivedThisMonth(income, now)) return 0;
   return monthlyAmount(income.amount, income.frequency);
 }

@@ -103,3 +103,50 @@ test('F09: monthly recurring income keeps calendar-based behavior', () => {
     0,
   );
 });
+
+test('confirmed salary uses receipt snapshot after salary amount changes or is zeroed', () => {
+  const salary: Income = {
+    id: 'salary-confirmed',
+    name: 'Salário',
+    amount: 4000,
+    type: 'salario',
+    frequency: 'mensal',
+    receiveDay: 5,
+    startsAt: '2026-01-05',
+    receivedForMonth: '2026-10',
+    receipts: [
+      { month: '2026-10', amount: 3000, receivedAt: '2026-10-06T12:00:00.000Z' },
+    ],
+  };
+  assert.equal(incomeContributionThisMonth(salary, now), 3000);
+  assert.equal(incomeForecastContributionThisMonth(salary, now), 4000);
+  assert.equal(
+    incomeContributionThisMonth({ ...salary, amount: 0, endsAt: '2026-09-30' }, now),
+    3000,
+  );
+});
+
+test('salary receipt uses cash date and adds late prior-cycle receipt to current auto salary', () => {
+  const salary: Income = {
+    id: 'salary-late',
+    name: 'Salário',
+    amount: 4000,
+    type: 'salario',
+    frequency: 'mensal',
+    receiveDay: 5,
+    startsAt: '2026-01-05',
+    receivedForMonth: '2026-09',
+    receipts: [
+      { month: '2026-09', amount: 3000, receivedAt: '2026-10-06T12:00:00.000Z' },
+    ],
+  };
+  assert.equal(incomeContributionThisMonth(salary, now), 7000);
+  const prepaid: Income = {
+    ...salary,
+    receivedForMonth: '2026-10',
+    receipts: [
+      { month: '2026-10', amount: 3000, receivedAt: '2026-09-25T12:00:00.000Z' },
+    ],
+  };
+  assert.equal(incomeContributionThisMonth(prepaid, now), 0);
+});
