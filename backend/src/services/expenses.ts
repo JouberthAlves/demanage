@@ -1,7 +1,12 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { badRequest, conflict, notFound } from '@/http/errors';
 import { cardsWithUnclosedBilling } from '@/lib/billing/guard';
+import {
+  obligationSplitSnapshot,
+  parseObligationVersions,
+} from '@/lib/billing/obligation-versions';
 import { todayInSaoPaulo } from '@/lib/card-billing';
+import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { dateKey } from '@/lib/decimal';
 import {
   denormalizedCardId,
@@ -41,6 +46,7 @@ async function assertAffectedCardsCaughtUp(
   tx: Prisma.TransactionClient,
   userId: string,
   cardIds: Array<string | null | undefined>,
+  now?: Date,
 ) {
   const ids = [...new Set(cardIds.filter((id): id is string => !!id))];
   if (ids.length === 0) return;
@@ -48,7 +54,7 @@ async function assertAffectedCardsCaughtUp(
   const cards = await tx.card.findMany({
     where: { userId, id: { in: ids }, archivedAt: null },
   });
-  if (cardsWithUnclosedBilling(cards).length > 0) {
+  if (cardsWithUnclosedBilling(cards, now).length > 0) {
     throw conflict(
       'Feche as faturas pendentes do cartão antes de editar ou excluir esta despesa; depois tente novamente',
     );
@@ -231,6 +237,20 @@ export async function createExpense(userId: string, input: CreateExpenseInput) {
       resolved: resolvedSplits,
     });
 
+    if (created.frequency !== 'unica') {
+      const initialMonth = (created.startsAt ?? created.createdAt).toISOString().slice(0, 7);
+      await tx.expenseObligationVersion.create({
+        data: {
+          expenseId: created.id,
+          sequence: 1,
+          effectiveMonth: initialMonth,
+          amount: created.amount,
+          cardId: created.cardId,
+          splits: obligationSplitSnapshot(resolvedSplits),
+        },
+      });
+    }
+
     if (uniqueDate) {
       const cashAmount = cashAmountOf(resolvedSplits, input.amount);
       if (cashAmount > 0) {
@@ -256,8 +276,10 @@ export async function updateExpense(
   userId: string,
   id: string,
   input: UpdateExpenseInput,
+  now?: Date,
 ) {
   return withUserWriteLockTransaction(userId, async (tx) => {
+    const effectiveMonth = todayKeyInSaoPaulo(now ?? new Date()).slice(0, 7);
     const existing = await tx.expense.findFirst({
       where: { id, userId },
       include: { splits: true, payments: true },
@@ -333,6 +355,48 @@ export async function updateExpense(
       nextFrequency,
     });
 
+    const oldSplits = existing.splits.map((split) => ({
+      kind: split.kind,
+      cardId: split.cardId,
+      amount: Number(split.amount),
+      percent: Number(split.percent),
+    }));
+    const oldAmount = Number(existing.amount);
+    const revisedSplits = nextSplits ?? oldSplits;
+    const financialChange = nextAmount !== oldAmount ||
+      (nextSplits !== null && comparableSplits(revisedSplits, existing.cardId, nextAmount) !==
+        comparableSplits(oldSplits, existing.cardId, oldAmount));
+    const recurringVersionChange = financialChange &&
+      existing.frequency !== 'unica' && nextFrequency !== 'unica';
+    const oldScheduleChanged = existing.frequency !== 'unica' && (
+      nextFrequency !== existing.frequency ||
+      (schedule.day !== undefined && schedule.day !== existing.dueDay) ||
+      (schedule.startsAt !== undefined &&
+        (schedule.startsAt ? dateKey(schedule.startsAt) : null) !==
+        (existing.startsAt ? dateKey(existing.startsAt) : null)) ||
+      (schedule.endsAt !== undefined &&
+        (schedule.endsAt ? dateKey(schedule.endsAt) : null) !==
+        (existing.endsAt ? dateKey(existing.endsAt) : null))
+    );
+    if (oldScheduleChanged && existing.payments.length) {
+      throw conflict('Despesa com pagamento registrado não pode alterar recorrência ou agenda');
+    }
+    const oldVersions = recurringVersionChange || oldScheduleChanged
+      ? await tx.expenseObligationVersion.findMany({
+          where: { expenseId: id },
+          orderBy: { sequence: 'asc' },
+        })
+      : [];
+    const priorCardIds = oldScheduleChanged
+      ? parseObligationVersions(oldVersions).flatMap((version) => [
+          version.cardId,
+          ...version.splits.filter((split) => split.kind === 'card').map((split) => split.cardId),
+        ])
+      : [];
+    if (recurringVersionChange && existing.payments.some((payment) => payment.month >= effectiveMonth)) {
+      throw conflict('Despesa já paga nesta competência não pode alterar valor ou forma de pagamento');
+    }
+
     const changesCardHistory =
       input.amount !== undefined ||
       input.frequency !== undefined ||
@@ -342,12 +406,19 @@ export async function updateExpense(
       input.schedule.startsAt !== undefined ||
       input.schedule.endsAt !== undefined ||
       input.schedule.date !== undefined;
-    if (changesCardHistory) {
+    const changesSchedule = input.frequency !== undefined ||
+      input.schedule.day !== undefined || input.schedule.startsAt !== undefined ||
+      input.schedule.endsAt !== undefined || input.schedule.date !== undefined;
+    // Historical revisions are sufficient for financial-only changes when a
+    // prior snapshot exists. Legacy rows with no snapshots, schedule changes,
+    // deletion, and one-offs still require catching up pending card cycles.
+    if (changesCardHistory && (!recurringVersionChange || changesSchedule || oldVersions.length === 0)) {
       await assertAffectedCardsCaughtUp(tx, userId, [
         existing.cardId,
         ...existing.splits.map((split) => split.cardId),
         ...(nextSplits ?? []).map((split) => split.cardId),
-      ]);
+        ...priorCardIds,
+      ], now);
     }
 
     let recordNewOneOffCash = false;
@@ -450,6 +521,33 @@ export async function updateExpense(
 
     if (nextSplits) {
       await replaceExpenseSplits({ tx, expenseId: id, resolved: nextSplits });
+    }
+
+    if (recurringVersionChange) {
+      // Seed a legacy baseline only after any older card invoices were closed;
+      // the migration itself cannot reconstruct already overwritten values.
+      if (!oldVersions.length) {
+        await tx.expenseObligationVersion.create({
+          data: {
+            expenseId: id,
+            sequence: 1,
+            effectiveMonth,
+            amount: existing.amount,
+            cardId: existing.cardId,
+            splits: obligationSplitSnapshot(existing.splits),
+          },
+        });
+      }
+      await tx.expenseObligationVersion.create({
+        data: {
+          expenseId: id,
+          sequence: oldVersions.length ? oldVersions[oldVersions.length - 1].sequence + 1 : 2,
+          effectiveMonth,
+          amount: nextAmount,
+          cardId: nextSplits ? denormalizedCardId(nextSplits) : existing.cardId,
+          splits: obligationSplitSnapshot(revisedSplits),
+        },
+      });
     }
 
     if (
@@ -565,7 +663,7 @@ export async function archiveExpense(userId: string, id: string) {
   await withUserWriteLockTransaction(userId, async (tx) => {
     const existing = await tx.expense.findFirst({
       where: { id, userId, archivedAt: null },
-      include: { splits: true },
+      include: { splits: true, obligationVersions: true },
     });
     if (!existing) throw notFound(NOT_FOUND_MESSAGE);
     if (existing.systemOrigin !== 'manual') {
@@ -582,6 +680,10 @@ export async function archiveExpense(userId: string, id: string) {
     await assertAffectedCardsCaughtUp(tx, userId, [
       existing.cardId,
       ...existing.splits.map((split) => split.cardId),
+      ...parseObligationVersions(existing.obligationVersions).flatMap((version) => [
+        version.cardId,
+        ...version.splits.filter((split) => split.kind === 'card').map((split) => split.cardId),
+      ]),
     ]);
 
     await tx.expense.update({

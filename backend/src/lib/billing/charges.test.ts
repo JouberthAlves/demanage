@@ -44,6 +44,35 @@ test('first cycle includes a one-off purchase on the card creation day', () => {
   );
 });
 
+test('F02: overdue billings use August and September split amounts after October revision', () => {
+  const recurring = expense({
+    frequency: 'mensal',
+    startsAt: at('2026-08-01'),
+    createdAt: at('2026-08-01'),
+    occurredAt: null,
+    amount: '200',
+    cardId: null,
+    splits: [{ kind: 'card', cardId: 'card-2', amount: '150' }, { kind: 'pix', cardId: null, amount: '50' }],
+    obligationVersions: [
+      { sequence: 1, effectiveMonth: '2026-08', amount: '100', cardId: null,
+        splits: [{ kind: 'card', cardId: 'card-1', amount: '60' }, { kind: 'pix', cardId: null, amount: '40' }] },
+      { sequence: 2, effectiveMonth: '2026-10', amount: '200', cardId: null,
+        splits: [{ kind: 'card', cardId: 'card-2', amount: '150' }, { kind: 'pix', cardId: null, amount: '50' }] },
+    ],
+  });
+  for (const [closing, oldCardAmount, newCardAmount] of [
+    ['2026-08-31', 60, 0],
+    ['2026-09-30', 60, 0],
+    ['2026-10-31', 0, 150],
+  ] as const) {
+    const start = `${closing.slice(0, 7)}-01`;
+    assert.equal(chargeAmountForClosing(recurring, 'card-1', at(closing), at(start), true), oldCardAmount);
+    assert.equal(chargeAmountForClosing(recurring, 'card-2', at(closing), at(start), true), newCardAmount);
+  }
+  assert.equal(chargeAmountForClosing(recurring, 'card-1', at('2026-10-05'), at('2026-08-31')), 60,
+    '28-day skipped closing must still bill September according to September version');
+});
+
 test('a one-off on the prior closing date is not billed in the next cycle', () => {
   assert.equal(
     chargeAmountForClosing(

@@ -2,6 +2,7 @@ import type { Expense, ExpenseSplit } from '@/generated/prisma/client';
 import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
+import { parseObligationVersions } from './obligation-versions';
 import { planCardBilling } from './plan';
 
 type ExpenseForBilling = Expense & { splits?: ExpenseSplit[] };
@@ -22,14 +23,18 @@ export async function processUserCardBilling(userId: string, now?: Date) {
 
     const cards = await tx.card.findMany({
       where: { userId, archivedAt: null },
-      include: {
-        expenses: { include: { splits: true } },
-        expenseSplits: {
-          where: { kind: 'card' },
-          include: { expense: { include: { splits: true } } },
-        },
-      },
     });
+
+    // Source every obligation owned by this account: an earlier version can
+    // reference a card that no longer appears in the current expense splits.
+    const expenses = await tx.expense.findMany({
+      where: { userId, isInvoice: false },
+      include: { splits: true, obligationVersions: { orderBy: { sequence: 'asc' } } },
+    });
+    const billable: ExpenseForBilling[] = expenses.map((expense) => ({
+      ...expense,
+      obligationVersions: parseObligationVersions(expense.obligationVersions),
+    }));
 
     let createdCount = 0;
     const invoiceRows: Array<{
@@ -47,15 +52,9 @@ export async function processUserCardBilling(userId: string, now?: Date) {
     }> = [];
 
     for (const card of cards) {
-      const expenseMap = new Map<string, ExpenseForBilling>();
-      for (const expense of card.expenses) expenseMap.set(expense.id, expense);
-      for (const split of card.expenseSplits) {
-        expenseMap.set(split.expense.id, split.expense);
-      }
-
       const { invoices, cardUpdate } = planCardBilling(
         card,
-        [...expenseMap.values()],
+        billable,
         cutoff,
         effectiveNow,
       );
