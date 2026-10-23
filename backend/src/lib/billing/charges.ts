@@ -25,6 +25,7 @@ export type BillableExpense = {
   cardId: string | null;
   isInvoice: boolean;
   frequency: string;
+  dueDay?: number | null;
   startsAt: Date | null;
   endsAt: Date | null;
   occurredAt: Date | null;
@@ -60,10 +61,7 @@ export function splitShareFor(
       (split) => split.kind === 'card' && split.cardId === target.cardId,
     );
     if (cardSplits.length > 0) {
-      return cardSplits.reduce(
-        (sum, split) => sum.plus(split.amount),
-        ZERO,
-      );
+      return cardSplits.reduce((sum, split) => sum.plus(split.amount), ZERO);
     }
     return expense.cardId === target.cardId
       ? new Prisma.Decimal(expense.amount)
@@ -92,9 +90,7 @@ export const MAX_CHARGES_PER_CYCLE = {
 } as const;
 
 export function maxChargesPerCycle(frequency: string): number {
-  return (
-    (MAX_CHARGES_PER_CYCLE as Record<string, number>)[frequency] ?? 1
-  );
+  return (MAX_CHARGES_PER_CYCLE as Record<string, number>)[frequency] ?? 1;
 }
 
 export type CycleWindow = {
@@ -135,18 +131,25 @@ export function countWeeklyOccurrences(
 }
 
 /**
- * Number of monthly occurrences (day-of-month of `anchorKey`, clamped to the
- * month length) falling in [lo, hi] and not before the anchor.
+ * Number of monthly occurrences (true dueDay, or anchor day for legacy rows,
+ * clamped to each month) falling in [lo, hi] and not before the start date.
  */
 export function countMonthlyOccurrences(
   anchorKey: DayKey,
   loKey: DayKey,
   hiKey: DayKey,
+  dueDay?: number | null,
 ): number {
   const anchor = parseDayKey(anchorKey);
-  const lo = parseDayKey(compareDayKeys(loKey, anchorKey) >= 0 ? loKey : anchorKey);
+  const lo = parseDayKey(
+    compareDayKeys(loKey, anchorKey) >= 0 ? loKey : anchorKey,
+  );
   const hi = parseDayKey(hiKey);
   if (!anchor || !lo || !hi) return 0;
+  const day =
+    dueDay != null && Number.isInteger(dueDay) && dueDay >= 1 && dueDay <= 31
+      ? dueDay
+      : anchor.day;
   const effectiveLo = compareDayKeys(loKey, anchorKey) >= 0 ? loKey : anchorKey;
   if (compareDayKeys(effectiveLo, hiKey) > 0) return 0;
 
@@ -157,7 +160,7 @@ export function countMonthlyOccurrences(
     const occurrence = formatDayKey(
       year,
       month,
-      clampDayToMonth(year, month, anchor.day),
+      clampDayToMonth(year, month, day),
     );
     if (
       compareDayKeys(occurrence, effectiveLo) >= 0 &&
@@ -179,8 +182,8 @@ export function countMonthlyOccurrences(
  * - invoices are never charged on a card;
  * - one-offs: once, if dated inside the cycle;
  * - weekly: real weekday occurrences from startsAt in the cycle (4 or 5);
- * - monthly: real day-of-month occurrences in the cycle, so a cycle that
- *   spans two months (skipped closing) bills both.
+ * - monthly: true dueDay occurrences in the cycle, independent of startsAt;
+ *   a cycle spanning two months (skipped closing) bills both.
  * Recurring charges stop at endsAt and at the archive day.
  */
 export function chargeOccurrences(
@@ -215,7 +218,7 @@ export function chargeOccurrences(
 
   return expense.frequency === 'semanal'
     ? countWeeklyOccurrences(startKey, lowerInclusive, hi)
-    : countMonthlyOccurrences(startKey, lowerInclusive, hi);
+    : countMonthlyOccurrences(startKey, lowerInclusive, hi, expense.dueDay);
 }
 
 /**

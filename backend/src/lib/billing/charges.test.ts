@@ -89,19 +89,35 @@ test('weekly charges count the real weekday occurrences: 5 Mondays bill 5x', () 
   });
   // Mondays in (2026-08-31, 2026-10-05]: Sep 7, 14, 21, 28 and Oct 5.
   assert.equal(
-    chargeAmountForClosing(monday, 'card-1', at('2026-10-05'), at('2026-08-31')),
+    chargeAmountForClosing(
+      monday,
+      'card-1',
+      at('2026-10-05'),
+      at('2026-08-31'),
+    ),
     125,
   );
   // Mondays in (2026-10-05, 2026-11-05]: Oct 12, 19, 26 and Nov 2.
   assert.equal(
-    chargeAmountForClosing(monday, 'card-1', at('2026-11-05'), at('2026-10-05')),
+    chargeAmountForClosing(
+      monday,
+      'card-1',
+      at('2026-11-05'),
+      at('2026-10-05'),
+    ),
     100,
   );
 });
 
 test('weekly counting honours startsAt, endsAt and the archive day', () => {
-  assert.equal(countWeeklyOccurrences('2026-09-14', '2026-09-01', '2026-09-30'), 3);
-  assert.equal(countWeeklyOccurrences('2026-08-31', '2026-09-08', '2026-09-13'), 0);
+  assert.equal(
+    countWeeklyOccurrences('2026-09-14', '2026-09-01', '2026-09-30'),
+    3,
+  );
+  assert.equal(
+    countWeeklyOccurrences('2026-08-31', '2026-09-08', '2026-09-13'),
+    0,
+  );
   const ended = expense({
     frequency: 'semanal',
     startsAt: at('2026-08-31'),
@@ -125,20 +141,123 @@ test('monthly charges bill every occurrence inside a long (skipped-closing) cycl
   });
   // Normal cycle: one occurrence.
   assert.equal(
-    chargeAmountForClosing(monthly, 'card-1', at('2026-10-05'), at('2026-09-05')),
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2026-10-05'),
+      at('2026-09-05'),
+    ),
     40,
   );
   // A 28-day rule skipped a closing: (Aug 31, Oct 5] spans Sep 1 and Oct 1.
   assert.equal(
-    chargeAmountForClosing(monthly, 'card-1', at('2026-10-05'), at('2026-08-31')),
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2026-10-05'),
+      at('2026-08-31'),
+    ),
     80,
   );
 });
 
 test('monthly day 31 is clamped to the month end', () => {
-  assert.equal(countMonthlyOccurrences('2026-01-31', '2026-02-01', '2026-02-28'), 1);
-  assert.equal(countMonthlyOccurrences('2026-01-31', '2026-02-01', '2026-04-30'), 3);
-  assert.equal(countMonthlyOccurrences('2026-03-10', '2026-01-01', '2026-03-09'), 0);
+  assert.equal(
+    countMonthlyOccurrences('2026-01-31', '2026-02-01', '2026-02-28'),
+    1,
+  );
+  assert.equal(
+    countMonthlyOccurrences('2026-01-31', '2026-02-01', '2026-04-30'),
+    3,
+  );
+  assert.equal(
+    countMonthlyOccurrences('2026-03-10', '2026-01-01', '2026-03-09'),
+    0,
+  );
+});
+
+test('monthly dueDay 31 survives a clamped February startsAt', () => {
+  const monthly = expense({
+    frequency: 'mensal',
+    amount: '75',
+    dueDay: 31,
+    startsAt: at('2026-02-28'),
+    occurredAt: null,
+  });
+
+  assert.equal(
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2026-02-28'),
+      at('2026-02-01'),
+    ),
+    75,
+  );
+  assert.equal(
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2026-03-29'),
+      at('2026-02-28'),
+    ),
+    0,
+  );
+  assert.equal(
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2026-03-31'),
+      at('2026-02-28'),
+    ),
+    75,
+  );
+  assert.equal(
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2026-04-30'),
+      at('2026-03-31'),
+    ),
+    75,
+  );
+});
+
+test('monthly dueDay 31 retains leap-day clamping without changing March to day 29', () => {
+  const monthly = expense({
+    frequency: 'mensal',
+    amount: '30',
+    dueDay: 31,
+    startsAt: at('2028-02-29'),
+    occurredAt: null,
+  });
+  assert.equal(
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2028-02-29'),
+      at('2028-02-01'),
+    ),
+    30,
+  );
+  assert.equal(
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2028-03-29'),
+      at('2028-02-29'),
+    ),
+    0,
+  );
+  assert.equal(
+    chargeAmountForClosing(
+      monthly,
+      'card-1',
+      at('2028-03-31'),
+      at('2028-02-29'),
+    ),
+    30,
+  );
 });
 
 test('archiving preserves one-off card purchases but stops later recurring charges', () => {
@@ -192,12 +311,21 @@ test('splitShareFor is the single split rule for card, pix and cash', () => {
       { kind: 'pix', cardId: null, amount: '9.99' },
     ],
   });
-  assert.equal(splitShareFor(split, { kind: 'card', cardId: 'card-1' }).toFixed(2), '10.00');
-  assert.equal(splitShareFor(split, { kind: 'card', cardId: 'card-2' }).toFixed(2), '0.00');
+  assert.equal(
+    splitShareFor(split, { kind: 'card', cardId: 'card-1' }).toFixed(2),
+    '10.00',
+  );
+  assert.equal(
+    splitShareFor(split, { kind: 'card', cardId: 'card-2' }).toFixed(2),
+    '0.00',
+  );
   assert.equal(splitShareFor(split, { kind: 'pix' }).toFixed(2), '9.99');
 
   const legacyCard = expense({ amount: '30', cardId: 'card-1', splits: [] });
-  assert.equal(splitShareFor(legacyCard, { kind: 'card', cardId: 'card-1' }).toFixed(2), '30.00');
+  assert.equal(
+    splitShareFor(legacyCard, { kind: 'card', cardId: 'card-1' }).toFixed(2),
+    '30.00',
+  );
   assert.equal(splitShareFor(legacyCard, { kind: 'cash' }).toFixed(2), '0.00');
 
   const cash = expense({ amount: '12.50', cardId: null, splits: [] });
@@ -218,7 +346,12 @@ test('card amounts are summed in decimal, not floating point', () => {
   );
   assert.equal(Math.round(total * 100), 30);
   assert.equal(
-    chargeAmountForClosing(expense({ amount: '0.1' }), 'card-1', at('2026-09-30'), at('2026-08-31')),
+    chargeAmountForClosing(
+      expense({ amount: '0.1' }),
+      'card-1',
+      at('2026-09-30'),
+      at('2026-08-31'),
+    ),
     0.1,
   );
 });
