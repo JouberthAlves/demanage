@@ -240,3 +240,40 @@ test('auth/me clears the logged-in user on a 401', async () => {
     useAuthStore.getState().setUser(null);
   }
 });
+
+test('a delayed 401 from session A does not log out session B', async () => {
+  const originalAdapter = api.defaults.adapter;
+  let rejectOldRequest: ((error: unknown) => void) | undefined;
+  let oldRequestConfig: InternalAxiosRequestConfig | undefined;
+
+  try {
+    useAuthStore.getState().setUser(user('a'));
+    api.defaults.adapter = async (config) => {
+      if (config.url === '/expenses') {
+        oldRequestConfig = config;
+        return new Promise<AxiosResponse>((_resolve, reject) => {
+          rejectOldRequest = reject;
+        });
+      }
+      if (config.url === '/auth/login') {
+        return response(config, { user: user('b') });
+      }
+      throw new Error(`Unexpected request: ${config.url}`);
+    };
+
+    const oldRequest = api.get('/expenses');
+    await useAuthStore.getState().login('b@example.com', 'password');
+    assert.ok(rejectOldRequest);
+    assert.ok(oldRequestConfig);
+    const revisionB = useAuthStore.getState().sessionRevision;
+    rejectOldRequest!(failure(oldRequestConfig!, 401));
+    await assert.rejects(oldRequest);
+
+    assert.equal(useAuthStore.getState().user?.id, 'b');
+    assert.equal(useAuthStore.getState().sessionRevision, revisionB);
+    assert.equal(useAuthStore.getState().isAuthenticated, true);
+  } finally {
+    api.defaults.adapter = originalAdapter;
+    useAuthStore.getState().setUser(null);
+  }
+});
