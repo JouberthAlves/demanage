@@ -9,7 +9,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -b",
-    "test": "tsx --test \"tests/*.test.ts\"",
+    "test": "tsx --tsconfig tsconfig.test.json --test \"tests/*.test.ts\"",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",
     "preview": "vite preview"
   },
