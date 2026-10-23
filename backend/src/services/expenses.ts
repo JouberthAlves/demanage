@@ -63,6 +63,27 @@ function roundCents(value: number) {
   return Math.round(value * 100) / 100;
 }
 
+/** One-off payments and closed card charges are historical cash facts. */
+export function assertOneOffMutationSafe(args: {
+  paymentCount: number;
+  oldCashAmount: number;
+  newCashAmount: number;
+  hasCardSettlement: boolean;
+}): boolean {
+  if (args.paymentCount > 0 || args.oldCashAmount > 0) {
+    throw conflict(
+      'Despesa com pagamento registrado não pode alterar valor, frequência ou forma de pagamento',
+    );
+  }
+  if (args.hasCardSettlement) {
+    throw conflict(
+      'Despesa já faturada não pode alterar valor ou forma de pagamento',
+    );
+  }
+  // Card-only -> PIX (before closing): the newly paid cash must be recorded.
+  return args.newCashAmount > 0;
+}
+
 /**
  * Parcela que sai do caixa na hora (PIX). Sem splits, a despesa inteira é caixa.
  */
@@ -100,6 +121,51 @@ export function existingSplitInputs(
     return [{ kind: 'card' as const, cardId: expense.cardId, percent: 100 }];
   }
   return [];
+}
+
+type FinancialSplit = Pick<
+  ResolvedSplit,
+  'kind' | 'cardId' | 'amount' | 'percent'
+>;
+
+function comparableSplits(
+  splits: FinancialSplit[],
+  legacyCardId: string | null,
+  amount: number,
+) {
+  const effective =
+    splits.length > 0
+      ? splits
+      : legacyCardId
+        ? [
+            {
+              kind: 'card' as const,
+              cardId: legacyCardId,
+              percent: 100,
+              amount,
+            },
+          ]
+        : [{ kind: 'pix' as const, cardId: null, percent: 100, amount }];
+  return effective
+    .map(
+      (split) =>
+        `${split.kind}:${split.cardId ?? ''}:${Number(split.percent)}:${roundCents(Number(split.amount))}`,
+    )
+    .sort()
+    .join('|');
+}
+
+function cashOfPersistedExpense(expense: ExpenseWithRelations) {
+  if (expense.splits.length > 0) {
+    return cashAmountOf(
+      expense.splits.map((split) => ({
+        kind: split.kind,
+        amount: Number(split.amount),
+      })),
+      Number(expense.amount),
+    );
+  }
+  return expense.cardId ? 0 : Number(expense.amount);
 }
 
 function assertUniqueDateNotFuture(date: Date | null | undefined) {
@@ -284,6 +350,80 @@ export async function updateExpense(
       ]);
     }
 
+    let recordNewOneOffCash = false;
+    if (existing.frequency === 'unica' || nextFrequency === 'unica') {
+      const oldAmount = Number(existing.amount);
+      const oldSplits = existing.splits.map((split) => ({
+        kind: split.kind,
+        cardId: split.cardId,
+        percent: Number(split.percent),
+        amount: Number(split.amount),
+      }));
+      const financialChange =
+        nextAmount !== oldAmount ||
+        nextFrequency !== existing.frequency ||
+        (nextOccurredAt ? dateKey(nextOccurredAt) : null) !==
+          (existing.occurredAt ? dateKey(existing.occurredAt) : null) ||
+        (nextSplits !== null &&
+          comparableSplits(nextSplits, null, nextAmount) !==
+            comparableSplits(oldSplits, existing.cardId, oldAmount));
+
+      if (financialChange) {
+        const affectedCardIds = [
+          ...new Set(
+            [
+              existing.cardId,
+              ...existing.splits.map((split) => split.cardId),
+              ...(nextSplits ?? []).map((split) => split.cardId),
+            ].filter((cardId): cardId is string => !!cardId),
+          ),
+        ];
+        const cards = affectedCardIds.length
+          ? await tx.card.findMany({
+              where: { userId, id: { in: affectedCardIds } },
+              select: { lastInvoicedOn: true, lastBillingProcessedAt: true },
+            })
+          : [];
+        const earliestAffectedCharge =
+          existing.frequency === 'unica'
+            ? (existing.occurredAt ?? existing.createdAt)
+            : (existing.startsAt ?? existing.createdAt);
+        const nextRecurringStart =
+          nextFrequency === 'unica'
+            ? null
+            : (schedule.startsAt ?? existing.startsAt ?? existing.createdAt);
+        const hasCardSettlement = cards.some(
+          (card) =>
+            card.lastInvoicedOn &&
+            ((existing.frequency !== 'unica' &&
+              dateKey(card.lastInvoicedOn) >=
+                dateKey(earliestAffectedCharge)) ||
+              (nextRecurringStart != null &&
+                dateKey(card.lastInvoicedOn) >= dateKey(nextRecurringStart)) ||
+              ((card.lastBillingProcessedAt == null ||
+                card.lastBillingProcessedAt >= existing.createdAt) &&
+                (dateKey(card.lastInvoicedOn) >=
+                  dateKey(earliestAffectedCharge) ||
+                  (nextOccurredAt != null &&
+                    dateKey(card.lastInvoicedOn) >= dateKey(nextOccurredAt))))),
+        );
+        const oldCashAmount = cashOfPersistedExpense(existing);
+        const newCashAmount = nextSplits
+          ? cashAmountOf(nextSplits, nextAmount)
+          : existing.cardId && existing.splits.length === 0
+            ? 0
+            : existing.splits.length > 0
+              ? oldCashAmount
+              : nextAmount;
+        recordNewOneOffCash = assertOneOffMutationSafe({
+          paymentCount: existing.payments.length,
+          oldCashAmount: existing.frequency === 'unica' ? oldCashAmount : 0,
+          newCashAmount,
+          hasCardSettlement,
+        });
+      }
+    }
+
     // updatedAt como guarda otimista contra escritores fora do lock do usuário.
     const { count } = await tx.expense.updateMany({
       where: { id, userId, updatedAt: existing.updatedAt },
@@ -310,6 +450,21 @@ export async function updateExpense(
 
     if (nextSplits) {
       await replaceExpenseSplits({ tx, expenseId: id, resolved: nextSplits });
+    }
+
+    if (
+      recordNewOneOffCash &&
+      existing.frequency === 'unica' &&
+      nextOccurredAt
+    ) {
+      await tx.expensePayment.create({
+        data: {
+          expenseId: id,
+          month: nextOccurredAt.toISOString().slice(0, 7),
+          amount: cashAmountOf(nextSplits ?? [], nextAmount),
+          paidAt: nextOccurredAt,
+        },
+      });
     }
 
     if (
