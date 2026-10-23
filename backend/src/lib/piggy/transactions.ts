@@ -152,7 +152,7 @@ async function validateCorrectionSource(
     amount: Prisma.Decimal;
     expenseId: string | null;
     entryId: string | null;
-    note: string | null;
+    correctionOrigin: 'debited' | 'not_debited' | null;
   }> },
   requested: Prisma.Decimal,
   origin: 'debited' | 'not_debited',
@@ -173,10 +173,10 @@ async function validateCorrectionSource(
   let spentNotDebited = decimal(0);
   for (const movement of bank.transactions) {
     if (movement.type !== 'withdraw') continue;
-    if (movement.note?.startsWith(CORRECTION_PREFIX + ' [origem:debited]') &&
+    if (movement.correctionOrigin === 'debited' &&
       movement.entryId) {
       spentDebited = spentDebited.plus(movement.amount);
-    } else if (movement.note?.startsWith(CORRECTION_PREFIX + ' [origem:not_debited]') &&
+    } else if (movement.correctionOrigin === 'not_debited' &&
       !movement.entryId) {
       spentNotDebited = spentNotDebited.plus(movement.amount);
     } else {
@@ -273,6 +273,7 @@ export async function withdrawFromPiggyBank({
         amount: requested,
         date: day,
         entryId: entry?.id ?? null,
+        correctionOrigin: correctionOrigin ?? null,
         note: correctionOrigin
           ? CORRECTION_PREFIX + ' [origem:' + correctionOrigin + ']' +
             (note ? ' · ' + note : '')

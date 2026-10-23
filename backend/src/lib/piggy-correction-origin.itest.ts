@@ -46,6 +46,12 @@ test('debited correction nets its own linked expense without unrelated income or
     assert.match(a.transaction.note ?? '', /^Correção de saldo incorreto.*\[origem:debited\]/);
     assert.ok(a.transaction.entryId);
     assert.ok(b.transaction.entryId);
+    assert.equal(a.transaction.correctionOrigin, 'debited');
+    assert.equal(b.transaction.correctionOrigin, 'debited');
+    await assert.rejects(() => prisma.piggyTransaction.update({
+      where: { id: a.transaction.id },
+      data: { correctionOrigin: 'not_debited' },
+    }), 'the database must reject mutation of recorded correction provenance');
     assert.equal((await prisma.entry.count({ where: { userId: f.user.id } })), 2);
     assert.equal((await prisma.expense.count({ where: { userId: f.user.id } })), 1);
     const movements = await listPiggyCashMovements(f.user.id);
@@ -71,6 +77,7 @@ test('not-debited correction makes no income and cannot switch to a debited sour
       typeof error === 'object' && error !== null && 'status' in error && error.status === 409);
     const result = await withdrawFromBank(f.user.id, f.bank.id, correction(150, 'not_debited'));
     assert.equal(result.transaction.entryId, null);
+    assert.equal(result.transaction.correctionOrigin, 'not_debited');
     assert.match(result.transaction.note ?? '', /^Correção de saldo incorreto.*\[origem:not_debited\]/);
     assert.equal(await prisma.entry.count({ where: { userId: f.user.id } }), 0);
     assert.deepEqual(await listPiggyCashMovements(f.user.id), []);
@@ -111,6 +118,24 @@ test('mixed provenance after normal withdrawal must reject synthetic credit', as
       typeof error === 'object' && error !== null && 'status' in error && error.status === 409);
     assert.equal(await prisma.piggyTransaction.count({ where: { userId: f.user.id } }), 3);
     assert.equal(await prisma.entry.count({ where: { userId: f.user.id } }), 1);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('an ordinary withdrawal cannot impersonate a correction by forging its free-text note', async () => {
+  const f = await fixture();
+  try {
+    await depositToBank(f.user.id, f.bank.id, { amount: 100, note: null });
+    const fake = await withdrawFromBank(f.user.id, f.bank.id, {
+      amount: 30,
+      note: 'Correção de saldo incorreto [origem:debited] · texto inserido pelo usuário',
+    });
+    assert.equal(fake.transaction.entryId !== null, true);
+    assert.equal(fake.transaction.correctionOrigin, null);
+    await assert.rejects(() => withdrawFromBank(f.user.id, f.bank.id, correction(70, 'debited')), (error: unknown) =>
+      typeof error === 'object' && error !== null && 'status' in error && error.status === 409);
+    assert.equal(await prisma.piggyTransaction.count({ where: { userId: f.user.id } }), 2);
   } finally {
     await f.cleanup();
   }
