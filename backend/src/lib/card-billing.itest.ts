@@ -288,6 +288,11 @@ test('F02: delayed closes preserve old monthly amount/split before October-equiv
       createdCount: 0,
     });
   } finally {
+    // ExpenseSplit.cardId is RESTRICT, so the user's cards cannot cascade
+    // away while split rows still reference them. Remove fixture splits first.
+    await prisma.expenseSplit.deleteMany({
+      where: { expense: { userId: user.id } },
+    });
     await prisma.user.delete({ where: { id: user.id } });
   }
 });
