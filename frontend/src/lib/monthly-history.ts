@@ -5,8 +5,12 @@ import {
   parseDayKey,
   todayKey,
 } from '@/lib/dates';
+import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { expenseCashAmount } from '@/lib/expense-splits';
-import { incomeReceiptsInMonth } from '@/lib/income-schedule';
+import {
+  incomeContributionThisMonth,
+  incomeReceiptsInMonth,
+} from '@/lib/income-schedule';
 import type { PiggyCashMovement } from '@/lib/piggy-api';
 import type {
   Income,
@@ -104,6 +108,34 @@ function sumPaidExpenses(
 function sumReceivedIncome(incomes: Income[], month: string, now: Date) {
   return incomes.reduce(
     (sum, income) => sum + incomeReceiptsInMonth(income, month, now),
+    0,
+  );
+}
+
+/** Live templates use schedule rules; archived ones contribute recorded cash only. */
+export function financialExpenseThisMonth(
+  expenses: RecurringExpense[],
+  now: Date,
+) {
+  const month = currentMonthKey(now);
+  return expenses.reduce(
+    (sum, expense) =>
+      sum +
+      (expense.archivedAt
+        ? sumPaidExpenses([expense], month, now)
+        : expenseContributionThisMonth(expense, now)),
+    0,
+  );
+}
+
+export function financialIncomeThisMonth(incomes: Income[], now: Date) {
+  const month = currentMonthKey(now);
+  return incomes.reduce(
+    (sum, income) =>
+      sum +
+      (income.archivedAt
+        ? incomeReceiptsInMonth(income, month, now)
+        : incomeContributionThisMonth(income, now)),
     0,
   );
 }

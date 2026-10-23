@@ -5,16 +5,20 @@ import {
   EXPENSE_CATEGORY_COLORS,
   EXPENSE_CATEGORY_LABELS,
 } from '@/data/labels';
-import { useExpenseList } from '@/hooks/use-expenses';
 import { useFinancialNow } from '@/hooks/use-financial-now';
+import { useFinancialHistory } from '@/hooks/use-monthly-history';
 import { usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import { currentMonthKey } from '@/lib/dates';
-import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { formatCurrencyCompact } from '@/lib/format';
-import { piggyCashContribution } from '@/lib/monthly-history';
+import {
+  financialExpenseThisMonth,
+  piggyCashContribution,
+} from '@/lib/monthly-history';
 import type { PiggyCashMovement } from '@/lib/piggy-api';
+import type { RecurringExpense } from '@/types/finance';
 
 const EMPTY_MOVEMENTS: PiggyCashMovement[] = [];
+const EMPTY_EXPENSES: RecurringExpense[] = [];
 
 type DonutItem = {
   key: string;
@@ -24,7 +28,7 @@ type DonutItem = {
 };
 
 export function CategoryDonutChart() {
-  const expenses = useExpenseList();
+  const expenses = useFinancialHistory().data?.expenses ?? EMPTY_EXPENSES;
   const piggyMovements = usePiggyCashMovements().data ?? EMPTY_MOVEMENTS;
   const now = useFinancialNow();
   const [active, setActive] = useState<DonutItem | null>(null);
@@ -33,7 +37,7 @@ export function CategoryDonutChart() {
     const grouped = expenses.reduce<
       Record<string, { name: string; color: string; value: number }>
     >((acc, expense) => {
-      const value = expenseContributionThisMonth(expense, now);
+      const value = financialExpenseThisMonth([expense], now);
       if (value <= 0) return acc;
 
       const key = expense.customTag
@@ -55,7 +59,12 @@ export function CategoryDonutChart() {
       return acc;
     }, {});
 
-    const piggyDebits = piggyCashContribution(piggyMovements, currentMonthKey(now), 'deposit', now);
+    const piggyDebits = piggyCashContribution(
+      piggyMovements,
+      currentMonthKey(now),
+      'deposit',
+      now,
+    );
     if (piggyDebits > 0) {
       grouped.cofrinho = {
         name: EXPENSE_CATEGORY_LABELS.cofrinho,

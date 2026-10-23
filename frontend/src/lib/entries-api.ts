@@ -3,6 +3,7 @@ import type { Income, IncomeFrequency, IncomeType } from '@/types/finance';
 
 export type ApiEntry = {
   id: string;
+  archivedAt?: string | null;
   name: string;
   notes?: string | null;
   amount: string | number;
@@ -52,6 +53,7 @@ function mapDateOnly(value?: string | null) {
 export function mapEntryToIncome(entry: ApiEntry): Income {
   return {
     id: entry.id,
+    archivedAt: entry.archivedAt ?? null,
     name: entry.name,
     notes: entry.notes ?? null,
     amount: Number(entry.amount),
