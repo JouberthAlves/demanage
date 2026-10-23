@@ -132,6 +132,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
           intentNonce: nonce,
           payloadDigest: digestFinanceAction(action),
           action,
+          oauthGrantId: identity.oauthGrantId,
         });
         return response({ status: 'committed', replayed, idempotencyKey, ...result });
       } catch (error) {
