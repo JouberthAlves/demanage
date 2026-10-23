@@ -32,6 +32,15 @@ export type BillableExpense = {
   createdAt: Date;
   archivedAt?: Date | null;
   splits?: BillableSplit[];
+  obligationVersions?: BillableObligationVersion[];
+};
+
+export type BillableObligationVersion = {
+  sequence: number;
+  effectiveMonth: string;
+  amount: MoneyInput;
+  cardId: string | null;
+  splits: BillableSplit[];
 };
 
 export type SplitTarget =
@@ -284,6 +293,40 @@ export function chargeAmountDecimal(
   cardId: string,
   window: CycleWindow,
 ): Prisma.Decimal {
+  const versions = expense.obligationVersions;
+  if (expense.frequency !== 'unica' && versions?.length) {
+    // A closing cycle may span several calendar months when the card's
+    // closing day changes. Apply the financial terms valid at EACH month,
+    // preserving the original schedule/weekday across split boundaries.
+    const lo = window.includePeriodStart
+      ? window.periodStartKey
+      : addDaysToKey(window.periodStartKey, 1);
+    let cursor = lo;
+    let total = ZERO;
+    while (compareDayKeys(cursor, window.closingKey) <= 0) {
+      const month = cursor.slice(0, 7);
+      const [year, monthNumber] = month.split('-').map(Number);
+      const nextMonth = monthNumber === 12
+        ? `${String(year + 1).padStart(4, '0')}-01-01`
+        : `${String(year).padStart(4, '0')}-${String(monthNumber + 1).padStart(2, '0')}-01`;
+      const monthEnd = addDaysToKey(nextMonth, -1);
+      const hi = compareDayKeys(monthEnd, window.closingKey) < 0 ? monthEnd : window.closingKey;
+      const active = versions
+        .filter((version) => version.effectiveMonth <= month)
+        .sort((a, b) => b.sequence - a.sequence)[0];
+      if (active) {
+        const occurrences = chargeOccurrences(
+          { ...expense, amount: active.amount, cardId: active.cardId, splits: active.splits },
+          { periodStartKey: addDaysToKey(cursor, -1), closingKey: hi, includePeriodStart: false },
+        );
+        if (occurrences) {
+          total = total.plus(splitShareFor({ ...expense, ...active }, { kind: 'card', cardId }).mul(occurrences));
+        }
+      }
+      cursor = addDaysToKey(hi, 1);
+    }
+    return total;
+  }
   const occurrences = chargeOccurrences(expense, window);
   if (occurrences <= 0) return ZERO;
   return splitShareFor(expense, { kind: 'card', cardId }).mul(occurrences);

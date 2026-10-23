@@ -257,6 +257,7 @@ model Expense {
   card               Card?             @relation(fields: [cardId], references: [id], onDelete: SetNull)
   customTag          CustomTag?        @relation(fields: [customTagId], references: [id], onDelete: SetNull)
   splits             ExpenseSplit[]
+  obligationVersions ExpenseObligationVersion[]
   assetTransaction   AssetTransaction?
   payments           ExpensePayment[]
   piggyTransactions  PiggyTransaction[]
@@ -284,6 +285,23 @@ model ExpenseSplit {
   // unique index: UNIQUE (expenseId, kind) WHERE cardId IS NULL.
   @@unique([expenseId, kind, cardId])
   @@index([cardId])
+}
+
+// Historical recurring card obligations. Financial terms are inserted under
+// the user's write lock; older versions must never be repriced on PATCH.
+model ExpenseObligationVersion {
+  id             String   @id @default(uuid())
+  expenseId      String
+  sequence       Int
+  effectiveMonth String
+  amount         Decimal  @db.Decimal(12, 2)
+  cardId         String?
+  splits         Json
+  createdAt      DateTime @default(now())
+  expense        Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, sequence])
+  @@index([expenseId, effectiveMonth, sequence])
 }
 
 model ExpensePayment {
