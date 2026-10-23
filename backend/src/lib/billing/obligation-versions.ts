@@ -57,3 +57,16 @@ export function parseObligationVersions(rows: ExpenseObligationVersion[]): Billa
     };
   });
 }
+
+/** Legacy records predate versioning. Anchor the original snapshot to the
+ * schedule's first month, so a card cycle straddling the edit month still
+ * bills old occurrences; never infer or reopen an already-closed invoice. */
+export function legacyBaselineMonth(startsAt: Date | null, createdAt: Date): string {
+  return (startsAt ?? createdAt).toISOString().slice(0, 7);
+}
+
+/** Moving a recurring start backwards invents earlier scheduled obligations.
+ * The existing immutable version chain may have no price for those months. */
+export function scheduleMovesEarlier(previous: Date | null, next: Date | null | undefined): boolean {
+  return previous != null && next != null && next.getTime() < previous.getTime();
+}
