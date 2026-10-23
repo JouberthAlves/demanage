@@ -158,3 +158,29 @@ test('a delayed previous-day result cannot schedule retries or invalidate the ne
   assert.equal(clock.pending.size, 0);
   cancelDailyMaintenance(client);
 });
+
+test('stale previous-day observer cannot restart or rewind the current maintenance day', async () => {
+  const client = new QueryClient();
+  let calls = 0;
+  const options = {
+    run: async () => {
+      calls++;
+      return { createdCount: 0 };
+    },
+    needsRetry: () => false,
+  };
+
+  runDailyMaintenance(client, 'cards', '2026-10-24', options);
+  await tick();
+  assert.equal(calls, 1);
+
+  // A previously mounted/queued observer can still render an obsolete day.
+  runDailyMaintenance(client, 'cards', '2026-10-23', options);
+  await tick();
+  assert.equal(calls, 1, 'older observer must not run obsolete maintenance');
+
+  runDailyMaintenance(client, 'cards', '2026-10-24', options);
+  await tick();
+  assert.equal(calls, 1, 'current completed day must not be discarded');
+  cancelDailyMaintenance(client);
+});
