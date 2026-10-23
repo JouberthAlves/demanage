@@ -61,6 +61,20 @@ export function usePiggyBanks(includeArchived = false, enabled = true) {
   return query;
 }
 
+/** The dashboard's patrimony total includes completed archived vaults with funds. */
+export function usePiggyTotal() {
+  const query = usePiggyBanks(true);
+  return {
+    ...query,
+    total: query.data
+      ? query.data.reduce(
+          (cents, bank) => cents + Math.round(bank.balance * 100),
+          0,
+        ) / 100
+      : null,
+  };
+}
+
 export function usePiggyTransactions(piggyBankId: string | null) {
   return useQuery({
     queryKey: queryKeys.piggyBanks.transactions(piggyBankId),

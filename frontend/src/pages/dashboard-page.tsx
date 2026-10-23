@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
 
 import { CardCommitmentChart } from '@/components/dashboard/card-commitment-chart';
@@ -15,7 +14,7 @@ import {
   useAssetCashTransactions,
   useFinanceSummary,
 } from '@/hooks/use-monthly-history';
-import { usePiggyBanks, usePiggyCashMovements } from '@/hooks/use-piggy-banks';
+import { usePiggyCashMovements, usePiggyTotal } from '@/hooks/use-piggy-banks';
 import {
   formatCurrencyCompact,
   formatPercent,
@@ -34,17 +33,13 @@ export function DashboardPage() {
     recurringShare,
     historyQuery,
   } = useFinanceSummary();
-  const { data: piggyBanks = [] } = usePiggyBanks();
+  const piggyTotalQuery = usePiggyTotal();
   const piggyCashQuery = usePiggyCashMovements();
   const assetCashQuery = useAssetCashTransactions();
   const balance = income - expenses;
   const hasHistory = history.slice(0, -1).some((month) => month.hasActivity);
-  const piggyTotal = useMemo(
-    () => piggyBanks.reduce((sum, bank) => sum + bank.balance, 0),
-    [piggyBanks],
-  );
   const balanceLabel = formatCurrencyCompact(balance);
-  const piggyLabel = formatCurrencyCompact(piggyTotal);
+  const piggyLabel = formatCurrencyCompact(piggyTotalQuery.total ?? 0);
   const shareLabel = formatPercent(recurringShare);
 
   // Ordinary income/expense endpoints omit internal piggy and asset flows.
@@ -52,13 +47,18 @@ export function DashboardPage() {
   if (
     piggyCashQuery.isError ||
     !piggyCashQuery.data ||
+    piggyTotalQuery.isError ||
+    !piggyTotalQuery.data ||
     assetCashQuery.isError ||
     assetCashQuery.isPending ||
     historyQuery.isError ||
     !historyQuery.data
   ) {
     const failed =
-      piggyCashQuery.isError || assetCashQuery.isError || historyQuery.isError;
+      piggyCashQuery.isError ||
+      piggyTotalQuery.isError ||
+      assetCashQuery.isError ||
+      historyQuery.isError;
     return (
       <div className='space-y-6'>
         <title>Dashboard | deManage</title>
@@ -81,6 +81,7 @@ export function DashboardPage() {
               onClick={() =>
                 void Promise.all([
                   piggyCashQuery.refetch(),
+                  piggyTotalQuery.refetch(),
                   assetCashQuery.refetch(),
                   historyQuery.refetch(),
                 ])
