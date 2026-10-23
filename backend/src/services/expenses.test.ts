@@ -11,7 +11,11 @@ import {
   parsePayExpenseBody,
   parseUpdateExpense,
 } from './expense-input';
-import { cashAmountOf, existingSplitInputs } from './expenses';
+import {
+  assertOneOffMutationSafe,
+  cashAmountOf,
+  existingSplitInputs,
+} from './expenses';
 
 function status(fn: () => unknown) {
   try {
@@ -120,5 +124,62 @@ test('pay body needs a valid month', () => {
   assert.equal(
     status(() => parsePayExpenseBody({ month: '2026-9' })),
     400,
+  );
+});
+
+test('F01: paid one-off cash cannot be repriced or moved to a card', () => {
+  assert.equal(
+    status(() =>
+      assertOneOffMutationSafe({
+        paymentCount: 1,
+        oldCashAmount: 100,
+        newCashAmount: 0,
+        hasCardSettlement: false,
+      }),
+    ),
+    409,
+  );
+  assert.equal(
+    status(() =>
+      assertOneOffMutationSafe({
+        paymentCount: 1,
+        oldCashAmount: 40,
+        newCashAmount: 60,
+        hasCardSettlement: true,
+      }),
+    ),
+    409,
+  );
+});
+
+test('F01: settled card cannot be repriced; unbilled card can switch to PIX once', () => {
+  assert.equal(
+    status(() =>
+      assertOneOffMutationSafe({
+        paymentCount: 0,
+        oldCashAmount: 0,
+        newCashAmount: 0,
+        hasCardSettlement: true,
+      }),
+    ),
+    409,
+  );
+  assert.equal(
+    assertOneOffMutationSafe({
+      paymentCount: 0,
+      oldCashAmount: 0,
+      newCashAmount: 35,
+      hasCardSettlement: false,
+    }),
+    true,
+  );
+  assert.equal(
+    assertOneOffMutationSafe({
+      paymentCount: 0,
+      oldCashAmount: 0,
+      newCashAmount: 0,
+      hasCardSettlement: false,
+    }),
+    false,
   );
 });
