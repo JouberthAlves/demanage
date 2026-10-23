@@ -146,6 +146,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14.4'
+      - name: Install pinned PostgreSQL SQL parser for approval gate
+        run: python -m pip install -r ops/cd/requirements-approval.txt
       - name: Compile deploy agent
         run: python -m compileall -q ops/cd
       - name: Run fail-closed deployment tests

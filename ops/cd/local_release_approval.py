@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 
 from demanage_cd.local_ci import SHA, validate_ci_evidence
 from demanage_cd.manifest import validate_release
+from demanage_cd.migration_gate import validate_additive_sql
 
 REPOSITORY = "bielxdh3/demanage"
 APPROVER = "bielxdh3"
@@ -140,23 +141,10 @@ def verify_git(repo: Path, previous: str, target: str) -> bool:
     for name in names:
         if not name.startswith("backend/prisma/migrations/"):
             continue
-        if not name.endswith("/migration.sql"):
+        if not re.fullmatch(r"backend/prisma/migrations/[0-9]{14}_[a-zA-Z0-9_]+/migration\.sql", name):
             raise RuntimeError("Unexpected migration asset in local release")
         content = call("git", "-C", str(repo), "show", target + ":" + name)
-        content = re.sub(r"/\*.*?\*/", "", content, flags=re.S)
-        content = re.sub(r"--[^\n]*", "", content)
-        # RAISE hints and FK ON DELETE/UPDATE actions are not SQL DML.
-        content = re.sub(r"'(?:''|[^'])*'", "''", content)
-        content = re.sub(
-            r"\bON\s+(DELETE|UPDATE)\s+(CASCADE|RESTRICT|NO\s+ACTION|SET\s+NULL|SET\s+DEFAULT)\b",
-            "", content, flags=re.I,
-        )
-        if re.search(
-            r"\b(DROP|DELETE|UPDATE|TRUNCATE|RENAME|EXECUTE|REPLACE)\b"
-            r"|\bSET\s+NOT\s+NULL\b",
-            content, flags=re.I,
-        ):
-            raise RuntimeError("Potentially destructive migration needs a separate manual runbook: " + name)
+        validate_additive_sql(content, name)
     return True
 
 

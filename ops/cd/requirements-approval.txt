@@ -1,0 +1,2 @@
+# PostgreSQL 18 grammar parser for the local release SQL gate. Fail closed if absent.
+pglast==8.7
