@@ -37,3 +37,10 @@ procedure. This restricted gate is intentionally unable to approve arbitrary
 SQL. The parser checks syntactic structure and an allowlist, **not** that the
 complete database state is semantically unchanged; retain the disposable
 PostgreSQL rehearsal and release backup requirements.
+
+**C04 pending revision:** A C04 composite FK migration originally used an
+`ON UPDATE CASCADE` action that could propagate an owner change across account
+boundaries. Its old SQL is deliberately blocked and kept as a regression
+fixture. Pin only the corrected and fully reviewed final migration, with an
+adversarial same-owner test. F02's versioning trigger also requires final
+review before any exception is added.

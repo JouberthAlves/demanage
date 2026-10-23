@@ -177,6 +177,16 @@ class LocalReleaseApprovalTests(unittest.TestCase):
             with mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
                 self.assertTrue(approval.verify_git(Path("test-repo"), PREVIOUS, TARGET))
 
+    def test_git_refuses_c04_migration_before_safe_fk_revision(self):
+        path = "backend/prisma/migrations/20261023211000_c04_owner_composite_fks/migration.sql"
+        sql = (Path(__file__).resolve().parent / "fixtures/20261023211000_c04_owner_composite_fks.sql").read_text(encoding="utf-8")
+        with mock.patch.object(approval, "call", side_effect=[
+            TARGET + " refs/heads/master", "", "", path, "A\t" + path, sql,
+        ]):
+            with mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                with self.assertRaisesRegex(RuntimeError, "manual audited runbook"):
+                    approval.verify_git(Path("test-repo"), PREVIOUS, TARGET)
+
     def test_git_blocks_non_additive_column_type_change_that_old_regex_allowed(self):
         file = "backend/prisma/migrations/20261023220000_sneaky/migration.sql"
         with mock.patch.object(approval, "call", side_effect=[

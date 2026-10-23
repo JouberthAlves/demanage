@@ -19,8 +19,8 @@ except ImportError:  # The approval channel must never fall back to regexes.
 
 
 # Individually reviewed exceptions: bounded OAuth token issuance backfill and
-# append-only piggy provenance check/immutability trigger. Only these exact SQL
-# contents at these exact paths bypass the generic DDL-only allowlist.
+# piggy provenance immutability trigger. Complex future migrations (including
+# C04) remain blocked until final SQL is independently reviewed and pinned.
 REVIEWED_SQL = {
     "backend/prisma/migrations/20261023210000_piggy_correction_origin/migration.sql": (
         "be32187d748161dd32d998545536cf362fe2b89fe636e47f9a7ea3593534d594"
