@@ -27,6 +27,10 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
   const isProduction = NODE_ENV === 'production';
   const app = express();
 
+  // Production accepts exactly one hop from frontend nginx. nginx replaces
+  // incoming XFF with its sanitized socket peer (or a separately verified
+  // Tunnel visitor IP). Never expose the backend directly: direct callers
+  // could spoof that trusted forwarded hop and evade rate limiting.
   app.set('trust proxy', isProduction ? 1 : 'loopback');
 
   if (isProduction) {

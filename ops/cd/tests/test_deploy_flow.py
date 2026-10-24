@@ -75,6 +75,7 @@ class FakeDocker:
 
     def __init__(self, journal_file, *, running, healthy_ids, fail_up=lambda refs: False):
         self.running = dict(running)
+        self.db_id = 'cid-db'
         self.healthy_ids = set(healthy_ids)
         self.fail_up = fail_up
         self.journal_file = journal_file
@@ -109,7 +110,7 @@ class FakeDocker:
             if 'config' in args:
                 return json.dumps(compose_model())
             if 'ps' in args:
-                return 'cid-' + args[-1]
+                return self.db_id if args[-1] == 'db' else 'cid-' + args[-1]
             if 'up' in args:
                 return self._up(args)
         raise AssertionError(f'unexpected command: {args}')
@@ -129,7 +130,7 @@ class FakeDocker:
         service = name.removeprefix('demanage-')
         if service == 'db':
             return {
-                'Id': 'cid-db',
+                'Id': self.db_id,
                 'Image': 'sha256:db',
                 'Config': {'Labels': {
                     'com.docker.compose.project': 'demanage',
@@ -211,7 +212,7 @@ class DeployFlowTest(unittest.TestCase):
 
         def probe(url):
             if fake.running['backend'] in fake.healthy_ids:
-                return {'status': 'ok', 'service': 'demanage-backend'}
+                return {'status': 'ok', 'service': 'demanage-backend', 'db': 'ready'}
             raise RuntimeError('backend down')
 
         return deploy.Context(
@@ -224,6 +225,30 @@ class DeployFlowTest(unittest.TestCase):
             health_timeout=60,
             fetch=fetch,
         )
+
+    def test_readiness_fails_closed_even_if_public_liveness_is_healthy(self):
+        fake = self.make_fake()
+        ctx = self.make_ctx(fake)
+        seen = []
+
+        def probe(url):
+            seen.append(url)
+            if url.endswith('/ready'):
+                return {'status': 'unavailable', 'service': 'demanage-backend', 'db': 'unavailable'}
+            return {'status': 'ok', 'service': 'demanage-backend'}
+
+        ctx.probe = probe
+        # Preflight supports the currently deployed old image, which may not
+        # yet expose /ready. New images must pass the SQL check before commit.
+        self.assertTrue(deploy.healthy(ctx))
+        self.assertFalse(deploy.healthy(ctx, OLD, require_readiness=True))
+        self.assertIn('https://demanage.biel.dev.br/api/ready', seen)
+
+    def test_readiness_without_sql_confirmation_does_not_promote(self):
+        fake = self.make_fake()
+        ctx = self.make_ctx(fake)
+        ctx.probe = lambda _: {'status': 'ok', 'service': 'demanage-backend'}
+        self.assertFalse(deploy.healthy(ctx, OLD, require_readiness=True))
 
     # --- happy path -------------------------------------------------------
 
@@ -299,6 +324,11 @@ class DeployFlowTest(unittest.TestCase):
             'previous': FIRST,
             'previous_images': previous,
             'new_images': new,
+            'database_identity': {
+                'id': 'cid-db',
+                'image': 'sha256:db',
+                'volumes': [['demanage_pgdata', '/var/lib/postgresql']],
+            },
             'rollback_refs': {'backend': 'localhost/x:1', 'frontend': 'localhost/y:1'},
             'backup': str(self.base / 'demanage.dump'),
             'started_at': '2026-10-10T12:00:00+00:00',
@@ -318,6 +348,32 @@ class DeployFlowTest(unittest.TestCase):
         self.assertEqual(saved['running_image_ids'], NEW)
         self.assertTrue(saved.get('recovered_from_journal'))
         self.assertFalse(self.journal_file.exists())
+
+    def test_crash_with_replaced_database_refuses_to_reconcile(self):
+        self.write_state(FIRST, OLD)
+        self._journal(new=NEW, previous=OLD)
+        fake = self.make_fake(running=NEW)
+        fake.db_id = 'replaced-db-container'
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+
+        with self.assertRaisesRegex(RuntimeError, 'database identity|database changed'):
+            cli.run_agent(ctx)
+        self.assertTrue(self.journal_file.exists())
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], FIRST)
+
+    def test_crash_with_legacy_journal_missing_database_identity_fails_closed(self):
+        self.write_state(FIRST, OLD)
+        self._journal(new=NEW, previous=OLD)
+        journal = state.read_journal(self.journal_file)
+        del journal['database_identity']
+        state.write_journal(self.journal_file, journal)
+        fake = self.make_fake(running=NEW)
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+
+        with self.assertRaisesRegex(RuntimeError, 'database identity|database changed'):
+            cli.run_agent(ctx)
+        self.assertTrue(self.journal_file.exists())
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], FIRST)
 
     def test_crash_before_apply_clears_journal_when_previous_release_runs(self):
         self.write_state(FIRST, OLD)

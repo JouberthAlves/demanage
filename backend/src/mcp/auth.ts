@@ -6,6 +6,8 @@ export type McpIdentity = {
   userId: string;
   clientId: string;
   scopes: ReadonlySet<string>;
+  /** OAuth provider grant checked when the bearer was received. */
+  oauthGrantId?: string;
 };
 
 export type McpTokenVerifier = (

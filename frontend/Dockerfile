@@ -27,6 +27,7 @@ WORKDIR /app
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/templates/default.conf.template
 COPY entrypoint.sh /entrypoint.sh
+COPY realip-config.sh /realip-config.sh
 # .gitattributes keeps *.sh as LF, so no CRLF conversion is needed here.
 RUN chmod +x /entrypoint.sh
 

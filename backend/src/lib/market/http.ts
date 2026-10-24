@@ -60,6 +60,9 @@ export async function getJson<T>(
     const response = await fetch(url, {
       signal: controller.signal,
       headers: { 'user-agent': 'deManage/1.0' },
+      // Fixed provider URLs must never redirect into internal networks.
+      // Redirects are unnecessary for these explicit HTTPS endpoints.
+      redirect: 'error',
     });
     if (response.status === 404 && 'onNotFound' in options) {
       await response.body?.cancel();

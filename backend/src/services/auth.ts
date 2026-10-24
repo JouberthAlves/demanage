@@ -108,26 +108,56 @@ export function parseCurrentPassword(body: Record<string, unknown>) {
   return password;
 }
 
-export async function rotateRecoveryCode(
+/**
+ * Validate and publish one recovery-code rotation against the same credential
+ * snapshot. A password reset or session revocation between read and write
+ * makes the CAS fail instead of publishing a code from stale authentication.
+ */
+export async function rotateRecoveryCodeInTransaction(
   userId: string,
   currentPassword: string,
+  userStore: Pick<typeof prisma.user, 'findUnique' | 'updateMany'>,
 ) {
-  const user = await prisma.user.findUnique({
+  const user = await userStore.findUnique({
     where: { id: userId },
-    select: { passwordHash: true },
+    select: {
+      passwordHash: true,
+      sessionVersion: true,
+      recoveryCodeHash: true,
+    },
   });
   if (!user || !(await comparePassword(currentPassword, user.passwordHash))) {
     throw unauthorized('Senha atual inválida');
   }
 
   const recoveryCode = generateRecoveryCode();
-  await prisma.user.update({
-    where: { id: userId },
+  const { count } = await userStore.updateMany({
+    // The snapshot is authenticated but may already have been superseded.
+    // All credential/session fields must still match when this update commits.
+    where: {
+      id: userId,
+      passwordHash: user.passwordHash,
+      sessionVersion: user.sessionVersion,
+      recoveryCodeHash: user.recoveryCodeHash,
+    },
     data: {
       recoveryCodeHash: hashRecoveryCode(recoveryCode),
       recoveryCodeCreatedAt: new Date(),
     },
   });
+  if (count !== 1) throw unauthorized('Senha atual inválida');
+
+  return recoveryCode;
+}
+
+export async function rotateRecoveryCode(
+  userId: string,
+  currentPassword: string,
+) {
+  const recoveryCode = await prisma.$transaction(
+    (tx) => rotateRecoveryCodeInTransaction(userId, currentPassword, tx.user),
+    { maxWait: 10_000, timeout: 15_000 },
+  );
 
   console.info('[security] recovery_code_rotated', {
     userId,
@@ -168,12 +198,9 @@ export function parseRecoverPassword(
 /** Troca a senha com o código de recuperação, revoga sessões e gira o código. */
 export async function recoverPassword(
   input: RecoverPasswordInput,
-  userStore: Pick<
-    typeof prisma.user,
-    'findUnique' | 'updateMany'
-  > = prisma.user,
+  database: Pick<typeof prisma, 'user' | '$transaction'> = prisma,
 ) {
-  const user = await userStore.findUnique({ where: { email: input.email } });
+  const user = await database.user.findUnique({ where: { email: input.email } });
   if (
     !user?.recoveryCodeHash ||
     !verifyRecoveryCode(input.recoveryCode, user.recoveryCodeHash)
@@ -183,16 +210,39 @@ export async function recoverPassword(
 
   const passwordHash = await hashPassword(input.newPassword);
   const nextRecoveryCode = generateRecoveryCode();
-  const { count } = await userStore.updateMany({
-    // Compare-and-consume atomically; concurrent reuse must not reset the password.
-    where: { id: user.id, recoveryCodeHash: user.recoveryCodeHash },
-    data: {
-      passwordHash,
-      recoveryCodeHash: hashRecoveryCode(nextRecoveryCode),
-      recoveryCodeCreatedAt: new Date(),
-      sessionVersion: { increment: 1 },
-    },
+  await database.$transaction(async (tx) => {
+    // Password, session epoch and OAuth revocation either commit together or
+    // all roll back. Updating User first locks its row against consent writes.
+    const { count } = await tx.user.updateMany({
+      where: { id: user.id, recoveryCodeHash: user.recoveryCodeHash },
+      data: {
+        passwordHash,
+        recoveryCodeHash: hashRecoveryCode(nextRecoveryCode),
+        recoveryCodeCreatedAt: new Date(),
+        sessionVersion: { increment: 1 },
+      },
+    });
+    if (count !== 1) throw unauthorized(INVALID_RECOVERY_MESSAGE);
+
+    const connections = await tx.oAuthConnection.findMany({
+      where: { userId: user.id },
+      select: { grantId: true },
+    });
+    await tx.oAuthConnection.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+    const grantIds = connections.map((connection) => connection.grantId);
+    if (grantIds.length) {
+      // Access, refresh and authorization-code objects all carry grantId.
+      // The Grant object itself uses the ID as primary key.
+      await tx.oAuthArtifact.deleteMany({
+        where: { OR: [
+          { grantId: { in: grantIds } },
+          { model: 'Grant', id: { in: grantIds } },
+        ] },
+      });
+    }
   });
-  if (count !== 1) throw unauthorized(INVALID_RECOVERY_MESSAGE);
   return nextRecoveryCode;
 }

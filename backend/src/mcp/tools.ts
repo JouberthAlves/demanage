@@ -41,7 +41,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
   server.registerTool(
     'get_financial_overview',
     {
-      description: 'Consultar saldo até hoje no mês, igual ao Dashboard, e patrimônio opcional. O saldo do mês não é saldo bancário absoluto.',
+      description: 'Consultar saldo do mês até hoje: pagamentos e recebimentos registrados pela data efetiva, mais recorrências vencidas sem baixa; patrimônio opcional. Não é saldo bancário absoluto.',
       annotations: { ...READ_ONLY_ANNOTATIONS, openWorldHint: true },
       inputSchema: {},
     },
@@ -132,6 +132,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
           intentNonce: nonce,
           payloadDigest: digestFinanceAction(action),
           action,
+          oauthGrantId: identity.oauthGrantId,
         });
         return response({ status: 'committed', replayed, idempotencyKey, ...result });
       } catch (error) {

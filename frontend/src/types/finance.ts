@@ -91,6 +91,7 @@ export type ExpensePaymentOccurrence = {
 
 export type RecurringExpense = {
   id: string;
+  archivedAt?: string | null;
   name: string;
   amount: number;
   category: ExpenseCategory;
@@ -125,6 +126,7 @@ export type EntryReceiptOccurrence = {
 
 export type Income = {
   id: string;
+  archivedAt?: string | null;
   name: string;
   notes?: string | null;
   amount: number;

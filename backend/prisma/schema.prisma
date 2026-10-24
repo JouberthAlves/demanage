@@ -61,6 +61,11 @@ enum PiggyTransactionSource {
   yield
 }
 
+enum PiggyCorrectionOrigin {
+  debited
+  not_debited
+}
+
 enum ExpenseSplitKind {
   card
   pix
@@ -169,6 +174,8 @@ model FinanceMcpOperation {
 
   @@unique([userId, clientId, idempotencyKey])
   @@unique([userId, clientId, intentNonce])
+  // Composite FK from FinanceMcpUndo verifies the operation's owner.
+  @@unique([id, userId])
 }
 
 // A separate immutable undo receipt preserves the original operation history.
@@ -181,9 +188,11 @@ model FinanceMcpUndo {
   operationId  String   @unique
   undoneAt     DateTime @default(now())
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  operation    FinanceMcpOperation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  operation    FinanceMcpOperation @relation(fields: [operationId, userId], references: [id, userId], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([userId, clientId, intentNonce])
+  // Prisma needs the exact compound relation fields unique for 1:1.
+  @@unique([operationId, userId])
   @@index([userId, clientId, undoneAt])
 }
 
@@ -213,6 +222,7 @@ model OAuthConnection {
   grantId    String    @unique
   scopes     String
   createdAt  DateTime  @default(now())
+  connectedAt DateTime?
   revokedAt  DateTime?
   user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -247,6 +257,7 @@ model Expense {
   card               Card?             @relation(fields: [cardId], references: [id], onDelete: SetNull)
   customTag          CustomTag?        @relation(fields: [customTagId], references: [id], onDelete: SetNull)
   splits             ExpenseSplit[]
+  obligationVersions ExpenseObligationVersion[]
   assetTransaction   AssetTransaction?
   payments           ExpensePayment[]
   piggyTransactions  PiggyTransaction[]
@@ -274,6 +285,23 @@ model ExpenseSplit {
   // unique index: UNIQUE (expenseId, kind) WHERE cardId IS NULL.
   @@unique([expenseId, kind, cardId])
   @@index([cardId])
+}
+
+// Historical recurring card obligations. Financial terms are inserted under
+// the user's write lock; older versions must never be repriced on PATCH.
+model ExpenseObligationVersion {
+  id             String   @id @default(uuid())
+  expenseId      String
+  sequence       Int
+  effectiveMonth String
+  amount         Decimal  @db.Decimal(12, 2)
+  cardId         String?
+  splits         Json
+  createdAt      DateTime @default(now())
+  expense        Expense  @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  @@unique([expenseId, sequence])
+  @@index([expenseId, effectiveMonth, sequence])
 }
 
 model ExpensePayment {
@@ -356,6 +384,8 @@ model PiggyBank {
 
   // Leading-userId composite below also serves userId-only lookups.
   @@index([userId, archivedAt])
+  // Composite FK from PiggyTransaction verifies the bank's owner.
+  @@unique([id, userId])
 }
 
 model PiggyTransaction {
@@ -369,13 +399,14 @@ model PiggyTransaction {
   expenseId        String?
   entryId          String?
   note             String?
+  correctionOrigin PiggyCorrectionOrigin?
   cdiRate          Decimal?               @db.Decimal(12, 8)
   cdiPercent       Decimal?               @db.Decimal(8, 4)
   baseBalance      Decimal?               @db.Decimal(18, 8)
   resultingBalance Decimal?               @db.Decimal(18, 8)
   interestKey      String?                @unique
   createdAt        DateTime               @default(now())
-  piggyBank        PiggyBank              @relation(fields: [piggyBankId], references: [id], onDelete: Cascade)
+  piggyBank        PiggyBank              @relation(fields: [piggyBankId, userId], references: [id, userId], onDelete: Cascade, onUpdate: NoAction)
   user             User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   expense          Expense?               @relation(fields: [expenseId], references: [id], onDelete: SetNull)
   entry            Entry?                 @relation(fields: [entryId], references: [id], onDelete: SetNull)

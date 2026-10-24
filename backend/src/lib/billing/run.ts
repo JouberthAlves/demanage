@@ -1,10 +1,8 @@
-import type { Expense, ExpenseSplit } from '@/generated/prisma/client';
 import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
+import { loadBillableExpensesForCards } from './obligation-versions';
 import { planCardBilling } from './plan';
-
-type ExpenseForBilling = Expense & { splits?: ExpenseSplit[] };
 
 /**
  * Generates every pending card invoice for the user.
@@ -22,14 +20,9 @@ export async function processUserCardBilling(userId: string, now?: Date) {
 
     const cards = await tx.card.findMany({
       where: { userId, archivedAt: null },
-      include: {
-        expenses: { include: { splits: true } },
-        expenseSplits: {
-          where: { kind: 'card' },
-          include: { expense: { include: { splits: true } } },
-        },
-      },
     });
+
+    const billable = await loadBillableExpensesForCards(tx, userId);
 
     let createdCount = 0;
     const invoiceRows: Array<{
@@ -47,15 +40,9 @@ export async function processUserCardBilling(userId: string, now?: Date) {
     }> = [];
 
     for (const card of cards) {
-      const expenseMap = new Map<string, ExpenseForBilling>();
-      for (const expense of card.expenses) expenseMap.set(expense.id, expense);
-      for (const split of card.expenseSplits) {
-        expenseMap.set(split.expense.id, split.expense);
-      }
-
       const { invoices, cardUpdate } = planCardBilling(
         card,
-        [...expenseMap.values()],
+        billable,
         cutoff,
         effectiveNow,
       );

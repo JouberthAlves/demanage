@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import { ArrowDownRight, ArrowUpRight, Wallet } from 'lucide-react';
 
 import { CardCommitmentChart } from '@/components/dashboard/card-commitment-chart';
@@ -11,8 +10,11 @@ import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
 import { Button } from '@/components/ui/button';
-import { useFinanceSummary } from '@/hooks/use-monthly-history';
-import { usePiggyBanks, usePiggyCashMovements } from '@/hooks/use-piggy-banks';
+import {
+  useAssetCashTransactions,
+  useFinanceSummary,
+} from '@/hooks/use-monthly-history';
+import { usePiggyCashMovements, usePiggyTotal } from '@/hooks/use-piggy-banks';
 import {
   formatCurrencyCompact,
   formatPercent,
@@ -23,35 +25,70 @@ import { useAuthStore } from '@/stores/auth-store';
 
 export function DashboardPage() {
   const userName = useAuthStore((state) => state.user?.name ?? '');
-  const { history, income, expenses, averageExpense, recurringShare } =
-    useFinanceSummary();
-  const { data: piggyBanks = [] } = usePiggyBanks();
+  const {
+    history,
+    income,
+    expenses,
+    averageExpense,
+    recurringShare,
+    historyQuery,
+  } = useFinanceSummary();
+  const piggyTotalQuery = usePiggyTotal();
   const piggyCashQuery = usePiggyCashMovements();
+  const assetCashQuery = useAssetCashTransactions();
   const balance = income - expenses;
   const hasHistory = history.slice(0, -1).some((month) => month.hasActivity);
-  const piggyTotal = useMemo(
-    () => piggyBanks.reduce((sum, bank) => sum + bank.balance, 0),
-    [piggyBanks],
-  );
   const balanceLabel = formatCurrencyCompact(balance);
-  const piggyLabel = formatCurrencyCompact(piggyTotal);
+  const piggyLabel = formatCurrencyCompact(piggyTotalQuery.total ?? 0);
   const shareLabel = formatPercent(recurringShare);
 
-  // Ordinary income/expense endpoints intentionally omit internal transfers.
-  // Without this query the displayed cash total is wrong, not genuinely zero.
-  if (piggyCashQuery.isError || !piggyCashQuery.data) {
+  // Ordinary income/expense endpoints omit internal piggy and asset flows.
+  // Never display a partial cash balance while either source is unavailable.
+  if (
+    piggyCashQuery.isError ||
+    !piggyCashQuery.data ||
+    piggyTotalQuery.isError ||
+    !piggyTotalQuery.data ||
+    assetCashQuery.isError ||
+    assetCashQuery.isPending ||
+    historyQuery.isError ||
+    !historyQuery.data
+  ) {
+    const failed =
+      piggyCashQuery.isError ||
+      piggyTotalQuery.isError ||
+      assetCashQuery.isError ||
+      historyQuery.isError;
     return (
       <div className='space-y-6'>
         <title>Dashboard | deManage</title>
-        <PageHeader title={`Olá, ${getFirstName(userName)}`} description='Resumo financeiro até hoje' />
-        <div role={piggyCashQuery.isError ? 'alert' : 'status'} className='rounded-xl border border-border p-5 space-y-3'>
+        <PageHeader
+          title={`Olá, ${getFirstName(userName)}`}
+          description='Resumo financeiro até hoje'
+        />
+        <div
+          role={failed ? 'alert' : 'status'}
+          className='rounded-xl border border-border p-5 space-y-3'
+        >
           <p className='font-medium'>
-            {piggyCashQuery.isError
-              ? 'Saldo indisponível: não foi possível consultar as movimentações dos cofrinhos.'
-              : 'Atualizando o saldo com as movimentações dos cofrinhos…'}
+            {failed
+              ? 'Saldo indisponível: não foi possível consultar todas as movimentações financeiras.'
+              : 'Atualizando o saldo com as movimentações financeiras…'}
           </p>
-          {piggyCashQuery.isError ? (
-            <Button variant='outline' onClick={() => void piggyCashQuery.refetch()}>Tentar novamente</Button>
+          {failed ? (
+            <Button
+              variant='outline'
+              onClick={() =>
+                void Promise.all([
+                  piggyCashQuery.refetch(),
+                  piggyTotalQuery.refetch(),
+                  assetCashQuery.refetch(),
+                  historyQuery.refetch(),
+                ])
+              }
+            >
+              Tentar novamente
+            </Button>
           ) : null}
         </div>
       </div>

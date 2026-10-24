@@ -19,6 +19,7 @@ export type ApiExpenseSplit = {
 
 export type ApiExpense = {
   id: string;
+  archivedAt?: string | null;
   name: string;
   amount: string | number;
   category: ExpenseCategory;
@@ -89,6 +90,7 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
   const registeredAt = expense.occurredAt ?? expense.createdAt;
   return {
     id: expense.id,
+    archivedAt: expense.archivedAt ?? null,
     name: expense.name,
     amount: Number(expense.amount),
     category: expense.category,
@@ -100,7 +102,9 @@ export function mapExpenseToLocal(expense: ApiExpense): RecurringExpense {
     occurredAt: expense.occurredAt ?? undefined,
     billingPeriodStart: mapDateOnly(expense.billingPeriodStart),
     billingPeriodEnd: mapDateOnly(expense.billingPeriodEnd),
-    registeredAt: registeredAt ? (dayKeyOf(registeredAt) ?? undefined) : undefined,
+    registeredAt: registeredAt
+      ? (dayKeyOf(registeredAt) ?? undefined)
+      : undefined,
     paidForMonth: expense.paidForMonth ?? undefined,
     paidAt: expense.paidAt ?? undefined,
     createdAt: expense.createdAt,

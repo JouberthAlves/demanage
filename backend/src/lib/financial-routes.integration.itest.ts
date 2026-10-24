@@ -17,6 +17,9 @@ import {
 } from '@/lib/expense-splits';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
+import { getFinancialOverview } from '@/mcp/financial-overview';
+import { parseCreateExpense, parseUpdateExpense } from '@/services/expense-input';
+import { createExpense, updateExpense } from '@/services/expenses';
 
 async function createUser(name: string) {
   return prisma.user.create({
@@ -136,6 +139,65 @@ test('entry create, list and edit keep description independent of title and inco
     assert.equal(persisted.notes, null);
     assert.equal(persisted.name, 'Presente');
     assert.equal(persisted.customTagId, tag.id);
+  } finally {
+    await api.close();
+    await cleanupUser(user.id);
+  }
+});
+
+test('a received one-off cannot become recurring and inflate MCP cash beyond dashboard receipts', async () => {
+  const user = await createUser('One-off receipt frequency guard');
+  const today = todayInSaoPaulo();
+  const day = today.toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const entry = await prisma.entry.create({
+    data: {
+      userId: user.id,
+      name: 'Freela já recebido',
+      amount: 100,
+      type: 'outro',
+      frequency: 'unica',
+      date: today,
+      receipts: { create: [{
+        month,
+        amount: 100,
+        receivedAt: new Date(`${day}T14:00:00.000Z`),
+      }] },
+    },
+  });
+  const api = await startApi(user.id);
+
+  try {
+    const changed = await api.request(`/entries/${entry.id}`, 'PATCH', {
+      frequency: 'mensal', amount: 200, receiveDay: 1, startsAt: `${month}-01`,
+    });
+    assert.equal(changed.response.status, 409);
+
+    const saved = await prisma.entry.findUniqueOrThrow({
+      where: { id: entry.id }, include: { receipts: true },
+    });
+    assert.equal(saved.frequency, 'unica');
+    assert.equal(Number(saved.amount), 100);
+    assert.equal(saved.receipts.length, 1);
+    assert.equal(Number(saved.receipts[0].amount), 100);
+
+    const cashNow = new Date(`${day}T18:00:00.000Z`);
+    assert.equal((await getFinancialOverview(user.id, cashNow)).monthly.incomeBrl, '100.00');
+
+    const rename = await api.request(`/entries/${entry.id}`, 'PATCH', { name: 'Freela confirmado' });
+    assert.equal(rename.response.status, 200, 'non-financial edits must still work');
+
+    const pending = await prisma.entry.create({
+      data: {
+        userId: user.id, name: 'Freela não recebido', amount: 100,
+        type: 'outro', frequency: 'unica', date: today,
+      },
+    });
+    const allowed = await api.request(`/entries/${pending.id}`, 'PATCH', {
+      frequency: 'mensal', amount: 200, receiveDay: 1, startsAt: `${month}-01`,
+    });
+    assert.equal(allowed.response.status, 200, 'unreceived one-offs can still become recurring');
+    assert.equal((allowed.data as { frequency: string }).frequency, 'mensal');
   } finally {
     await api.close();
     await cleanupUser(user.id);
@@ -324,6 +386,83 @@ test('archiving a card closes a late purchase from the already invoiced cycle', 
     });
     assert.equal(Number(invoice.amount), 80);
     assert.match(invoice.notes ?? '', /compras retroativas/);
+  } finally {
+    await api.close();
+    await cleanupUser(user.id);
+  }
+});
+
+test('archiving a former card settles historical obligations once after moving its recurring split', async () => {
+  const user = await createUser('Historical card archive');
+  const today = todayInSaoPaulo();
+  const firstMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 3, 1, 12));
+  const movedMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1, 12));
+  const [oldCard, newCard] = await Promise.all([
+    prisma.card.create({
+      data: { userId: user.id, name: 'Historical A', closingDay: 31, createdAt: firstMonth },
+    }),
+    prisma.card.create({
+      data: { userId: user.id, name: 'Current B', closingDay: 31, createdAt: firstMonth },
+    }),
+  ]);
+  const api = await startApi(user.id);
+
+  try {
+    const expense = await createExpense(user.id, parseCreateExpense({
+      name: 'Card assignment changes', category: 'outro', frequency: 'mensal',
+      amount: 100, dueDay: 1, startsAt: firstMonth.toISOString().slice(0, 10),
+      splits: [
+        { kind: 'card', cardId: oldCard.id, percent: 60 },
+        { kind: 'pix', percent: 40 },
+      ],
+    }));
+    await updateExpense(user.id, expense.id, parseUpdateExpense({
+      amount: 200,
+      splits: [
+        { kind: 'card', cardId: newCard.id, percent: 75 },
+        { kind: 'pix', percent: 25 },
+      ],
+    }), movedMonth);
+
+    const obligationVersions = await prisma.expenseObligationVersion.findMany({
+      where: { expenseId: expense.id }, orderBy: { sequence: 'asc' },
+    });
+    assert.deepEqual(obligationVersions.map((version) => [
+      version.effectiveMonth, Number(version.amount), version.splits,
+    ]), [
+      [firstMonth.toISOString().slice(0, 7), 100, [
+        { kind: 'card', cardId: oldCard.id, amount: '60', percent: '60' },
+        { kind: 'pix', cardId: null, amount: '40', percent: '40' },
+      ]],
+      [movedMonth.toISOString().slice(0, 7), 200, [
+        { kind: 'card', cardId: newCard.id, amount: '150', percent: '75' },
+        { kind: 'pix', cardId: null, amount: '50', percent: '25' },
+      ]],
+    ]);
+    const current = await prisma.expense.findUniqueOrThrow({
+      where: { id: expense.id }, include: { splits: true },
+    });
+    assert.equal(current.cardId, null);
+    assert.deepEqual(current.splits.filter((split) => split.kind === 'card').map((split) => split.cardId), [newCard.id]);
+
+    const oldArchive = await api.request(`/cards/${oldCard.id}`, 'DELETE');
+    assert.equal(oldArchive.response.status, 200);
+    let invoices = await prisma.expense.findMany({
+      where: { userId: user.id, isInvoice: true },
+    });
+    assert.deepEqual(invoices.map((invoice) => [invoice.cardId, Number(invoice.amount)]), [
+      [oldCard.id, 120],
+    ], 'former card must bill two old monthly shares even without current relations');
+
+    const newArchive = await api.request(`/cards/${newCard.id}`, 'DELETE');
+    assert.equal(newArchive.response.status, 200);
+    invoices = await prisma.expense.findMany({
+      where: { userId: user.id, isInvoice: true }, orderBy: { cardId: 'asc' },
+    });
+    assert.deepEqual(invoices.map((invoice) => [invoice.cardId, Number(invoice.amount)]).sort(), [
+      [oldCard.id, 120], [newCard.id, 300],
+    ].sort(), 'each historical competence must be billed to exactly its versioned card');
+    assert.equal(invoices.reduce((sum, invoice) => sum + Number(invoice.amount), 0), 420);
   } finally {
     await api.close();
     await cleanupUser(user.id);
