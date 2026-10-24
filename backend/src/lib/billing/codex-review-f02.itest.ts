@@ -72,3 +72,49 @@ test('Codex P2: moving a recurring start from December to October fails atomical
     assert.deepEqual((await prisma.expenseObligationVersion.findMany({ where: { expenseId: expense.id } })).map(v => v.effectiveMonth), ['2026-12']);
   } finally { await cleanup(user.id); }
 });
+
+test('Codex P2: editing February weekly price cannot spend immutable January card reserve', async () => {
+  const user = await fixture('P2 projected card limit');
+  try {
+    const card = await prisma.card.create({ data: {
+      userId: user.id, name: 'Card R$500', limit: 500, closingDay: 20,
+      createdAt: at('2026-01-01'), lastInvoicedOn: at('2026-01-20'),
+      lastBillingProcessedAt: at('2026-01-21'),
+    } });
+    const recurring = await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Weekly price revision',
+      amount: 100, category: 'outro', frequency: 'semanal',
+      startsAt: at('2026-01-21'), createdAt: at('2026-01-21'),
+    } });
+    await updateExpense(user.id, recurring.id, parseUpdateExpense({ amount: 10 }), at('2026-02-05'));
+    const initialVersions = await prisma.expenseObligationVersion.findMany({
+      where: { expenseId: recurring.id }, orderBy: { sequence: 'asc' },
+    });
+    assert.deepEqual(initialVersions.map((version) => [version.effectiveMonth, Number(version.amount)]), [
+      ['2026-01', 100], ['2026-02', 10],
+    ]);
+    await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Other purchase',
+      amount: 200, category: 'outro', frequency: 'unica',
+      occurredAt: at('2026-02-01'), createdAt: at('2026-02-01'),
+    } });
+
+    // Previous validation saw only other 200 + candidate max 5 x 50 = 450.
+    // Actual open cycle contains January 2 x 100 + February 3 x 50 + 200 = 550.
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({ amount: 50 }), at('2026-02-06')),
+      /Limite insuficiente/,
+    );
+    assert.equal(Number((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).amount), 10);
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: recurring.id } }), 2);
+
+    await updateExpense(user.id, recurring.id, parseUpdateExpense({ amount: 33.33 }), at('2026-02-06'));
+    assert.equal(Number((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).amount), 33.33);
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: recurring.id } }), 3);
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({ amount: 33.34 }), at('2026-02-06')),
+      /Limite insuficiente/,
+      'one cent above the real available amount must fail',
+    );
+  } finally { await cleanup(user.id); }
+});

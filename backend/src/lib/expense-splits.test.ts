@@ -6,7 +6,10 @@ import test from 'node:test';
 
 import { Prisma, type Card } from '@/generated/prisma/client';
 
+import { chargeAmountForClosing, type BillableExpense } from '@/lib/billing/charges';
 import {
+  assertCardLimits,
+  assertProspectiveVersionedCardLimits,
   getCommittedByCard,
   resolveAndValidateSplits,
 } from '@/lib/expense-splits';
@@ -105,4 +108,102 @@ test('card commitment fails closed on a malformed persisted obligation snapshot'
     () => getCommittedByCard({ userId: 'user-1', tx: historicalCommitmentDb({ invalidSnapshot: true }) }),
     /Persisted expense obligation splits do not match amount/,
   );
+});
+
+test('P2: a weekly edit must reserve January history plus three February charges without counting the candidate twice', () => {
+  const asOf = at('2026-02-06');
+  const card: Card = {
+    id: 'card-500', userId: 'user-1', name: 'Limite R$500',
+    limit: new Prisma.Decimal(500), closingDay: 20,
+    pendingClosingDay: null, pendingClosingDaySetAt: null,
+    createdAt: at('2026-01-01'), updatedAt: asOf,
+    archivedAt: null, expiresAt: null,
+    lastInvoicedOn: at('2026-01-20'), lastBillingProcessedAt: at('2026-01-21'),
+    minimumNextClosingOn: null,
+  };
+  const prospective: BillableExpense = {
+    amount: '50', cardId: card.id, isInvoice: false,
+    frequency: 'semanal', startsAt: at('2026-01-21'),
+    endsAt: null, occurredAt: null, createdAt: at('2026-01-21'),
+    splits: [{ kind: 'card', cardId: card.id, amount: '50' }],
+    obligationVersions: [
+      { sequence: 1, effectiveMonth: '2026-01', amount: '100', cardId: card.id,
+        splits: [{ kind: 'card', cardId: card.id, amount: '100' }] },
+      { sequence: 2, effectiveMonth: '2026-02', amount: '10', cardId: card.id,
+        splits: [{ kind: 'card', cardId: card.id, amount: '10' }] },
+      { sequence: 3, effectiveMonth: '2026-02', amount: '50', cardId: card.id,
+        splits: [{ kind: 'card', cardId: card.id, amount: '50' }] },
+    ],
+  };
+  assert.equal(chargeAmountForClosing(prospective, card.id, at('2026-02-20'), at('2026-01-20')), 350);
+  // Prior validation accepted 200 (one-off) + 5 x 50 = 450, ignoring
+  // the edited expense's immutable 2 x 100 from January.
+  assert.doesNotThrow(() => assertCardLimits({
+    cards: new Map([[card.id, card]]),
+    resolved: [{ kind: 'card', cardId: card.id, amount: 50, percent: 100 }],
+    committedByCard: new Map([[card.id, 200]]), frequency: 'semanal',
+  }));
+  assert.throws(() => assertProspectiveVersionedCardLimits({
+    cards: [card], otherCommittedByCard: new Map([[card.id, 200]]),
+    prospective, asOf,
+  }), /Limite insuficiente.*Limite R\$500/);
+
+  const safe = {
+    ...prospective,
+    amount: '33.33',
+    obligationVersions: [
+      ...prospective.obligationVersions!.slice(0, -1),
+      { sequence: 3, effectiveMonth: '2026-02', amount: '33.33', cardId: card.id,
+        splits: [{ kind: 'card', cardId: card.id, amount: '33.33' }] },
+    ],
+  };
+  assert.equal(chargeAmountForClosing(safe, card.id, at('2026-02-20'), at('2026-01-20')), 299.99);
+  assert.doesNotThrow(() => assertProspectiveVersionedCardLimits({
+    cards: [card], otherCommittedByCard: new Map([[card.id, 200]]),
+    prospective: safe, asOf,
+  }));
+  const overByCent = {
+    ...safe,
+    amount: '33.34',
+    obligationVersions: [
+      ...safe.obligationVersions.slice(0, -1),
+      { sequence: 3, effectiveMonth: '2026-02', amount: '33.34', cardId: card.id,
+        splits: [{ kind: 'card', cardId: card.id, amount: '33.34' }] },
+    ],
+  };
+  assert.equal(chargeAmountForClosing(overByCent, card.id, at('2026-02-20'), at('2026-01-20')), 300.02);
+  assert.throws(() => assertProspectiveVersionedCardLimits({
+    cards: [card], otherCommittedByCard: new Map([[card.id, 200]]),
+    prospective: overByCent, asOf,
+  }), /Limite insuficiente/);
+});
+
+test('P2: a moved split still validates historical obligations on the old card', () => {
+  const asOf = at('2026-02-06');
+  const card = (id: string): Card => ({
+    id, userId: 'user-1', name: id, limit: new Prisma.Decimal(500),
+    closingDay: 20, pendingClosingDay: null, pendingClosingDaySetAt: null,
+    minimumNextClosingOn: null, archivedAt: null, expiresAt: null,
+    lastInvoicedOn: at('2026-01-20'), lastBillingProcessedAt: at('2026-01-21'),
+    createdAt: at('2026-01-01'), updatedAt: asOf,
+  });
+  const original = card('original');
+  const destination = card('destination');
+  const prospective: BillableExpense = {
+    amount: '50', cardId: destination.id, isInvoice: false,
+    frequency: 'semanal', startsAt: at('2026-01-21'), endsAt: null,
+    occurredAt: null, createdAt: at('2026-01-21'),
+    splits: [{ kind: 'card', cardId: destination.id, amount: '50' }],
+    obligationVersions: [
+      { sequence: 1, effectiveMonth: '2026-01', amount: '100', cardId: original.id,
+        splits: [{ kind: 'card', cardId: original.id, amount: '100' }] },
+      { sequence: 2, effectiveMonth: '2026-02', amount: '50', cardId: destination.id,
+        splits: [{ kind: 'card', cardId: destination.id, amount: '50' }] },
+    ],
+  };
+  assert.throws(() => assertProspectiveVersionedCardLimits({
+    cards: [original, destination],
+    otherCommittedByCard: new Map([[original.id, 350]]),
+    prospective, asOf,
+  }), /Limite insuficiente.*original/);
 });
