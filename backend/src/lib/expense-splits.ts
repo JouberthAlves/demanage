@@ -11,6 +11,7 @@ import {
   lateOneOffsDecimal,
 } from '@/lib/billing/charges';
 import { currentCycleWindow } from '@/lib/billing/cycle-window';
+import { parseObligationVersions } from '@/lib/billing/obligation-versions';
 import { dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 import {
@@ -102,19 +103,28 @@ export async function getCommittedByCard(args: {
           ? { id: { not: args.excludeExpenseId } }
           : {}),
       },
-      include: { splits: true },
+      include: {
+        splits: true,
+        obligationVersions: { orderBy: { sequence: 'asc' } },
+      },
     }),
   ]);
+  // An edit can move the live split while an older month's obligation is
+  // still in the open card cycle. Use the same persisted versions as billing.
+  const billable = expenses.map((expense) => ({
+    ...expense,
+    obligationVersions: parseObligationVersions(expense.obligationVersions),
+  }));
   const todayKey = todayKeyInSaoPaulo();
   const map = new Map<string, number>();
   for (const card of cards) {
     const window = currentCycleWindow(card, todayKey);
     const periodStartKey = window.periodStartKey;
-    const cycleAmount = chargesTotalDecimal(expenses, card.id, window);
+    const cycleAmount = chargesTotalDecimal(billable, card.id, window);
     const lateAdjustment =
       card.lastInvoicedOn && card.lastBillingProcessedAt
         ? lateOneOffsDecimal(
-            expenses,
+            billable,
             card.id,
             dayKeyToDate(periodStartKey),
             card.lastBillingProcessedAt,
