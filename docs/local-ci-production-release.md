@@ -53,7 +53,7 @@ Este canal conserva a validação local e o ensaio de migrações. **A opção `
      --confirm-migration-backup-sha256 'SHA256_REAL_DO_DUMP'
    ```
 
-   **Somente para issue #87**, adicionar `--confirm-migration-rehearsal-sha256 'SHA256_REAL_DO_MANIFESTO'` e revisar o vínculo exato à versão, digests OCI e prazo de 48 horas. Para revisões **sem mudanças Prisma** omitir os parâmetros de migração. `RELEASE_GATE=PASS` comprova somente os gates locais; para publicação, executar o workflow hospedado e aprovar o ambiente protegido no GitHub.
+   **Somente para issue #87**, adicionar `--confirm-migration-rehearsal-sha256 'SHA256_REAL_DO_MANIFESTO'` e revisar o vínculo exato à versão, digests OCI e prazo de 48 horas. Após o merge do PR de autorização, executar `git fetch origin master` para obter os objetos do commit remoto: este canal aceita apenas o SHA antigo imutável da aplicação quando a diferença até `master` é precisamente o conjunto de arquivos revisados do gate; qualquer mudança adicional volta a bloquear. Para revisões **sem mudanças Prisma** omitir os parâmetros de migração. `RELEASE_GATE=PASS` comprova somente os gates locais; para publicação, executar o workflow hospedado e aprovar o ambiente protegido no GitHub.
 
 5. Após o workflow hospedado concluir com sucesso, verificar no GitHub que `production.json` aponta o novo SHA, anterior correto e duas imagens por digest. Aguardar o timer do agente ou executá-lo normalmente com `python3 /opt/demanage/cd/deploy_agent.py --config /opt/demanage/cd/config.json`. Ele verifica também a proveniência da aprovação, Compose, backend, banco, versão e faz novo dump antes de alterar a aplicação.
 

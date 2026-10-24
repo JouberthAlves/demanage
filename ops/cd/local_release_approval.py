@@ -41,6 +41,19 @@ SENSITIVE = (
     "backend/prisma", "backend/prisma.config.ts",
     "backend/entrypoint.sh", "docker-compose.prod.yml",
 )
+ISSUE87_REVIEWED_GATE_DELTA = {
+    ".github/workflows/ci.yml": "M",
+    ".github/workflows/promote-production.yml": "M",
+    "docs/issue-87-production-release-review.md": "A",
+    "docs/local-ci-production-release.md": "M",
+    "docs/superpowers/plans/2026-10-24-issue87-production-release.md": "A",
+    "docs/superpowers/specs/2026-10-24-issue87-production-release-design.md": "A",
+    "ops/cd/issue87_release_gate.py": "A",
+    "ops/cd/local_release_approval.py": "M",
+    "ops/cd/tests/test_issue87_release_gate.py": "A",
+    "ops/cd/tests/test_local_release.py": "M",
+    "ops/cd/tests/test_promote_workflow_ancestry.py": "M",
+}
 
 
 def call(*args: str) -> str:
@@ -141,7 +154,26 @@ def verify_image(target: str, service: str) -> str:
 def verify_git(repo: Path, previous: str, target: str) -> bool:
     sha = call("git", "-C", str(repo), "ls-remote", "origin", "refs/heads/master").split()[0]
     if sha != target:
-        raise RuntimeError("Requested commit is not the current upstream master")
+        if (previous, target) != (ISSUE87_PREVIOUS, ISSUE87_TARGET):
+            raise RuntimeError("Requested commit is not the current upstream master")
+        # After the formal gate PR is merged, the immutable reviewed app SHA
+        # necessarily precedes master. Allow only that exact app release and
+        # the exact gate-only diff, never arbitrary intervening app changes.
+        if subprocess.run([
+            "git", "-C", str(repo), "merge-base", "--is-ancestor", target, sha,
+        ], capture_output=True).returncode:
+            raise RuntimeError("Issue87 target is not an ancestor of current master; fetch master first")
+        rows = call("git", "-C", str(repo), "diff", "--name-status", "--no-renames", target, sha).splitlines()
+        actual: dict[str, str] = {}
+        for row in rows:
+            if "\t" not in row:
+                raise RuntimeError("Issue87 master gate diff is malformed")
+            status, path = row.split("\t", 1)
+            if status not in ("A", "M") or path in actual:
+                raise RuntimeError("Issue87 unreviewed master changes")
+            actual[path] = status
+        if actual != ISSUE87_REVIEWED_GATE_DELTA:
+            raise RuntimeError("Issue87 unreviewed master changes")
     call("git", "-C", str(repo), "cat-file", "-e", target + "^{commit}")
     call("git", "-C", str(repo), "cat-file", "-e", previous + "^{commit}")
     if subprocess.run(["git", "-C", str(repo), "merge-base", "--is-ancestor", previous, target]).returncode:

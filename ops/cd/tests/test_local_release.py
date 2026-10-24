@@ -79,6 +79,35 @@ class LocalReleaseApprovalTests(unittest.TestCase):
         ]):
             self.assertTrue(approval.verify_git(repo, ISSUE87_PREVIOUS, ISSUE87_TARGET))
 
+    def test_issue87_local_dry_run_allows_only_the_reviewed_gate_delta_after_master_merge(self):
+        repo = Path(__file__).resolve().parents[3]
+        gate_sha = approval.call("git", "-C", str(repo), "rev-parse", "HEAD")
+        original = approval.call
+
+        def reviewed_master(*cmd):
+            if cmd[-2:] == ("origin", "refs/heads/master"):
+                return gate_sha + " refs/heads/master"
+            return original(*cmd)
+
+        with mock.patch.object(approval, "call", side_effect=reviewed_master):
+            self.assertTrue(approval.verify_git(repo, ISSUE87_PREVIOUS, ISSUE87_TARGET))
+
+    def test_issue87_local_dry_run_refuses_extra_application_changes_on_master(self):
+        repo = Path(__file__).resolve().parents[3]
+        gate_sha = approval.call("git", "-C", str(repo), "rev-parse", "HEAD")
+        original = approval.call
+
+        def altered_master(*cmd):
+            if cmd[-2:] == ("origin", "refs/heads/master"):
+                return gate_sha + " refs/heads/master"
+            if cmd[3:6] == ("diff", "--name-status", "--no-renames"):
+                return original(*cmd) + "\nM\tbackend/src/server.ts"
+            return original(*cmd)
+
+        with mock.patch.object(approval, "call", side_effect=altered_master):
+            with self.assertRaisesRegex(RuntimeError, "unreviewed master changes"):
+                approval.verify_git(repo, ISSUE87_PREVIOUS, ISSUE87_TARGET)
+
     def test_issue87_dry_run_requires_exact_explicit_rehearsal_acknowledgment(self):
         mocks = self.setup_success()
         mocks[2].return_value = ({**production_manifest(), "source_commit": ISSUE87_PREVIOUS}, "blob")
