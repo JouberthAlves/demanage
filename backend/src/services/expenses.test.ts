@@ -16,6 +16,8 @@ import {
   assertOneOffMutationSafe,
   cashAmountOf,
   existingSplitInputs,
+  projectedRecurringEndAt,
+  requiresVersionedCardProjection,
 } from './expenses';
 
 function status(fn: () => unknown) {
@@ -27,6 +29,22 @@ function status(fn: () => unknown) {
   }
   return null;
 }
+
+test('schedule-only edits with historical versions must validate the full card cycle', () => {
+  assert.equal(requiresVersionedCardProjection(true, false, 2, 'semanal'), true);
+  assert.equal(requiresVersionedCardProjection(true, false, 2, 'mensal'), true);
+  assert.equal(requiresVersionedCardProjection(false, true, 0, 'mensal'), true);
+  assert.equal(requiresVersionedCardProjection(true, false, 0, 'mensal'), false);
+  assert.equal(requiresVersionedCardProjection(false, false, 2, 'mensal'), false);
+  assert.equal(requiresVersionedCardProjection(true, false, 2, 'unica'), false);
+});
+
+test('card projections respect explicit clearing of a recurring end date', () => {
+  const end = new Date('2026-02-01T16:00:00.000Z');
+  assert.equal(projectedRecurringEndAt(undefined, end), end);
+  assert.equal(projectedRecurringEndAt(null, end), null);
+  assert.equal(projectedRecurringEndAt(new Date('2026-02-10T16:00:00.000Z'), end)?.toISOString().slice(0, 10), '2026-02-10');
+});
 
 test('cash amount is the PIX share, or everything without splits', () => {
   assert.equal(cashAmountOf([], 120), 120);

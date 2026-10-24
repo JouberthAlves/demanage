@@ -114,6 +114,26 @@ export function assertExpenseFrequencyTransitionSafe(
   }
 }
 
+/** A schedule change can reprice old open-cycle occurrences even when the
+ * live amount/splits did not change. Check the entire versioned cycle. */
+export function requiresVersionedCardProjection(
+  scheduleChanged: boolean,
+  recurringVersionChange: boolean,
+  historicalVersionCount: number,
+  nextFrequency: string,
+) {
+  return recurringVersionChange ||
+    (scheduleChanged && historicalVersionCount > 0 && nextFrequency !== 'unica');
+}
+
+/** `null` explicitly removes the end cap; only `undefined` means unchanged. */
+export function projectedRecurringEndAt(
+  nextEndAt: Date | null | undefined,
+  existingEndAt: Date | null,
+): Date | null {
+  return nextEndAt === undefined ? existingEndAt : nextEndAt;
+}
+
 /**
  * Parcela que sai do caixa na hora (PIX). Sem splits, a despesa inteira é caixa.
  */
@@ -490,7 +510,9 @@ export async function updateExpense(
       ], now);
     }
 
-    if (recurringVersionChange) {
+    if (requiresVersionedCardProjection(
+      oldScheduleChanged, recurringVersionChange, oldVersions.length, nextFrequency,
+    )) {
       const previousVersions = oldVersions.length
         ? parseObligationVersions(oldVersions)
         : [{
@@ -512,10 +534,10 @@ export async function updateExpense(
         frequency: nextFrequency,
         dueDay: schedule.day ?? existing.dueDay,
         startsAt: schedule.startsAt ?? existing.startsAt,
-        endsAt: schedule.endsAt ?? existing.endsAt,
+        endsAt: projectedRecurringEndAt(schedule.endsAt, existing.endsAt),
         obligationVersions: [
           ...previousVersions,
-          {
+          ...(recurringVersionChange ? [{
             sequence: oldVersions.length
               ? oldVersions[oldVersions.length - 1].sequence + 1
               : 2,
@@ -523,7 +545,7 @@ export async function updateExpense(
             amount: nextAmount,
             cardId: proposedCardId,
             splits: proposedSplits,
-          },
+          }] : []),
         ],
       };
       const [cards, otherCommittedByCard] = await Promise.all([
