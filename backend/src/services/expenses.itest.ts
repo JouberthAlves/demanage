@@ -259,7 +259,11 @@ test('F01: settled split PIX + billed card cannot change amount, split, card or 
     ]) {
       await assert.rejects(
         () => updateExpense(user.id, expense.id, parseUpdateExpense(change)),
-        /pagamento registrado/,
+        // A one-off never reuses an old recurring obligation's price chain;
+        // both the transition guard and paid-expense guard fail closed.
+        'frequency' in change
+          ? /pagamento registrado|nova despesa|histórico/
+          : /pagamento registrado/,
       );
     }
 
