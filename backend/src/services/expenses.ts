@@ -97,10 +97,16 @@ export function assertOneOffMutationSafe(args: {
 export function assertExpenseFrequencyTransitionSafe(
   currentFrequency: string,
   nextFrequency: string,
+  hasUnprovenCardHistory = false,
 ) {
   if (currentFrequency === 'unica' && nextFrequency !== 'unica') {
     throw conflict(
       'Para voltar à recorrência, crie uma nova despesa; o histórico anterior não pode ser reativado',
+    );
+  }
+  if (currentFrequency !== 'unica' && nextFrequency === 'unica' && hasUnprovenCardHistory) {
+    throw conflict(
+      'Histórico do cartão pode conter fatura recorrente pendente; para registrar uma despesa única, crie uma nova despesa',
     );
   }
 }
@@ -431,6 +437,20 @@ export async function updateExpense(
           orderBy: { sequence: 'asc' },
         })
       : [];
+    if (existing.frequency !== 'unica' && nextFrequency === 'unica') {
+      // A frequency change would make chargeAmountDecimal ignore ALL previous
+      // recurring obligation versions, even if an earlier version belonged to
+      // a card that is no longer in the current split. Until a fully audited
+      // stop-and-settle operation exists, reject any unproven card history.
+      const historical = parseObligationVersions(oldVersions);
+      const hasCardHistory =
+        oldVersions.length === 0 || // Legacy history without snapshots is unknown.
+        Boolean(existing.cardId) ||
+        existing.splits.some((split) => split.kind === 'card') ||
+        historical.some((version) =>
+          Boolean(version.cardId) || version.splits.some((split) => split.kind === 'card'));
+      assertExpenseFrequencyTransitionSafe(existing.frequency, nextFrequency, hasCardHistory);
+    }
     const priorCardIds = oldScheduleChanged
       ? parseObligationVersions(oldVersions).flatMap((version) => [
           version.cardId,

@@ -149,7 +149,7 @@ test('F01: a paid recurring PIX expense cannot turn into one-off and duplicate i
   }
 });
 
-test('Codex P2: recurring to one-off to recurring cannot revive a stale obligation version', async () => {
+test('P2: card recurring debt cannot become one-off and lose an unbilled historical obligation', async () => {
   const user = await createTestUser();
   try {
     const card = await createTestCard(user.id, 'Card-only obligation history');
@@ -165,19 +165,25 @@ test('Codex P2: recurring to one-off to recurring cannot revive a stale obligati
         cardId: card.id,
       }),
     );
-    await updateExpense(
-      user.id,
-      expense.id,
-      parseUpdateExpense({ frequency: 'unica', date: day, amount: 200 }),
+    await assert.rejects(
+      () => updateExpense(user.id, expense.id, parseUpdateExpense({
+        frequency: 'unica', date: day, amount: 10,
+      })),
+      /histórico|fatura|nova despesa/i,
+      'converting the still-unbilled R$100 card charge to R$10 one-off must fail',
     );
-    const oneOff = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
-    assert.equal(oneOff.frequency, 'unica');
-    assert.equal(Number(oneOff.amount), 200);
+    const unchanged = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    assert.equal(unchanged.frequency, 'mensal');
+    assert.equal(Number(unchanged.amount), 100);
     assert.equal(await prisma.expensePayment.count({ where: { expenseId: expense.id } }), 0);
 
+    const oneOff = await createExpense(user.id, parseCreateExpense({
+      name: 'Independent one-off', amount: 200, category: 'outro',
+      frequency: 'unica', date: day, cardId: card.id,
+    }));
     for (const amount of [200, 100]) {
       await assert.rejects(
-        () => updateExpense(user.id, expense.id, parseUpdateExpense({
+        () => updateExpense(user.id, oneOff.id, parseUpdateExpense({
           frequency: 'mensal',
           startsAt: day,
           dueDay: Number(day.slice(-2)),
@@ -187,7 +193,7 @@ test('Codex P2: recurring to one-off to recurring cannot revive a stale obligati
       );
     }
 
-    const persisted = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    const persisted = await prisma.expense.findUniqueOrThrow({ where: { id: oneOff.id } });
     assert.equal(persisted.frequency, 'unica', 'failed reentry must not mutate frequency');
     assert.equal(Number(persisted.amount), 200, 'failed reentry must not mutate amount');
     assert.deepEqual(
@@ -195,7 +201,7 @@ test('Codex P2: recurring to one-off to recurring cannot revive a stale obligati
         where: { expenseId: expense.id }, orderBy: { sequence: 'asc' },
       })).map((version) => [version.effectiveMonth, Number(version.amount)]),
       [[day.slice(0, 7), 100]],
-      'immutable original historical obligation must survive the rejected transition',
+      'immutable original historical card obligation must survive rejected conversion',
     );
   } finally {
     await cleanup(user.id);

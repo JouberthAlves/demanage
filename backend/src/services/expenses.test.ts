@@ -200,3 +200,15 @@ test('Codex P2: returning a one-off to recurring fails closed regardless of hist
     assert.doesNotThrow(() => assertExpenseFrequencyTransitionSafe(oldFrequency, nextFrequency));
   }
 });
+
+test('independent P2: recurring card debt cannot become a one-off and hide unbilled monthly obligations', () => {
+  assert.throws(
+    () => assertExpenseFrequencyTransitionSafe('mensal', 'unica', true),
+    /fatura|cartão|histórico|nova despesa/i,
+  );
+  assert.throws(
+    () => assertExpenseFrequencyTransitionSafe('semanal', 'unica', true),
+    /fatura|cartão|histórico|nova despesa/i,
+  );
+  assert.doesNotThrow(() => assertExpenseFrequencyTransitionSafe('mensal', 'unica', false));
+});
