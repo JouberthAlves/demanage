@@ -84,6 +84,7 @@ test('Codex P2: editing February weekly price cannot spend immutable January car
     const recurring = await prisma.expense.create({ data: {
       userId: user.id, cardId: card.id, name: 'Weekly price revision',
       amount: 100, category: 'outro', frequency: 'semanal',
+      dueDay: 21,
       startsAt: at('2026-01-21'), createdAt: at('2026-01-21'),
     } });
     await updateExpense(user.id, recurring.id, parseUpdateExpense({ amount: 10 }), at('2026-02-05'));
