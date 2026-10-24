@@ -9,6 +9,7 @@ import { Prisma } from '@/generated/prisma/client';
 import { AppError } from '@/http/errors';
 
 import {
+  assertEntryFrequencyTransition,
   parseCreateEntry,
   parseReceiptStateBody,
   parseUpdateEntry,
@@ -145,6 +146,20 @@ test('update input is partial and refuses the salary type', () => {
     status(() => parseUpdateEntry({ amount: '-1' })),
     400,
   );
+});
+
+test('a received one-off cannot become recurring while its receipt remains immutable', () => {
+  for (const recurring of ['mensal', 'semanal'] as const) {
+    assert.throws(
+      () => assertEntryFrequencyTransition('unica', recurring, true),
+      (error: unknown) => error instanceof AppError && error.status === 409 &&
+        /recebimento registrado/.test(error.message),
+    );
+  }
+
+  assert.doesNotThrow(() => assertEntryFrequencyTransition('unica', 'mensal', false));
+  assert.doesNotThrow(() => assertEntryFrequencyTransition('unica', 'unica', true));
+  assert.doesNotThrow(() => assertEntryFrequencyTransition('mensal', 'semanal', true));
 });
 
 test('receipt state body and salary fields', () => {

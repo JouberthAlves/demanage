@@ -1,10 +1,22 @@
 import type { Prisma } from '@/generated/prisma/client';
 import { badRequest, conflict, notFound } from '@/http/errors';
+import { cardsWithUnclosedBilling } from '@/lib/billing/guard';
+import {
+  legacyBaselineMonth,
+  obligationSplitSnapshot,
+  parseObligationVersions,
+  scheduleMovesEarlier,
+} from '@/lib/billing/obligation-versions';
+import { hasRetroactiveClosedCardCharge, hasSettledRecurringMutation } from '@/lib/billing/retroactive-recurring';
 import { todayInSaoPaulo } from '@/lib/card-billing';
+import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { dateKey } from '@/lib/decimal';
 import {
+  assertProspectiveVersionedCardLimits,
   denormalizedCardId,
+  ExpenseSplitError,
   expenseSplitInclude,
+  getCommittedByCard,
   replaceExpenseSplits,
   resolveAndValidateSplits,
   type ResolvedSplit,
@@ -31,12 +43,95 @@ export const expenseInclude = {
   ...expenseSplitInclude,
 } satisfies Prisma.ExpenseInclude;
 
+/**
+ * Until obligation revisions are stored per competence, editing or removing a
+ * card charge before pending closes would rewrite historical invoice amounts.
+ * The billing endpoint acquires the same user lock and can settle these first.
+ */
+async function assertAffectedCardsCaughtUp(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  cardIds: Array<string | null | undefined>,
+  now?: Date,
+) {
+  const ids = [...new Set(cardIds.filter((id): id is string => !!id))];
+  if (ids.length === 0) return;
+
+  const cards = await tx.card.findMany({
+    where: { userId, id: { in: ids }, archivedAt: null },
+  });
+  if (cardsWithUnclosedBilling(cards, now).length > 0) {
+    throw conflict(
+      'Feche as faturas pendentes do cartão antes de editar ou excluir esta despesa; depois tente novamente',
+    );
+  }
+}
+
 type ExpenseWithRelations = Prisma.ExpenseGetPayload<{
   include: { splits: true; payments: true };
 }>;
 
 function roundCents(value: number) {
   return Math.round(value * 100) / 100;
+}
+
+/** One-off payments and closed card charges are historical cash facts. */
+export function assertOneOffMutationSafe(args: {
+  paymentCount: number;
+  oldCashAmount: number;
+  newCashAmount: number;
+  hasCardSettlement: boolean;
+}): boolean {
+  if (args.paymentCount > 0 || args.oldCashAmount > 0) {
+    throw conflict(
+      'Despesa com pagamento registrado não pode alterar valor, frequência ou forma de pagamento',
+    );
+  }
+  if (args.hasCardSettlement) {
+    throw conflict(
+      'Despesa já faturada não pode alterar valor ou forma de pagamento',
+    );
+  }
+  // Card-only -> PIX (before closing): the newly paid cash must be recorded.
+  return args.newCashAmount > 0;
+}
+
+/** A one-off cannot restart an old recurring obligation's immutable price chain. */
+export function assertExpenseFrequencyTransitionSafe(
+  currentFrequency: string,
+  nextFrequency: string,
+  hasUnprovenCardHistory = false,
+) {
+  if (currentFrequency === 'unica' && nextFrequency !== 'unica') {
+    throw conflict(
+      'Para voltar à recorrência, crie uma nova despesa; o histórico anterior não pode ser reativado',
+    );
+  }
+  if (currentFrequency !== 'unica' && nextFrequency === 'unica' && hasUnprovenCardHistory) {
+    throw conflict(
+      'Histórico do cartão pode conter fatura recorrente pendente; para registrar uma despesa única, crie uma nova despesa',
+    );
+  }
+}
+
+/** A schedule change can reprice old open-cycle occurrences even when the
+ * live amount/splits did not change. Check the entire versioned cycle. */
+export function requiresVersionedCardProjection(
+  scheduleChanged: boolean,
+  recurringVersionChange: boolean,
+  historicalVersionCount: number,
+  nextFrequency: string,
+) {
+  return recurringVersionChange ||
+    (scheduleChanged && historicalVersionCount > 0 && nextFrequency !== 'unica');
+}
+
+/** `null` explicitly removes the end cap; only `undefined` means unchanged. */
+export function projectedRecurringEndAt(
+  nextEndAt: Date | null | undefined,
+  existingEndAt: Date | null,
+): Date | null {
+  return nextEndAt === undefined ? existingEndAt : nextEndAt;
 }
 
 /**
@@ -76,6 +171,51 @@ export function existingSplitInputs(
     return [{ kind: 'card' as const, cardId: expense.cardId, percent: 100 }];
   }
   return [];
+}
+
+type FinancialSplit = Pick<
+  ResolvedSplit,
+  'kind' | 'cardId' | 'amount' | 'percent'
+>;
+
+function comparableSplits(
+  splits: FinancialSplit[],
+  legacyCardId: string | null,
+  amount: number,
+) {
+  const effective =
+    splits.length > 0
+      ? splits
+      : legacyCardId
+        ? [
+            {
+              kind: 'card' as const,
+              cardId: legacyCardId,
+              percent: 100,
+              amount,
+            },
+          ]
+        : [{ kind: 'pix' as const, cardId: null, percent: 100, amount }];
+  return effective
+    .map(
+      (split) =>
+        `${split.kind}:${split.cardId ?? ''}:${Number(split.percent)}:${roundCents(Number(split.amount))}`,
+    )
+    .sort()
+    .join('|');
+}
+
+function cashOfPersistedExpense(expense: ExpenseWithRelations) {
+  if (expense.splits.length > 0) {
+    return cashAmountOf(
+      expense.splits.map((split) => ({
+        kind: split.kind,
+        amount: Number(split.amount),
+      })),
+      Number(expense.amount),
+    );
+  }
+  return expense.cardId ? 0 : Number(expense.amount);
 }
 
 function assertUniqueDateNotFuture(date: Date | null | undefined) {
@@ -118,6 +258,30 @@ export async function createExpense(userId: string, input: CreateExpenseInput) {
       tx,
     });
 
+    // A retroactive recurring card charge after a closed cycle would never be
+    // billed by the incremental planner. Reject atomically instead of silently
+    // dropping the historical competence or mutating an immutable invoice.
+    if (input.frequency !== 'unica') {
+      const recurringFrequency = input.frequency;
+      const cardIds = [...new Set(resolvedSplits
+        .filter((split) => split.kind === 'card' && split.cardId)
+        .map((split) => split.cardId!))];
+      if (cardIds.length) {
+        const cards = await tx.card.findMany({
+          where: { userId, id: { in: cardIds }, archivedAt: null },
+          select: { createdAt: true, lastInvoicedOn: true },
+        });
+        if (cards.some((card) => hasRetroactiveClosedCardCharge(card, {
+          frequency: recurringFrequency,
+          amount: input.amount,
+          startsAt: schedule.startsAt ?? null,
+          endsAt: schedule.endsAt ?? null,
+          dueDay: schedule.day ?? null,
+        }))) {
+          throw conflict('Recorrência retroativa inclui competência já faturada; use um ajuste auditável, não altere fatura fechada');
+        }
+      }
+    }
     const created = await tx.expense.create({
       data: {
         userId,
@@ -140,6 +304,20 @@ export async function createExpense(userId: string, input: CreateExpenseInput) {
       expenseId: created.id,
       resolved: resolvedSplits,
     });
+
+    if (created.frequency !== 'unica') {
+      const initialMonth = (created.startsAt ?? created.createdAt).toISOString().slice(0, 7);
+      await tx.expenseObligationVersion.create({
+        data: {
+          expenseId: created.id,
+          sequence: 1,
+          effectiveMonth: initialMonth,
+          amount: created.amount,
+          cardId: created.cardId,
+          splits: obligationSplitSnapshot(resolvedSplits),
+        },
+      });
+    }
 
     if (uniqueDate) {
       const cashAmount = cashAmountOf(resolvedSplits, input.amount);
@@ -166,8 +344,11 @@ export async function updateExpense(
   userId: string,
   id: string,
   input: UpdateExpenseInput,
+  now?: Date,
 ) {
   return withUserWriteLockTransaction(userId, async (tx) => {
+    const editNow = now ?? new Date();
+    const effectiveMonth = todayKeyInSaoPaulo(editNow).slice(0, 7);
     const existing = await tx.expense.findFirst({
       where: { id, userId },
       include: { splits: true, payments: true },
@@ -197,6 +378,7 @@ export async function updateExpense(
 
     const nextCategory = input.category ?? existing.category;
     const nextFrequency = input.frequency ?? existing.frequency;
+    assertExpenseFrequencyTransitionSafe(existing.frequency, nextFrequency);
     const nextAmount = input.amount ?? Number(existing.amount);
     const nextCustomTagId =
       resolvedTagId !== undefined ? resolvedTagId : existing.customTagId;
@@ -241,7 +423,244 @@ export async function updateExpense(
       input,
       nextAmount,
       nextFrequency,
+      asOf: editNow,
     });
+
+    const oldSplits = existing.splits.map((split) => ({
+      kind: split.kind,
+      cardId: split.cardId,
+      amount: Number(split.amount),
+      percent: Number(split.percent),
+    }));
+    const oldAmount = Number(existing.amount);
+    const revisedSplits = nextSplits ?? oldSplits;
+    const financialChange = nextAmount !== oldAmount ||
+      (nextSplits !== null && comparableSplits(revisedSplits, existing.cardId, nextAmount) !==
+        comparableSplits(oldSplits, existing.cardId, oldAmount));
+    const recurringVersionChange = financialChange &&
+      existing.frequency !== 'unica' && nextFrequency !== 'unica';
+    const oldScheduleChanged = existing.frequency !== 'unica' && (
+      nextFrequency !== existing.frequency ||
+      (schedule.day !== undefined && schedule.day !== existing.dueDay) ||
+      (schedule.startsAt !== undefined &&
+        (schedule.startsAt ? dateKey(schedule.startsAt) : null) !==
+        (existing.startsAt ? dateKey(existing.startsAt) : null)) ||
+      (schedule.endsAt !== undefined &&
+        (schedule.endsAt ? dateKey(schedule.endsAt) : null) !==
+        (existing.endsAt ? dateKey(existing.endsAt) : null))
+    );
+    if (existing.frequency !== 'unica' && nextFrequency !== 'unica' &&
+      scheduleMovesEarlier(existing.startsAt, schedule.startsAt)) {
+      throw conflict('Não é possível antecipar o início de uma despesa recorrente; crie um ajuste auditável para competências anteriores');
+    }
+    if (oldScheduleChanged && existing.payments.length) {
+      throw conflict('Despesa com pagamento registrado não pode alterar recorrência ou agenda');
+    }
+    const oldVersions = recurringVersionChange || oldScheduleChanged
+      ? await tx.expenseObligationVersion.findMany({
+          where: { expenseId: id },
+          orderBy: { sequence: 'asc' },
+        })
+      : [];
+    if (existing.frequency !== 'unica' && nextFrequency === 'unica') {
+      // A frequency change would make chargeAmountDecimal ignore ALL previous
+      // recurring obligation versions, even if an earlier version belonged to
+      // a card that is no longer in the current split. Until a fully audited
+      // stop-and-settle operation exists, reject any unproven card history.
+      const historical = parseObligationVersions(oldVersions);
+      const hasCardHistory =
+        oldVersions.length === 0 || // Legacy history without snapshots is unknown.
+        Boolean(existing.cardId) ||
+        existing.splits.some((split) => split.kind === 'card') ||
+        historical.some((version) =>
+          Boolean(version.cardId) || version.splits.some((split) => split.kind === 'card'));
+      assertExpenseFrequencyTransitionSafe(existing.frequency, nextFrequency, hasCardHistory);
+    }
+    const priorCardIds = oldScheduleChanged
+      ? parseObligationVersions(oldVersions).flatMap((version) => [
+          version.cardId,
+          ...version.splits.filter((split) => split.kind === 'card').map((split) => split.cardId),
+        ])
+      : [];
+    if (recurringVersionChange && existing.payments.some((payment) => payment.month >= effectiveMonth)) {
+      throw conflict('Despesa já paga nesta competência não pode alterar valor ou forma de pagamento');
+    }
+
+    const changesCardHistory =
+      input.amount !== undefined ||
+      input.frequency !== undefined ||
+      input.cardId !== undefined ||
+      input.splits !== undefined ||
+      input.schedule.day !== undefined ||
+      input.schedule.startsAt !== undefined ||
+      input.schedule.endsAt !== undefined ||
+      input.schedule.date !== undefined;
+    const changesSchedule = input.frequency !== undefined ||
+      input.schedule.day !== undefined || input.schedule.startsAt !== undefined ||
+      input.schedule.endsAt !== undefined || input.schedule.date !== undefined;
+    // Historical revisions are sufficient for financial-only changes when a
+    // prior snapshot exists. Legacy rows with no snapshots, schedule changes,
+    // deletion, and one-offs still require catching up pending card cycles.
+    if (changesCardHistory && (!recurringVersionChange || changesSchedule || oldVersions.length === 0)) {
+      await assertAffectedCardsCaughtUp(tx, userId, [
+        existing.cardId,
+        ...existing.splits.map((split) => split.cardId),
+        ...(nextSplits ?? []).map((split) => split.cardId),
+        ...priorCardIds,
+      ], now);
+    }
+
+    const needsVersionedProjection = requiresVersionedCardProjection(
+      oldScheduleChanged, recurringVersionChange, oldVersions.length, nextFrequency,
+    );
+    // Schedule fields are live across historical versions. Even when there is
+    // no financial version change, forbid moving a previously closed charge
+    // into another card's open cycle (or behind its processed-through date).
+    if (existing.frequency !== 'unica' && nextFrequency !== 'unica' &&
+      (oldScheduleChanged || recurringVersionChange)) {
+      const previousVersions = oldVersions.length
+        ? parseObligationVersions(oldVersions)
+        : [{
+            sequence: 1,
+            effectiveMonth: legacyBaselineMonth(existing.startsAt, existing.createdAt),
+            amount: existing.amount,
+            cardId: existing.cardId,
+            splits: existing.splits,
+          }];
+      const proposedCardId = nextSplits
+        ? denormalizedCardId(nextSplits)
+        : existing.cardId;
+      const proposedSplits = nextSplits ?? existing.splits;
+      const projectedExpense = {
+        ...existing,
+        amount: nextAmount,
+        cardId: proposedCardId,
+        splits: proposedSplits,
+        frequency: nextFrequency,
+        dueDay: schedule.day ?? existing.dueDay,
+        startsAt: schedule.startsAt ?? existing.startsAt,
+        endsAt: projectedRecurringEndAt(schedule.endsAt, existing.endsAt),
+        obligationVersions: [
+          ...previousVersions,
+          ...(recurringVersionChange ? [{
+            sequence: oldVersions.length
+              ? oldVersions[oldVersions.length - 1].sequence + 1
+              : 2,
+            effectiveMonth,
+            amount: nextAmount,
+            cardId: proposedCardId,
+            splits: proposedSplits,
+          }] : []),
+        ],
+      };
+      const [allCards, otherCommittedByCard] = await Promise.all([
+        // An archived source card can still have an immutable invoice.
+        tx.card.findMany({ where: { userId } }),
+        needsVersionedProjection
+          ? getCommittedByCard({ userId, excludeExpenseId: id, tx, asOf: editNow })
+          : Promise.resolve(new Map<string, number>()),
+      ]);
+      if (hasSettledRecurringMutation(
+        {
+          ...existing,
+          // Legacy rows have no authenticated per-month baseline. Do not
+          // retroactively invent one when inspecting their settled history.
+          obligationVersions: oldVersions.length ? previousVersions : [],
+        },
+        projectedExpense,
+        allCards,
+        effectiveMonth,
+      )) {
+        throw conflict('Alteração de cartão ou agenda afetaria cobranças já faturadas; crie uma nova recorrência para os próximos vencimentos');
+      }
+      if (needsVersionedProjection) {
+        try {
+          assertProspectiveVersionedCardLimits({
+            cards: allCards.filter((card) => !card.archivedAt),
+            otherCommittedByCard,
+            prospective: projectedExpense,
+            asOf: editNow,
+          });
+        } catch (error) {
+          if (error instanceof ExpenseSplitError) throw conflict(error.message);
+          throw error;
+        }
+      }
+    }
+
+    let recordNewOneOffCash = false;
+    if (existing.frequency === 'unica' || nextFrequency === 'unica') {
+      const oldAmount = Number(existing.amount);
+      const oldSplits = existing.splits.map((split) => ({
+        kind: split.kind,
+        cardId: split.cardId,
+        percent: Number(split.percent),
+        amount: Number(split.amount),
+      }));
+      const financialChange =
+        nextAmount !== oldAmount ||
+        nextFrequency !== existing.frequency ||
+        (nextOccurredAt ? dateKey(nextOccurredAt) : null) !==
+          (existing.occurredAt ? dateKey(existing.occurredAt) : null) ||
+        (nextSplits !== null &&
+          comparableSplits(nextSplits, null, nextAmount) !==
+            comparableSplits(oldSplits, existing.cardId, oldAmount));
+
+      if (financialChange) {
+        const affectedCardIds = [
+          ...new Set(
+            [
+              existing.cardId,
+              ...existing.splits.map((split) => split.cardId),
+              ...(nextSplits ?? []).map((split) => split.cardId),
+            ].filter((cardId): cardId is string => !!cardId),
+          ),
+        ];
+        const cards = affectedCardIds.length
+          ? await tx.card.findMany({
+              where: { userId, id: { in: affectedCardIds } },
+              select: { lastInvoicedOn: true, lastBillingProcessedAt: true },
+            })
+          : [];
+        const earliestAffectedCharge =
+          existing.frequency === 'unica'
+            ? (existing.occurredAt ?? existing.createdAt)
+            : (existing.startsAt ?? existing.createdAt);
+        const nextRecurringStart =
+          nextFrequency === 'unica'
+            ? null
+            : (schedule.startsAt ?? existing.startsAt ?? existing.createdAt);
+        const hasCardSettlement = cards.some(
+          (card) =>
+            card.lastInvoicedOn &&
+            ((existing.frequency !== 'unica' &&
+              dateKey(card.lastInvoicedOn) >=
+                dateKey(earliestAffectedCharge)) ||
+              (nextRecurringStart != null &&
+                dateKey(card.lastInvoicedOn) >= dateKey(nextRecurringStart)) ||
+              ((card.lastBillingProcessedAt == null ||
+                card.lastBillingProcessedAt >= existing.createdAt) &&
+                (dateKey(card.lastInvoicedOn) >=
+                  dateKey(earliestAffectedCharge) ||
+                  (nextOccurredAt != null &&
+                    dateKey(card.lastInvoicedOn) >= dateKey(nextOccurredAt))))),
+        );
+        const oldCashAmount = cashOfPersistedExpense(existing);
+        const newCashAmount = nextSplits
+          ? cashAmountOf(nextSplits, nextAmount)
+          : existing.cardId && existing.splits.length === 0
+            ? 0
+            : existing.splits.length > 0
+              ? oldCashAmount
+              : nextAmount;
+        recordNewOneOffCash = assertOneOffMutationSafe({
+          paymentCount: existing.payments.length,
+          oldCashAmount: existing.frequency === 'unica' ? oldCashAmount : 0,
+          newCashAmount,
+          hasCardSettlement,
+        });
+      }
+    }
 
     // updatedAt como guarda otimista contra escritores fora do lock do usuário.
     const { count } = await tx.expense.updateMany({
@@ -269,6 +688,48 @@ export async function updateExpense(
 
     if (nextSplits) {
       await replaceExpenseSplits({ tx, expenseId: id, resolved: nextSplits });
+    }
+
+    if (recurringVersionChange) {
+      // Seed a legacy baseline only after any older card invoices were closed;
+      // the migration itself cannot reconstruct already overwritten values.
+      if (!oldVersions.length) {
+        await tx.expenseObligationVersion.create({
+          data: {
+            expenseId: id,
+            sequence: 1,
+            effectiveMonth: legacyBaselineMonth(existing.startsAt, existing.createdAt),
+            amount: existing.amount,
+            cardId: existing.cardId,
+            splits: obligationSplitSnapshot(existing.splits),
+          },
+        });
+      }
+      await tx.expenseObligationVersion.create({
+        data: {
+          expenseId: id,
+          sequence: oldVersions.length ? oldVersions[oldVersions.length - 1].sequence + 1 : 2,
+          effectiveMonth,
+          amount: nextAmount,
+          cardId: nextSplits ? denormalizedCardId(nextSplits) : existing.cardId,
+          splits: obligationSplitSnapshot(revisedSplits),
+        },
+      });
+    }
+
+    if (
+      recordNewOneOffCash &&
+      existing.frequency === 'unica' &&
+      nextOccurredAt
+    ) {
+      await tx.expensePayment.create({
+        data: {
+          expenseId: id,
+          month: nextOccurredAt.toISOString().slice(0, 7),
+          amount: cashAmountOf(nextSplits ?? [], nextAmount),
+          paidAt: nextOccurredAt,
+        },
+      });
     }
 
     if (
@@ -329,8 +790,9 @@ async function resolveNextSplits(args: {
   input: UpdateExpenseInput;
   nextAmount: number;
   nextFrequency: string;
+  asOf: Date;
 }): Promise<ResolvedSplit[] | null> {
-  const { userId, id, tx, existing, input, nextAmount, nextFrequency } = args;
+  const { userId, id, tx, existing, input, nextAmount, nextFrequency, asOf } = args;
   const splitsProvided =
     input.splits !== undefined || input.cardId !== undefined;
 
@@ -343,6 +805,7 @@ async function resolveNextSplits(args: {
       frequency: nextFrequency,
       excludeExpenseId: id,
       tx,
+      asOf,
     });
   }
 
@@ -362,6 +825,7 @@ async function resolveNextSplits(args: {
     frequency: nextFrequency,
     excludeExpenseId: id,
     tx,
+    asOf,
   });
 }
 
@@ -369,6 +833,7 @@ export async function archiveExpense(userId: string, id: string) {
   await withUserWriteLockTransaction(userId, async (tx) => {
     const existing = await tx.expense.findFirst({
       where: { id, userId, archivedAt: null },
+      include: { splits: true, obligationVersions: true },
     });
     if (!existing) throw notFound(NOT_FOUND_MESSAGE);
     if (existing.systemOrigin !== 'manual') {
@@ -381,6 +846,15 @@ export async function archiveExpense(userId: string, id: string) {
         'Faturas preservam o histórico do ciclo e não podem ser excluídas',
       );
     }
+
+    await assertAffectedCardsCaughtUp(tx, userId, [
+      existing.cardId,
+      ...existing.splits.map((split) => split.cardId),
+      ...parseObligationVersions(existing.obligationVersions).flatMap((version) => [
+        version.cardId,
+        ...version.splits.filter((split) => split.kind === 'card').map((split) => split.cardId),
+      ]),
+    ]);
 
     await tx.expense.update({
       where: { id },

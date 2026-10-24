@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 
+import { runDailyMaintenance } from '@/lib/daily-maintenance';
 import {
   archivePiggyBank,
   createPiggyBank,
@@ -17,13 +18,11 @@ import {
   withdrawPiggyBank,
 } from '@/lib/piggy-api';
 import { invalidateDomain, queryKeys } from '@/lib/query-keys';
-
-// Each authentication session has a distinct QueryClient. Do not run costly
-// daily accrual/autodebit once for every hook observer or route visit.
-const maintenanceStartedForSession = new WeakSet<ReturnType<typeof useQueryClient>>();
+import { useCalendarStore } from '@/stores/calendar-store';
 
 export function usePiggyBanks(includeArchived = false, enabled = true) {
   const queryClient = useQueryClient();
+  const dayKey = useCalendarStore((state) => state.dayKey);
   const query = useQuery({
     queryKey: queryKeys.piggyBanks.list(includeArchived),
     queryFn: () => listPiggyBanks(includeArchived),
@@ -32,30 +31,48 @@ export function usePiggyBanks(includeArchived = false, enabled = true) {
   });
 
   useEffect(() => {
-    if (!enabled || !query.isSuccess || maintenanceStartedForSession.has(queryClient)) return;
-    maintenanceStartedForSession.add(queryClient);
-
-    processPiggyAutoDebit()
-      .then((result) => {
+    if (!enabled || !query.isSuccess) return;
+    runDailyMaintenance(queryClient, 'piggyBanks', dayKey, {
+      run: processPiggyAutoDebit,
+      needsRetry: (result) =>
+        result.autoDebitFailedCount > 0 || result.interestStale,
+      onResult: (result) => {
         if (result.autoDebitFailedCount > 0) {
-          toast.error('Não foi possível processar todos os débitos automáticos.');
+          toast.error(
+            'Não foi possível processar todos os débitos automáticos.',
+          );
         }
         if (result.interestStale) {
-          toast.error('Os rendimentos do Cofrinho estão com atualização atrasada.');
+          toast.error(
+            'Os rendimentos do Cofrinho estão com atualização atrasada.',
+          );
         }
         if (result.createdCount > 0 || result.interestCreatedCount > 0) {
-          return invalidateDomain(queryClient, 'piggyBanks').then(() => undefined);
+          return invalidateDomain(queryClient, 'piggyBanks');
         }
         return undefined;
-      })
-      .catch(() => {
-        // Allow a later mount to retry the maintenance run.
-        maintenanceStartedForSession.delete(queryClient);
+      },
+      onError: () => {
         toast.error('Não foi possível atualizar os Cofrinhos agora.');
-      });
-  }, [enabled, query.isSuccess, queryClient]);
+      },
+    });
+  }, [enabled, query.isSuccess, queryClient, dayKey]);
 
   return query;
+}
+
+/** The dashboard's patrimony total includes completed archived vaults with funds. */
+export function usePiggyTotal() {
+  const query = usePiggyBanks(true);
+  return {
+    ...query,
+    total: query.data
+      ? query.data.reduce(
+          (cents, bank) => cents + Math.round(bank.balance * 100),
+          0,
+        ) / 100
+      : null,
+  };
 }
 
 export function usePiggyTransactions(piggyBankId: string | null) {
@@ -114,14 +131,21 @@ export function useDeletePiggyBank() {
 }
 
 export function useDepositPiggyBank() {
-  return usePiggyMutation(({ id, amount, note, deductFromBalance }: MoneyMovement) =>
-    depositPiggyBank(id, { amount, note, deductFromBalance }),
+  return usePiggyMutation(
+    ({ id, amount, note, deductFromBalance }: MoneyMovement) =>
+      depositPiggyBank(id, { amount, note, deductFromBalance }),
   );
 }
 
 export function useWithdrawPiggyBank() {
-  return usePiggyMutation(({ id, amount, note, creditToBalance, correctionOrigin }: MoneyMovement) =>
-    withdrawPiggyBank(id, { amount, note, creditToBalance, correctionOrigin }),
+  return usePiggyMutation(
+    ({ id, amount, note, creditToBalance, correctionOrigin }: MoneyMovement) =>
+      withdrawPiggyBank(id, {
+        amount,
+        note,
+        creditToBalance,
+        correctionOrigin,
+      }),
   );
 }
 

@@ -1,15 +1,15 @@
-# deManage: promoção por CI local (sem minutos de GitHub Actions)
+# deManage: ensaio de CI local (publicação suspensa)
 
-Este é um **canal alternativo explícito**, autorizado pelo dono `bielxdh3`; não simula GitHub CI nem CodeQL. O workflow hospedado e a proteção da `master` continuam inalterados. O manifesto publicado conserva o mesmo formato que o agente Debian já valida, e o agente existente continua responsável por **backup, journal, pull por digest, health e rollback de backend/frontend**.
+Este canal conserva a validação local e o ensaio de migrações. **A opção `--publish` está bloqueada**: um commit direto na branch `production` não fornece a prova de aprovação do ambiente GitHub `production` exigida pelo agente Debian. Para uma promoção real, use o workflow hospedado `Approve production release`. Ele continua responsável pela publicação do manifesto, enquanto o agente Debian cuida de **backup, journal, pull por digest, health e rollback de backend/frontend**.
 
 ## Limites e aprovações
 
 - Somente uma identidade `gh auth` que devolva `bielxdh3` pode aprovar.
-- Aprovar exige **SHA completo e confirmação exata**; publicar exige `--publish --acknowledge-no-codeql`, sem os quais somente há simulação.
+- O ensaio exige **SHA completo e confirmação exata**. `--publish` falha fechado, mesmo com `--acknowledge-no-codeql`.
 - A revisão alvo deve ser **a atual `origin/master`** e a revisão anterior deve coincidir com o estado do agente Debian e o manifesto vigente. Nunca reescrever `master`, checks, ou state.json.
 - O CI precisa rodar **os 24 gates** (incluindo builds Docker) no SHA exato, sem mudanças Git rastreadas. `local-ci-evidence.json` registra SHA, hashes de todos os logs, timestamp e número de gates; a aprovação revalida o conteúdo. Logs são locais e auditáveis.
 - Mudanças em Prisma exigem um **ensaio fresco sobre um dump real restaurado num Postgres 18 descartável, sem porta pública**, SHA256 do dump, imagem por digest e confirmação explícita do dono. Migrações existentes alteradas/removidas, SQL destrutivo ou mudanças em entrypoint/Compose-base são proibidas neste canal.
-- Aprovação publica apenas `production.json` na branch `production` via API do GitHub com `sha` de concorrência e commit auditável. Não instala runner no servidor nem manda credenciais SSH para GitHub.
+- O ensaio não publica `production.json`. O workflow hospedado gera o atestado vinculado aos bytes exatos do manifesto antes de publicá-lo.
 - O agente Debian faz o restante. O **rollback é somente da aplicação**; o schema aditivo continua. Se a migração ou o rollback falhar, investigar a journal/estado sem forçar manualmente o manifesto nem restaurar o banco às cegas.
 
 ## Procedimento completo
@@ -53,9 +53,9 @@ Este é um **canal alternativo explícito**, autorizado pelo dono `bielxdh3`; n�
      --confirm-migration-backup-sha256 'SHA256_REAL_DO_DUMP'
    ```
 
-   Para revisões **sem mudanças Prisma** omitir as duas últimas opções. Com resultado `RELEASE_GATE=PASS` e evidências revisadas, repetir o comando acrescentando **`--publish --acknowledge-no-codeql`**.
+   Para revisões **sem mudanças Prisma** omitir as duas últimas opções. `RELEASE_GATE=PASS` comprova somente os gates locais; para publicação, executar o workflow hospedado e aprovar o ambiente protegido no GitHub.
 
-5. Verificar no GitHub que `production.json` aponta o novo SHA, anterior correto e duas imagens por digest. Aguardar o timer do agente ou executá-lo normalmente com `python3 /opt/demanage/cd/deploy_agent.py --config /opt/demanage/cd/config.json`. Ele verifica Compose, backend, banco, versão e faz novo dump antes de alterar a aplicação.
+5. Após o workflow hospedado concluir com sucesso, verificar no GitHub que `production.json` aponta o novo SHA, anterior correto e duas imagens por digest. Aguardar o timer do agente ou executá-lo normalmente com `python3 /opt/demanage/cd/deploy_agent.py --config /opt/demanage/cd/config.json`. Ele verifica também a proveniência da aprovação, Compose, backend, banco, versão e faz novo dump antes de alterar a aplicação.
 
 6. Conferir depois: `/api/health` HTTPS, frontend carregando, revisão real dos dois containers, PostgreSQL saudável, **mesmo volume e identidade do banco**, Cloudflare Tunnel intacto, journal ausente, estado do agente no novo SHA e `prisma migrate status` sem pendências. MCP só pode ser ativado com segredo OAuth apropriado e novo consentimento.
 

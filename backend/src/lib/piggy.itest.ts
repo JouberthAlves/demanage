@@ -3,6 +3,9 @@ import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
 import { processPiggyAutoDebits } from '@/lib/piggy';
+import { listDueAutoDebitCycles } from '@/lib/piggy/auto-debit';
+import { processPiggyAutoDebitCycle } from '@/lib/piggy/auto-debit-run';
+import { withdrawFromPiggyBank } from '@/lib/piggy/transactions';
 import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { prisma } from '@/lib/prisma';
 
@@ -187,6 +190,93 @@ test('auto-debit enabled in October does not back-fill the months since creation
       transactions.map((row) => row.date.toISOString()),
       ['2026-10-05T12:00:00.000Z'],
     );
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
+test('F03: withdrawing after a completed goal resumes without billing paused months', async () => {
+  const user = await prisma.user.create({
+    data: {
+      name: 'Completed goal auto-debit regression',
+      email: `piggy-goal-resume-${randomUUID()}@example.invalid`,
+      passwordHash: 'test-only-not-a-login-hash',
+    },
+  });
+  try {
+    const bank = await prisma.piggyBank.create({
+      data: {
+        userId: user.id,
+        name: 'Target reached',
+        goalAmount: 50,
+        monthlyGoal: 50,
+        autoDebit: true,
+        autoDebitDay: 5,
+        autoDebitEnabledAt: new Date('2026-09-01T12:00:00.000Z'),
+        createdAt: new Date('2026-09-01T12:00:00.000Z'),
+      },
+    });
+
+    assert.equal((await processPiggyAutoDebits(user.id, new Date('2026-09-10T16:00:00.000Z'))).createdCount, 1);
+    assert.equal((await processPiggyAutoDebits(user.id, new Date('2026-11-20T16:00:00.000Z'))).createdCount, 0);
+
+    const withdrawalTime = new Date('2026-12-12T16:00:00.000Z');
+    await withdrawFromPiggyBank({ userId: user.id, piggyBankId: bank.id, amount: 50, date: withdrawalTime });
+    assert.equal((await processPiggyAutoDebits(user.id, new Date('2026-12-20T16:00:00.000Z'))).createdCount, 0);
+    assert.equal((await processPiggyAutoDebits(user.id, new Date('2027-01-20T16:00:00.000Z'))).createdCount, 1);
+    assert.deepEqual(
+      (await prisma.piggyTransaction.findMany({
+        where: { piggyBankId: bank.id, source: 'auto_debit' },
+        orderBy: { date: 'asc' },
+      })).map((transaction) => transaction.date.toISOString().slice(0, 10)),
+      ['2026-09-05', '2027-01-05'],
+    );
+    assert.equal(
+      (await prisma.piggyBank.findUniqueOrThrow({ where: { id: bank.id } })).autoDebitEnabledAt?.toISOString(),
+      withdrawalTime.toISOString(),
+    );
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
+test('F04: configuration changed after candidate selection rejects a stale cycle under lock', async () => {
+  const user = await prisma.user.create({
+    data: {
+      name: 'Concurrent auto-debit settings regression',
+      email: `piggy-concurrent-${randomUUID()}@example.invalid`,
+      passwordHash: 'test-only-not-a-login-hash',
+    },
+  });
+  try {
+    const createdAt = new Date('2026-09-01T12:00:00.000Z');
+    const bank = await prisma.piggyBank.create({
+      data: {
+        userId: user.id,
+        name: 'Stale auto-debit candidate',
+        monthlyGoal: 15,
+        autoDebit: true,
+        autoDebitDay: 5,
+        autoDebitEnabledAt: createdAt,
+        createdAt,
+      },
+    });
+    const now = new Date('2026-10-20T16:00:00.000Z');
+    const stale = listDueAutoDebitCycles(now, createdAt, 5, createdAt)[1];
+    // Deterministic interleaving: scheduler selects October 5, editor wins
+    // the user lock before that candidate reaches its posting transaction.
+    await prisma.piggyBank.update({ where: { id: bank.id }, data: { autoDebitDay: 25 } });
+    assert.equal(await processPiggyAutoDebitCycle(user.id, bank.id, stale, now), 'skipped');
+    await prisma.piggyBank.update({
+      where: { id: bank.id },
+      data: { autoDebitDay: 5, autoDebitEnabledAt: new Date('2026-10-10T12:00:00.000Z') },
+    });
+    assert.equal(await processPiggyAutoDebitCycle(user.id, bank.id, stale, now), 'skipped');
+    assert.equal(await prisma.piggyTransaction.count({ where: { piggyBankId: bank.id } }), 0);
+    await prisma.piggyBank.update({ where: { id: bank.id }, data: { autoDebitEnabledAt: createdAt } });
+    assert.equal(await processPiggyAutoDebitCycle(user.id, bank.id, stale, now), 'created');
+    assert.equal(await processPiggyAutoDebitCycle(user.id, bank.id, stale, now), 'skipped');
+    assert.equal(await prisma.piggyTransaction.count({ where: { piggyBankId: bank.id } }), 1);
   } finally {
     await prisma.user.delete({ where: { id: user.id } });
   }

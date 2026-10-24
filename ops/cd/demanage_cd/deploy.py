@@ -105,7 +105,12 @@ def db_identity(runner: Runner) -> dict[str, Any]:
     return {"id": db["Id"], "image": db["Image"], "volumes": sorted(volumes)}
 
 
-def healthy(ctx: Context, image_ids: dict[str, str] | None = None) -> bool:
+def healthy(
+    ctx: Context,
+    image_ids: dict[str, str] | None = None,
+    *,
+    require_readiness: bool = False,
+) -> bool:
     """True only when containers and the public endpoint are healthy.
 
     Failures are logged (without secrets) so an operator can see why a deploy stalled.
@@ -122,19 +127,38 @@ def healthy(ctx: Context, image_ids: dict[str, str] | None = None) -> bool:
             for name, obj in (("backend", backend), ("frontend", frontend))
         ):
             return False
-        body = ctx.probe(ctx.config["public_health_url"])
-        return body.get("status") == "ok" and body.get("service") == "demanage-backend"
+        live_url = ctx.config["public_health_url"]
+        if not live_url.endswith("/health"):
+            raise RuntimeError("Public health URL has no matching readiness endpoint")
+        live = ctx.probe(live_url)
+        if live.get("status") != "ok" or live.get("service") != "demanage-backend":
+            return False
+        # The pre-existing live image does not have /ready yet. It must still
+        # be eligible for a safe upgrade or rollback. Only NEW promotion and
+        # recovery confirmation require SQL-backed readiness.
+        if not require_readiness:
+            return True
+        ready = ctx.probe(live_url[:-len("/health")] + "/ready")
+        return (
+            ready.get("status") == "ok"
+            and ready.get("service") == "demanage-backend"
+            and ready.get("db") == "ready"
+        )
     except Exception as error:  # noqa: BLE001 - reported below, never silently dropped
         log(f"health check not passing: {type(error).__name__}: {error}")
         return False
 
 
 def wait_healthy(
-    ctx: Context, image_ids: dict[str, str] | None = None, timeout: float | None = None
+    ctx: Context,
+    image_ids: dict[str, str] | None = None,
+    timeout: float | None = None,
+    *,
+    require_readiness: bool = False,
 ) -> bool:
     until = ctx.monotonic() + (ctx.health_timeout if timeout is None else timeout)
     while True:
-        if healthy(ctx, image_ids):
+        if healthy(ctx, image_ids, require_readiness=require_readiness):
             return True
         if ctx.monotonic() >= until:
             return False
@@ -194,6 +218,9 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
         "previous": state["source_commit"],
         "previous_images": previous_images,
         "new_images": new_images,
+        # Serialize the pre-deploy identity in the crash journal. Container
+        # liveness alone cannot prove that PostgreSQL was not replaced.
+        "database_identity": before_db,
         "rollback_refs": rollback_refs,
         "backup": backup_path,
         "started_at": ctx.clock().isoformat(),
@@ -207,7 +234,7 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
             {service: release[service] for service in SERVICES},
             ctx.workdir,
         )
-        if not wait_healthy(ctx, new_images):
+        if not wait_healthy(ctx, new_images, require_readiness=True):
             raise RuntimeError("New deployment failed health/identity checks")
         if db_identity(ctx.runner) != before_db:
             raise RuntimeError("PostgreSQL container/volume/image changed unexpectedly")
@@ -252,8 +279,17 @@ def reconcile(ctx: Context, state: dict[str, Any], journal: dict[str, Any]) -> d
         raise RuntimeError(
             "previous deployment rollback failed; operator action needed (see deploy journal)"
         )
+    expected_db = journal.get("database_identity")
+    if not isinstance(expected_db, dict) or json.dumps(
+        db_identity(ctx.runner), sort_keys=True
+    ) != json.dumps(expected_db, sort_keys=True):
+        # Old/incomplete journals also fail closed: do not silently promote
+        # a healthy application attached to a replaced database volume.
+        raise RuntimeError("deploy journal database identity missing or database changed; operator action needed")
     running = running_images(ctx.runner)
-    if running == journal["new_images"] and wait_healthy(ctx, journal["new_images"]):
+    if running == journal["new_images"] and wait_healthy(
+        ctx, journal["new_images"], require_readiness=True
+    ):
         recovered = {
             "source_commit": journal["target"],
             "running_image_ids": journal["new_images"],

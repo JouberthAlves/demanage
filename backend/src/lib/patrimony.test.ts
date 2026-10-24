@@ -12,6 +12,7 @@ import {
   patrimonyToday,
   withTodayPoint,
 } from '@/lib/patrimony-calc';
+import { balanceFromTransactions } from '@/lib/piggy/ledger';
 
 test('patrimony current-day boundary follows the São Paulo civil day', () => {
   assert.equal(
@@ -28,7 +29,11 @@ test('a base date older than ten years is clamped, and the clamped range passes 
   const startKey = start.toISOString().slice(0, 10);
   assert.equal(diffDays('2026-10-10', startKey) + 1, MAX_HISTORY_RANGE_DAYS);
   assert.doesNotThrow(() =>
-    validateHistoryRange(startKey, '2026-10-10', new Date('2026-10-10T15:00:00Z')),
+    validateHistoryRange(
+      startKey,
+      '2026-10-10',
+      new Date('2026-10-10T15:00:00Z'),
+    ),
   );
   // A recent base is untouched.
   assert.equal(
@@ -44,7 +49,10 @@ test('withTodayPoint returns a new array and never mutates the shared series', (
   ];
   const next = withTodayPoint(shared, '2026-10-10', '3');
   assert.equal(shared.length, 2);
-  assert.deepEqual(next.map((p) => p.date), ['2026-10-08', '2026-10-09', '2026-10-10']);
+  assert.deepEqual(
+    next.map((p) => p.date),
+    ['2026-10-08', '2026-10-09', '2026-10-10'],
+  );
   assert.deepEqual(
     withTodayPoint(shared, '2026-10-09', '9').map((p) => p.value),
     ['1', '9'],
@@ -117,6 +125,41 @@ test('timeline row values: cash, piggy and holdings add up to patrimony', () => 
     assert.equal(sum.toFixed(8), decimal(row.patrimonyBrl).toFixed(8));
   }
   assert.equal(rows[0].cashBrl, '1000');
+});
+
+test('patrimony retains an archived funded vault alongside an active vault', () => {
+  const date = new Date('2026-10-21T12:00:00.000Z');
+  const archived = {
+    archivedAt: new Date('2026-10-22T12:00:00.000Z'),
+    transactions: [
+      { type: 'deposit', amount: '150', date },
+      { type: 'withdraw', amount: '24.5', date },
+    ],
+  };
+  const active = {
+    archivedAt: null,
+    transactions: [{ type: 'deposit', amount: '50', date }],
+  };
+  const actualVaultTotal =
+    balanceFromTransactions(archived.transactions) +
+    balanceFromTransactions(active.transactions);
+  const rows = buildPatrimonyRows({
+    storedBaseKey: '2026-10-20',
+    calculationBaseKey: '2026-10-20',
+    fromKey: '2026-10-23',
+    toKey: '2026-10-23',
+    openingCash: decimal('1000'),
+    flows: [{ date: '2026-10-21', amount: decimal('-175.5'), external: false }],
+    piggyTransactions: [...archived.transactions, ...active.transactions],
+    assetTransactions: [],
+    btcPoints: [{ date: '2026-10-20', value: '300000' }],
+    usdPoints: [{ date: '2026-10-20', value: '5' }],
+    cdiPoints: [],
+    ipcaPoints: [],
+  });
+  assert.equal(actualVaultTotal, 175.5);
+  assert.equal(Number(rows[0]?.piggyBrl), actualVaultTotal);
+  assert.equal(rows[0]?.patrimonyBrl, '1000');
 });
 
 test('missing quotes at the base date are reported, not silently zeroed', () => {

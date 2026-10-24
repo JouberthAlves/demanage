@@ -166,12 +166,65 @@ Hostname: demanage-test.biel.dev.br
 Service URL: http://localhost:8080
 ```
 
-`TRUST_CF_CONNECTING_IP` fica em `0` por padrão. Mude para `1` no `.env` somente
-quando o Cloudflare Tunnel for a única entrada externa e o host publicar o
-frontend apenas em `127.0.0.1`. Nesse caso, o Nginx aceita `CF-Connecting-IP`
-para rate limiting. Em qualquer implantação com outro ingress, mantenha `0` e
-use o endereço do peer recebido pelo Nginx. `APP_URL` começa com `https://` na
-produção; o Nginx aplica HSTS somente nesse caso.
+### IP dos visitantes e rate limiting (O06)
+
+**Mantenha `TRUST_CF_CONNECTING_IP=0` nesta topologia (`cloudflared` no host →
+`localhost:8080` → Docker).** Publicar `127.0.0.1` reduz exposição externa,
+mas qualquer processo local ainda pode requisitar a porta e enviar um
+`CF-Connecting-IP` falso. No Docker Desktop, conexões do serviço do Tunnel e
+de outros processos do host podem aparecer no Nginx com o **mesmo IP de gateway**.
+Não existe prova de origem confiável apenas por esse IP. O rate limiter, nesse
+modo conservador, contabiliza o endereço do peer Nginx: pode agrupar vários
+visitantes no mesmo limite, mas não permite escolher um IP por header forjado.
+
+O Nginx sempre substitui `X-Forwarded-For` pelo seu `$remote_addr` e remove o
+`CF-Connecting-IP` encaminhado ao backend. O Express confia em exatamente um
+proxy, o Nginx; **não exponha a porta 8888 do backend** a clientes ou outras
+origens não confiáveis. Se um atacante puder falar diretamente com o backend,
+conseguirá enviar seu próprio `X-Forwarded-For`, contornando o limitador.
+
+Existe uma ativação **condicional** para uma topologia diferente, após
+verificação independente, que exige todas as seguintes evidências:
+
+1. O `cloudflared` é o **único** processo que pode abrir conexão com a entrada
+   de origem do frontend, em uma rede ou socket isolado e com firewall/ACL
+   efetivamente bloqueando acesso direto do host e de outros containers.
+2. O IP remoto visto pelo Nginx pertence exclusivamente a esse processo
+   (`TRUSTED_TUNNEL_PROXY_IP` deve ser **um IPv4 canônico único**, sem CIDR).
+   IP de gateway compartilhado, loopback acessível por qualquer processo e
+   sub-redes Docker compartilhadas **não são ingressos exclusivos**.
+3. O cabeçalho `CF-Connecting-IP` é inserido pelo Cloudflare/Tunnel e não pode
+   ser escolhido por outra conexão, e o backend continua acessível só pelo
+   Nginx na rede Docker interna.
+4. Há um teste adversarial executado na **topologia real**, comprovando que
+   dois visitantes têm quotas separadas e que um acesso direto tenta forjar
+   `CF-Connecting-IP`/`X-Forwarded-For` sem alterar a quota ou o IP efetivo.
+
+Somente depois dessas verificações, documente a identidade do peer e configure:
+
+```env
+TRUST_CF_CONNECTING_IP=1
+TRUST_CF_INGRESS_VERIFIED=1
+TRUSTED_TUNNEL_PROXY_IP=192.0.2.22
+```
+
+**`192.0.2.22` é um IP de documentação, não use no servidor.** O entrypoint
+recusa iniciar se a flag estiver ativa sem a confirmação explícita ou sem IP
+válido, e o Nginx usa `set_real_ip_from` limitado ao único peer especificado.
+O módulo `realip` valida o valor e mantém o IP de socket quando o peer não é
+confiável ou o header é inválido. A confirmação da variável é uma declaração
+do operador, **não substitui** a verificação técnica do ingresso.
+
+Para a verificação após um **futuro** ambiente de testes isolado, use dois
+clientes externos com IPs distintos e observe a quota restante nos cabeçalhos
+`RateLimit` de `/api/health` após requisições autenticadas ou públicas de
+baixa frequência. Depois, no próprio host, tente requisições locais com
+`CF-Connecting-IP` e `X-Forwarded-For` falsos. A quota de um visitante real
+não deve mudar. Não faça testes de carga contra produção. Até haver essa
+evidência, preserve as três variáveis nos defaults (`0`, `0`, vazio).
+
+`APP_URL` começa com `https://` na produção; o Nginx aplica HSTS somente
+nesse caso.
 
 Depois teste o endereço HTTPS pelo navegador fora da rede local.
 
@@ -327,3 +380,22 @@ docker compose -f docker-compose.prod.yml down
 ```
 
 Não use `down -v` em produção: `-v` remove o volume do PostgreSQL.
+
+### Evidência de configuração do Tunnel — 23/10/2026 (somente leitura)
+
+A API Cloudflare confirmou o Tunnel **`demanage-server`** em estado `healthy`,
+com configuração remota: `demanage.biel.dev.br` encaminhado a
+`http://demanage-frontend:80` e fallback `http_status:404`. O segundo Tunnel
+`biel.dev.br` não publica esse hostname. Essa evidência identifica o roteamento
+externo atual, **mas não comprova exclusividade da origem que alcança o socket
+Nginx**: a stack também publica a porta `127.0.0.1:${DEMANAGE_PORT:-8080}` e
+outros processos/containers do host podem conseguir conexão direta. A checagem
+não alterou nenhum recurso Cloudflare, container ou produção.
+
+Logo, para a topologia verificada, mantenha `TRUST_CF_CONNECTING_IP=0`,
+`TRUST_CF_INGRESS_VERIFIED=0` e `TRUSTED_TUNNEL_PROXY_IP` vazio. Não habilite
+o modo por visitante com base apenas em `Tunnel=healthy`, DNS correto ou
+na presença do cabeçalho `CF-Connecting-IP`. Para habilitar, ainda precisa
+isolar o socket de origem e testar spoofing real na rede com tráfego autorizado.
+O exemplo de `cloudflared` instalado como serviço no host acima é outra
+possibilidade de implantação, **não** descreve a rota remota observada.

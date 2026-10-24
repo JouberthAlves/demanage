@@ -80,7 +80,7 @@ jobs:
             gh api "repos/$GITHUB_REPOSITORY/contents/production.json?ref=production" > "$RUNNER_TEMP/previous.json"
             # GitHub's REST content field includes base64 line breaks; jq's
             # @base64d rejects those on newer runners. GNU base64 accepts them.
-            PREVIOUS_SHA="$(jq -r '.content' "$RUNNER_TEMP/previous.json" | base64 --decode | jq -er 'select(.version == 1) | .source_commit')"
+            PREVIOUS_SHA="$(jq -r '.content' "$RUNNER_TEMP/previous.json" | base64 --decode | jq -er 'select(.version == 1 or .version == 2) | .source_commit')"
             if [[ -n "$INITIAL_LIVE_SHA" ]]; then
               echo "::error::initial_live_sha must be empty after initialization"
               exit 1
@@ -94,6 +94,10 @@ jobs:
           fi
           git cat-file -e "$PREVIOUS_SHA^{commit}"
           git merge-base --is-ancestor "$PREVIOUS_SHA" origin/master
+          if ! git merge-base --is-ancestor "$PREVIOUS_SHA" "$TARGET_SHA"; then
+            echo "::error::Normal production promotion must be a fast-forward from the live release; use a separately reviewed rollback procedure."
+            exit 1
+          fi
           if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
             backend/prisma backend/prisma.config.ts backend/entrypoint.sh docker-compose.prod.yml; then
             # Strictly scoped, single-release exception: this exact SHA was
@@ -118,7 +122,8 @@ jobs:
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
             echo "${service^^}_IMAGE=ghcr.io/$GITHUB_REPOSITORY-$service@$digest" >> "$GITHUB_ENV"
           done
-      - name: Publish atomic production pointer (no SSH, no database access)
+      - name: Prepare exact production pointer bytes
+        id: prepare
         run: |
           set -euo pipefail
           jq -n \
@@ -128,8 +133,28 @@ jobs:
             --arg frontend "$FRONTEND_IMAGE" \
             --arg reviewer "$GITHUB_ACTOR" \
             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            '{version:1, source_commit:$commit, previous_commit:$previous, backend:$backend, frontend:$frontend, approved_by:$reviewer, approved_at:$timestamp}' \
+            --argjson run_id "$GITHUB_RUN_ID" \
+            --argjson run_attempt "$GITHUB_RUN_ATTEMPT" \
+            '{version:2, source_commit:$commit, previous_commit:$previous, backend:$backend, frontend:$frontend, approved_by:$reviewer, approved_at:$timestamp, approval_run_id:$run_id, approval_run_attempt:$run_attempt}' \
             > "$RUNNER_TEMP/production.json"
+
+          pointer_sha256="$(sha256sum "$RUNNER_TEMP/production.json" | cut -d' ' -f1)"
+          [[ "$pointer_sha256" =~ ^[0-9a-f]{64}$ ]] || exit 1
+          echo "pointer_sha256=$pointer_sha256" >> "$GITHUB_OUTPUT"
+
+      # Uploaded inside the environment-gated job, before publishing. A failed
+      # artifact upload leaves the old pointer intact. v4 artifacts are immutable.
+      - name: Witness exact production pointer from approved run
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-pointer-${{ github.run_id }}-${{ github.run_attempt }}-${{ steps.prepare.outputs.pointer_sha256 }}
+          path: ${{ runner.temp }}/production.json
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Publish atomic production pointer (no SSH, no database access)
+        run: |
+          set -euo pipefail
 
           blob_sha=''
           if ! git ls-remote --exit-code --heads origin production > /dev/null; then
@@ -147,7 +172,17 @@ jobs:
             '{message:$message, content:$payload, branch:"production"} + (if $blob == "" then {} else {sha:$blob} end)' \
             > "$RUNNER_TEMP/payload.json"
           gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/production.json" \
-            --input "$RUNNER_TEMP/payload.json" > /dev/null
+            --input "$RUNNER_TEMP/payload.json" > "$RUNNER_TEMP/published.json"
+          pointer_commit="$(jq -er '.commit.sha' "$RUNNER_TEMP/published.json")"
+          pointer_blob="$(jq -er '.content.sha' "$RUNNER_TEMP/published.json")"
+          [[ "$pointer_commit" =~ ^[0-9a-f]{40}$ && "$pointer_blob" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "::error::GitHub did not confirm an immutable production pointer commit/blob"
+            exit 1
+          }
+          [[ "$(git hash-object "$RUNNER_TEMP/production.json")" == "$pointer_blob" ]] || {
+            echo "::error::Published production pointer blob differs from approved payload"
+            exit 1
+          }
           {
             echo "## Production approved"
             echo "- Commit: \`$TARGET_SHA\`"
