@@ -26,10 +26,16 @@ function monthFromTimestamp(value: string, now: Date) {
   return day.slice(0, 7);
 }
 
-/** Month of a past date-only value; future or invalid dates are ignored. */
+/** Month of a civil date or API ISO timestamp; future/invalid dates are ignored. */
 function monthFromDateOnly(value: string | undefined, now: Date) {
-  if (!value || !parseDayKey(value) || value > todayKey(now)) return null;
-  return value.slice(0, 7);
+  if (!value || !parseDayKey(value)) return null;
+  // API asset transactions are serialized as full UTC ISO timestamps, while
+  // planned expenses and cofrinho movements contain plain YYYY-MM-DD keys.
+  // Do not parse date-only keys as UTC midnight (which shifts them to yesterday
+  // in São Paulo); do not compare timestamps lexically with YYYY-MM-DD either.
+  const day = value.length === 10 ? value : dayKeyOf(value);
+  if (!day || day > todayKey(now)) return null;
+  return day.slice(0, 7);
 }
 
 /** Cash-only cofrinho movements: opt-out deposits and corrections are excluded by the API. */
