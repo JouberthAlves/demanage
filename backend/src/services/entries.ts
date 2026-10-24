@@ -217,6 +217,19 @@ export async function createEntry(userId: string, input: CreateEntryInput) {
   });
 }
 
+/** A recorded one-off receipt cannot be turned into a second recurring obligation. */
+export function assertEntryFrequencyTransition(
+  previous: EntryFrequency,
+  next: EntryFrequency,
+  hasRecordedReceipt: boolean,
+) {
+  if (previous === 'unica' && next !== 'unica' && hasRecordedReceipt) {
+    throw conflict(
+      'Entrada avulsa com recebimento registrado não pode virar recorrente; crie uma nova entrada',
+    );
+  }
+}
+
 export async function updateEntry(
   userId: string,
   id: string,
@@ -244,6 +257,13 @@ export async function updateEntry(
 
     const nextType = input.type ?? existing.type;
     const nextFrequency = input.frequency ?? existing.frequency;
+    if (existing.frequency === 'unica' && nextFrequency !== 'unica') {
+      const receipt = await tx.entryReceipt.findFirst({
+        where: { entryId: id },
+        select: { id: true },
+      });
+      assertEntryFrequencyTransition(existing.frequency, nextFrequency, receipt !== null);
+    }
     const nextCustomTagId =
       resolvedTagId !== undefined ? resolvedTagId : existing.customTagId;
     if (nextCustomTagId && nextType !== 'outro') {
