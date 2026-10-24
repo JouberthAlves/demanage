@@ -23,6 +23,11 @@ MAX_API_BYTES = 131072
 GITHUB_API = "https://api.github.com/repos/" + REPOSITORY
 PROMOTION_WORKFLOW_ID = 379924232
 PROMOTION_WORKFLOW_PATH = ".github/workflows/promote-production.yml"
+LEGACY_APPROVAL_RUN_ID = 39271031757
+# GitHub's run objects are large (~62 KiB for five real runs); keep pages
+# beneath MAX_API_BYTES while still searching later pages when necessary.
+HISTORY_PAGE_SIZE = 5
+MAX_HISTORY_PAGES = 40
 # This exact historical pointer predates authenticated provenance. It was published
 # by the approved 2026-10-19 promotion run; never extend this exception to new v1s.
 LEGACY_POINTER_COMMIT = "0f8892e115349975d854b53c5807ca79b1f2e5fc"
@@ -141,6 +146,82 @@ def _immutable_pointer(raw_body: bytes, opener: Callable[..., Any]) -> tuple[str
     return commit, blob
 
 
+def _has_owner_environment_approval(run_id: int, opener: Callable[..., Any]) -> bool:
+    approvals = _github_json(f"/actions/runs/{run_id}/approvals", opener)
+    if not isinstance(approvals, list):
+        raise ValueError("Invalid production environment approval history")
+    return any(
+        isinstance(item, dict) and item.get("state") == "approved"
+        and (item.get("user") or {}).get("login") == APPROVER
+        and isinstance(item.get("environments"), list)
+        and any(isinstance(env, dict) and env.get("name") == "production"
+                for env in item["environments"])
+        for item in approvals
+    )
+
+
+def _latest_approved_promotion(opener: Callable[..., Any]) -> dict[str, Any]:
+    """Use GitHub's descending workflow history as an external replay floor.
+
+    A branch writer can recommit the exact bytes of a prior approved pointer.
+    Neither its Git blob nor an old artifact proves the approval is still current.
+    Check all visible successful dispatches ahead of the selected run, including
+    reruns, and accept only actual owner-approved production environment runs.
+    """
+    total_count: int | None = None
+    scanned = 0
+    previous_id: int | None = None
+    for page in range(1, MAX_HISTORY_PAGES + 1):
+        history = _github_json(
+            f"/actions/workflows/{PROMOTION_WORKFLOW_ID}/runs"
+            f"?event=workflow_dispatch&status=success&actor={APPROVER}"
+            f"&branch=master&per_page={HISTORY_PAGE_SIZE}&page={page}",
+            opener,
+        )
+        if not isinstance(history, dict):
+            raise ValueError("Invalid production workflow history")
+        count = history.get("total_count")
+        runs = history.get("workflow_runs")
+        if (type(count) is not int or count <= 0 or not isinstance(runs, list)
+                or (total_count is not None and total_count != count)):
+            raise ValueError("Missing or inconsistent production workflow history")
+        total_count = count
+        expected = min(HISTORY_PAGE_SIZE, total_count - scanned)
+        if expected <= 0 or len(runs) != expected:
+            raise ValueError("Production workflow history page count is inconsistent")
+
+        # Validate the WHOLE fetched page before trusting its first approved run.
+        for run in runs:
+            if not isinstance(run, dict):
+                raise ValueError("Invalid production workflow history entry")
+            run_id = run.get("id")
+            attempt = run.get("run_attempt")
+            repository_id = (run.get("repository") or {}).get("id")
+            if (type(run_id) is not int or run_id <= 0
+                    or type(attempt) is not int or attempt <= 0
+                    or type(repository_id) is not int or repository_id <= 0
+                    or (previous_id is not None and run_id >= previous_id)):
+                raise ValueError("Invalid or out-of-order production workflow history")
+            previous_id = run_id
+            if (run.get("workflow_id") != PROMOTION_WORKFLOW_ID
+                    or str(run.get("path", "")).split("@", 1)[0] != PROMOTION_WORKFLOW_PATH
+                    or run.get("event") != "workflow_dispatch"
+                    or run.get("head_branch") != "master"
+                    or run.get("status") != "completed"
+                    or run.get("conclusion") != "success"
+                    or (run.get("actor") or {}).get("login") != APPROVER
+                    or (run.get("triggering_actor") or {}).get("login") != APPROVER):
+                raise ValueError("Inconsistent production promotion workflow identity")
+
+        for run in runs:
+            if _has_owner_environment_approval(run["id"], opener):
+                return run
+        scanned += len(runs)
+        if scanned == total_count:
+            raise ValueError("No production environment reviewer approval in workflow history")
+    raise ValueError("Production workflow history exceeds safe pagination limit")
+
+
 def _verify_approval_provenance(
     release: dict[str, Any], commit: str, blob: str,
     pointer_bytes: bytes, opener: Callable[..., Any]
@@ -148,36 +229,19 @@ def _verify_approval_provenance(
     if release["version"] == 1:
         if (commit, blob) != (LEGACY_POINTER_COMMIT, LEGACY_POINTER_BLOB):
             raise ValueError("Unwitnessed legacy production pointer provenance")
+        latest = _latest_approved_promotion(opener)
+        if (latest["id"], latest["run_attempt"]) != (LEGACY_APPROVAL_RUN_ID, 1):
+            raise ValueError("Stale legacy production pointer: newer approved workflow run")
         return
 
     run_id = release["approval_run_id"]
     attempt = release["approval_run_attempt"]
-    run = _github_json(f"/actions/runs/{run_id}", opener)
-    if not isinstance(run, dict) or any((
-        run.get("id") != run_id,
-        run.get("workflow_id") != PROMOTION_WORKFLOW_ID,
-        str(run.get("path", "")).split("@", 1)[0] != PROMOTION_WORKFLOW_PATH,
-        run.get("event") != "workflow_dispatch",
-        run.get("head_branch") != "master",
-        run.get("status") != "completed",
-        run.get("conclusion") != "success",
-        run.get("run_attempt") != attempt,
-        (run.get("actor") or {}).get("login") != APPROVER,
-        (run.get("triggering_actor") or {}).get("login") != APPROVER,
-    )):
-        raise ValueError("Production approval workflow identity is invalid")
+    run = _latest_approved_promotion(opener)
+    if (run["id"], run["run_attempt"]) != (run_id, attempt):
+        raise ValueError("Stale production pointer: latest approved workflow run differs")
     repository_id = (run.get("repository") or {}).get("id")
     if type(repository_id) is not int or repository_id <= 0:
         raise ValueError("Invalid production approval workflow repository")
-    approvals = _github_json(f"/actions/runs/{run_id}/approvals", opener)
-    if not isinstance(approvals, list) or not any(
-        isinstance(item, dict) and item.get("state") == "approved"
-        and (item.get("user") or {}).get("login") == APPROVER
-        and any(isinstance(env, dict) and env.get("name") == "production"
-                for env in item.get("environments", []))
-        for item in approvals
-    ):
-        raise ValueError("Required production environment reviewer approval is missing")
 
     artifacts = _github_json(f"/actions/runs/{run_id}/artifacts?per_page=100", opener)
     # The artifact is uploaded before the GitHub Contents API write. Its name

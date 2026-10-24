@@ -77,6 +77,8 @@ class GithubApiFixture:
         elif f'/contents/production.json?ref={self.commit}' in url:
             value = {'type': 'file', 'encoding': 'base64', 'sha': self.blob,
                      'content': base64.b64encode(self.raw).decode()}
+        elif f'/actions/workflows/{WORKFLOW_ID}/runs?' in url:
+            value = {'total_count': 1, 'workflow_runs': [self.run]}
         elif f'/actions/runs/{APPROVAL_RUN}/approvals' in url:
             value = self.approvals
         elif f'/actions/runs/{APPROVAL_RUN}/artifacts' in url:
