@@ -380,3 +380,22 @@ docker compose -f docker-compose.prod.yml down
 ```
 
 Não use `down -v` em produção: `-v` remove o volume do PostgreSQL.
+
+### Evidência de configuração do Tunnel — 23/10/2026 (somente leitura)
+
+A API Cloudflare confirmou o Tunnel **`demanage-server`** em estado `healthy`,
+com configuração remota: `demanage.biel.dev.br` encaminhado a
+`http://demanage-frontend:80` e fallback `http_status:404`. O segundo Tunnel
+`biel.dev.br` não publica esse hostname. Essa evidência identifica o roteamento
+externo atual, **mas não comprova exclusividade da origem que alcança o socket
+Nginx**: a stack também publica a porta `127.0.0.1:${DEMANAGE_PORT:-8080}` e
+outros processos/containers do host podem conseguir conexão direta. A checagem
+não alterou nenhum recurso Cloudflare, container ou produção.
+
+Logo, para a topologia verificada, mantenha `TRUST_CF_CONNECTING_IP=0`,
+`TRUST_CF_INGRESS_VERIFIED=0` e `TRUSTED_TUNNEL_PROXY_IP` vazio. Não habilite
+o modo por visitante com base apenas em `Tunnel=healthy`, DNS correto ou
+na presença do cabeçalho `CF-Connecting-IP`. Para habilitar, ainda precisa
+isolar o socket de origem e testar spoofing real na rede com tráfego autorizado.
+O exemplo de `cloudflared` instalado como serviço no host acima é outra
+possibilidade de implantação, **não** descreve a rota remota observada.
