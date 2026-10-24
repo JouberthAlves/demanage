@@ -1,12 +1,13 @@
 """Adversarial PostgreSQL DDL release-gate tests, with no database access."""
 
+import hashlib
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from demanage_cd.migration_gate import validate_additive_sql  # noqa: E402
+from demanage_cd.migration_gate import REVIEWED_SQL, validate_additive_sql  # noqa: E402
 
 
 class MigrationGateTests(unittest.TestCase):
@@ -68,20 +69,64 @@ class MigrationGateTests(unittest.TestCase):
         '''
         validate_additive_sql(safe, "backend/prisma/migrations/20261023000100_test/migration.sql")
 
-    def test_exactly_reviewed_migrations_allow_documented_backfill_and_trigger(self):
+    def test_exactly_reviewed_migrations_allow_only_pinned_bytes_and_paths(self):
         root = Path(__file__).resolve().parents[3]
         for folder in (
             '20261023210000_piggy_correction_origin',
             '20261023210100_oauth_token_connection_status',
+            '20261023211000_c04_owner_composite_fks',
+            '20261023213000_expense_obligation_versions',
         ):
             path = f'backend/prisma/migrations/{folder}/migration.sql'
             sql = (root / path).read_text(encoding='utf-8')
             with self.subTest(path=path):
+                self.assertEqual(hashlib.sha256(sql.encode('utf-8')).hexdigest(), REVIEWED_SQL[path])
                 validate_additive_sql(sql, path)
                 with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
                     validate_additive_sql(sql + '\nSELECT 1;', path)
                 with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
+                    validate_additive_sql(sql + '\n', path)
+                with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
+                    validate_additive_sql(sql + '\n-- altered', path)
+                with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
+                    validate_additive_sql('CREATE TABLE "Harmless" ("id" TEXT);', path)
+                with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
                     validate_additive_sql(sql, 'backend/prisma/migrations/20261023000100_unreviewed/migration.sql')
+                with self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
+                    validate_additive_sql(sql, './' + path)
+
+    def test_nonpublic_schema_statements_remain_blocked(self):
+        path = 'backend/prisma/migrations/20261023000100_unreviewed/migration.sql'
+        for sql in (
+            'CREATE TABLE private."Records" ("id" TEXT);',
+            'ALTER TABLE private."Entry" ADD COLUMN "note" TEXT;',
+            'CREATE INDEX "entry_note_idx" ON private."Entry" ("note");',
+            'CREATE TYPE private."Status" AS ENUM (\'active\');',
+            'SET search_path TO private; CREATE TABLE "Records" ("id" TEXT);',
+        ):
+            with self.subTest(sql=sql), self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
+                validate_additive_sql(sql, path)
+
+    def test_reviewed_c04_f02_cannot_be_redirected_to_another_schema(self):
+        root = Path(__file__).resolve().parents[3]
+        replacements = (
+            (
+                '20261023211000_c04_owner_composite_fks',
+                'LOCK TABLE "PiggyTransaction"',
+                'LOCK TABLE private."PiggyTransaction"',
+            ),
+            (
+                '20261023213000_expense_obligation_versions',
+                'CREATE TABLE "ExpenseObligationVersion"',
+                'CREATE TABLE private."ExpenseObligationVersion"',
+            ),
+        )
+        for folder, original, altered in replacements:
+            path = f'backend/prisma/migrations/{folder}/migration.sql'
+            sql = (root / path).read_text(encoding='utf-8')
+            self.assertIn(original, sql)
+            with self.subTest(path=path), self.assertRaisesRegex(RuntimeError, 'manual|unsupported|unsafe'):
+                validate_additive_sql(sql.replace(original, altered, 1), path)
 
     def test_unsafe_c04_owner_fk_update_cascade_remains_blocked(self):
         root = Path(__file__).resolve().parents[1]

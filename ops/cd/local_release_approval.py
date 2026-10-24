@@ -41,6 +41,15 @@ def call(*args: str) -> str:
     return completed.stdout.strip()
 
 
+def read_git_sql(repo: Path, target: str, path: str) -> str:
+    """Read SQL from the target Git blob without newline/whitespace rewriting."""
+    completed = subprocess.run(
+        ["git", "-C", str(repo), "show", target + ":" + path],
+        check=True, capture_output=True, timeout=180,
+    )
+    return completed.stdout.decode("utf-8")
+
+
 def json_call(*args: str) -> dict:
     value = json.loads(call(*args))
     if not isinstance(value, dict):
@@ -143,7 +152,7 @@ def verify_git(repo: Path, previous: str, target: str) -> bool:
             continue
         if not re.fullmatch(r"backend/prisma/migrations/[0-9]{14}_[a-zA-Z0-9_]+/migration\.sql", name):
             raise RuntimeError("Unexpected migration asset in local release")
-        content = call("git", "-C", str(repo), "show", target + ":" + name)
+        content = read_git_sql(repo, target, name)
         validate_additive_sql(content, name)
     return True
 
