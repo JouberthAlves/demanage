@@ -119,6 +119,7 @@ export type IncomeType = 'salario' | 'freelance' | 'outro';
 export type IncomeFrequency = 'mensal' | 'semanal' | 'unica';
 
 export type EntryReceiptOccurrence = {
+  id?: string;
   month: string;
   amount: number;
   receivedAt: string;
@@ -140,6 +141,7 @@ export type Income = {
   receivedForMonth?: string;
   receivedAt?: string;
   createdAt?: string;
+  updatedAt?: string;
   customTagId?: string;
   customTag?: Pick<CustomTag, 'id' | 'name' | 'color'>;
   receipts?: EntryReceiptOccurrence[];

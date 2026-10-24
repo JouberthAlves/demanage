@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Plus, TrendingUp } from 'lucide-react';
 import { toast } from 'sonner';
 
+import { IncomeConfirmReceiptDialog } from '@/components/income/income-confirm-receipt-dialog';
 import { IncomeDeleteDialog } from '@/components/income/income-delete-dialog';
 import { IncomeFiltersBar } from '@/components/income/income-filters-bar';
 import { IncomeFormDialog } from '@/components/income/income-form-dialog';
@@ -158,6 +159,13 @@ export function IncomePage() {
         income={actions.confirmDelete}
         onCancel={() => actions.askDelete(null)}
         onConfirm={() => void actions.runDelete()}
+      />
+      <IncomeConfirmReceiptDialog
+        income={actions.receiptToConfirm}
+        now={now}
+        pending={actions.receiptPending}
+        onCancel={actions.dismissReceiptConfirmation}
+        onConfirm={actions.runConfirmReceipt}
       />
     </div>
   );

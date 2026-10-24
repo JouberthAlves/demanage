@@ -105,9 +105,15 @@ test('entry notes are separate from name and custom income tag', () => {
   assert.equal(parsed.name, 'Presente');
   assert.equal(parsed.customTagId, 'income-tag');
   assert.equal(parsed.notes, 'Presente da minha vó');
-  assert.equal(parseCreateEntry({
-    name: 'Presente', amount: 20, type: 'outro', frequency: 'unica',
-  }).notes, null);
+  assert.equal(
+    parseCreateEntry({
+      name: 'Presente',
+      amount: 20,
+      type: 'outro',
+      frequency: 'unica',
+    }).notes,
+    null,
+  );
 
   const entry = {
     id: 'entry-notes',
@@ -124,12 +130,29 @@ test('entry notes are separate from name and custom income tag', () => {
 
 test('entry note updates accept null, preserve omitted notes and reject invalid or oversized text', () => {
   assert.equal(parseUpdateEntry({ notes: null }).notes, null);
-  assert.equal(parseUpdateEntry({ notes: '  outra descrição  ' }).notes, 'outra descrição');
+  assert.equal(
+    parseUpdateEntry({ notes: '  outra descrição  ' }).notes,
+    'outra descrição',
+  );
   assert.equal(parseUpdateEntry({ name: 'Novo' }).notes, undefined);
-  const base = { name: 'Presente', amount: 20, type: 'outro', frequency: 'unica' };
-  assert.equal(status(() => parseCreateEntry({ ...base, notes: 7 })), 400);
-  assert.equal(status(() => parseCreateEntry({ ...base, notes: 'x'.repeat(501) })), 400);
-  assert.equal(status(() => parseUpdateEntry({ notes: 'x'.repeat(501) })), 400);
+  const base = {
+    name: 'Presente',
+    amount: 20,
+    type: 'outro',
+    frequency: 'unica',
+  };
+  assert.equal(
+    status(() => parseCreateEntry({ ...base, notes: 7 })),
+    400,
+  );
+  assert.equal(
+    status(() => parseCreateEntry({ ...base, notes: 'x'.repeat(501) })),
+    400,
+  );
+  assert.equal(
+    status(() => parseUpdateEntry({ notes: 'x'.repeat(501) })),
+    400,
+  );
 });
 
 test('update input is partial and refuses the salary type', () => {
@@ -152,14 +175,22 @@ test('a received one-off cannot become recurring while its receipt remains immut
   for (const recurring of ['mensal', 'semanal'] as const) {
     assert.throws(
       () => assertEntryFrequencyTransition('unica', recurring, true),
-      (error: unknown) => error instanceof AppError && error.status === 409 &&
+      (error: unknown) =>
+        error instanceof AppError &&
+        error.status === 409 &&
         /recebimento registrado/.test(error.message),
     );
   }
 
-  assert.doesNotThrow(() => assertEntryFrequencyTransition('unica', 'mensal', false));
-  assert.doesNotThrow(() => assertEntryFrequencyTransition('unica', 'unica', true));
-  assert.doesNotThrow(() => assertEntryFrequencyTransition('mensal', 'semanal', true));
+  assert.doesNotThrow(() =>
+    assertEntryFrequencyTransition('unica', 'mensal', false),
+  );
+  assert.doesNotThrow(() =>
+    assertEntryFrequencyTransition('unica', 'unica', true),
+  );
+  assert.doesNotThrow(() =>
+    assertEntryFrequencyTransition('mensal', 'semanal', true),
+  );
 });
 
 test('receipt state body and salary fields', () => {
@@ -169,6 +200,66 @@ test('receipt state body and salary fields', () => {
       month: '2026-09',
       state: 'received',
     },
+  );
+  assert.deepEqual(
+    parseReceiptStateBody({
+      month: '2026-10',
+      state: 'received',
+      receivedOn: '2026-10-09',
+      expectedUpdatedAt: '2026-10-08T12:00:00.000Z',
+    }),
+    {
+      month: '2026-10',
+      state: 'received',
+      receivedOn: '2026-10-09',
+      expectedUpdatedAt: '2026-10-08T12:00:00.000Z',
+    },
+  );
+  for (const expectedUpdatedAt of [
+    'invalid',
+    '2026-10-08',
+    '2026-10-08T12:00:00+04:00',
+    42,
+  ]) {
+    assert.equal(
+      status(() =>
+        parseReceiptStateBody({
+          month: '2026-10',
+          state: 'received',
+          expectedUpdatedAt,
+        }),
+      ),
+      400,
+      `invalid optimistic version: ${expectedUpdatedAt}`,
+    );
+  }
+  for (const receivedOn of [
+    '2026-02-30',
+    '2026-09-30',
+    '2099-01-01',
+    'not-a-date',
+  ]) {
+    assert.equal(
+      status(() =>
+        parseReceiptStateBody({
+          month: '2026-10',
+          state: 'received',
+          receivedOn,
+        }),
+      ),
+      400,
+      `invalid or out-of-month receipt date: ${receivedOn}`,
+    );
+  }
+  assert.equal(
+    status(() =>
+      parseReceiptStateBody({
+        month: '2026-10',
+        state: 'waiting',
+        receivedOn: '2026-10-09',
+      }),
+    ),
+    400,
   );
   assert.equal(
     status(() => parseReceiptStateBody({ month: '2026-09' })),
