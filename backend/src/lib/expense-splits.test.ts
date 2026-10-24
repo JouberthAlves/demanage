@@ -207,3 +207,65 @@ test('P2: a moved split still validates historical obligations on the old card',
     prospective, asOf,
   }), /Limite insuficiente.*original/);
 });
+
+test('P2: schedule-only monthly-to-weekly edit exposes a hidden historical card reserve', () => {
+  const asOf = at('2026-02-06');
+  const card: Card = {
+    id: 'card', userId: 'user', name: 'Card R$500', limit: new Prisma.Decimal(500),
+    closingDay: 20, pendingClosingDay: null, pendingClosingDaySetAt: null,
+    minimumNextClosingOn: null, archivedAt: null, expiresAt: null,
+    lastInvoicedOn: at('2026-01-20'), lastBillingProcessedAt: at('2026-01-21'),
+    createdAt: at('2026-01-01'), updatedAt: asOf,
+  };
+  const monthly: BillableExpense = {
+    amount: '10', cardId: card.id, isInvoice: false,
+    frequency: 'mensal', dueDay: 21, startsAt: at('2026-01-21'),
+    endsAt: null, occurredAt: null, createdAt: at('2026-01-21'),
+    splits: [{ kind: 'card', cardId: card.id, amount: '10' }],
+    obligationVersions: [
+      { sequence: 1, effectiveMonth: '2026-01', amount: '100', cardId: card.id,
+        splits: [{ kind: 'card', cardId: card.id, amount: '100' }] },
+      { sequence: 2, effectiveMonth: '2026-02', amount: '10', cardId: card.id,
+        splits: [{ kind: 'card', cardId: card.id, amount: '10' }] },
+    ],
+  };
+  const weekly = { ...monthly, frequency: 'semanal' };
+  assert.equal(chargeAmountForClosing(monthly, card.id, at('2026-02-20'), at('2026-01-20')), 100);
+  assert.equal(chargeAmountForClosing(weekly, card.id, at('2026-02-20'), at('2026-01-20')), 230);
+  assert.doesNotThrow(() => assertCardLimits({
+    cards: new Map([[card.id, card]]),
+    resolved: [{ kind: 'card', cardId: card.id, amount: 10, percent: 100 }],
+    committedByCard: new Map([[card.id, 300]]), frequency: 'semanal',
+  }), 'the shallow check misses the history-dependent overflow');
+  assert.throws(() => assertProspectiveVersionedCardLimits({
+    cards: [card], otherCommittedByCard: new Map([[card.id, 300]]),
+    prospective: weekly, asOf,
+  }), /Limite insuficiente/);
+});
+
+test('prospective projection ignores unrelated already-overdrawn cards for PIX-only schedule changes', () => {
+  const asOf = at('2026-02-06');
+  const card: Card = {
+    id: 'unrelated', userId: 'user', name: 'Already overdrawn',
+    limit: new Prisma.Decimal(100), closingDay: 20,
+    pendingClosingDay: null, pendingClosingDaySetAt: null,
+    minimumNextClosingOn: null, archivedAt: null, expiresAt: null,
+    lastInvoicedOn: at('2026-01-20'), lastBillingProcessedAt: at('2026-01-21'),
+    createdAt: at('2026-01-01'), updatedAt: asOf,
+  };
+  const cashOnly: BillableExpense = {
+    amount: '10', cardId: null, isInvoice: false, frequency: 'mensal',
+    startsAt: at('2026-01-21'), endsAt: null, occurredAt: null,
+    createdAt: at('2026-01-21'), splits: [],
+  };
+  // This expense reserves zero on the unrelated card even though other
+  // committed debt already exceeds its user-adjusted R$100 limit.
+  assert.doesNotThrow(() => assertProspectiveVersionedCardLimits({
+    cards: [card], otherCommittedByCard: new Map([[card.id, 101]]),
+    prospective: cashOnly, asOf,
+  }));
+  assert.throws(() => assertProspectiveVersionedCardLimits({
+    cards: [card], otherCommittedByCard: new Map([[card.id, 101]]),
+    prospective: { ...cashOnly, cardId: card.id, splits: [{ kind: 'card', cardId: card.id, amount: '10' }] }, asOf,
+  }), /Limite insuficiente/);
+});

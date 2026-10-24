@@ -155,6 +155,9 @@ export function assertProspectiveVersionedCardLimits(args: {
     if (card.limit == null) continue;
     const window = currentCycleWindow(card, todayKey);
     const projected = chargeAmountDecimal(args.prospective, card.id, window);
+    // An unrelated overdrawn card must not block a cash-only or other-card
+    // schedule edit. Positive projected charges still require full headroom.
+    if (projected.lte(0)) continue;
     const available = new Prisma.Decimal(card.limit).minus(
       args.otherCommittedByCard.get(card.id) ?? 0,
     );

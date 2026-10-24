@@ -119,3 +119,74 @@ test('Codex P2: editing February weekly price cannot spend immutable January car
     );
   } finally { await cleanup(user.id); }
 });
+
+test('Codex P2: schedule-only monthly-to-weekly edit cannot exceed the historical open card cycle', async () => {
+  const user = await fixture('P2 schedule-only historical reserve');
+  try {
+    const card = await prisma.card.create({ data: {
+      userId: user.id, name: 'Card R$500', limit: 500, closingDay: 20,
+      createdAt: at('2026-01-01'), lastInvoicedOn: at('2026-01-20'),
+      lastBillingProcessedAt: at('2026-01-21'),
+    } });
+    const recurring = await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Monthly then weekly',
+      amount: 100, category: 'outro', frequency: 'mensal', dueDay: 21,
+      startsAt: at('2026-01-21'), createdAt: at('2026-01-21'),
+    } });
+    await updateExpense(user.id, recurring.id, parseUpdateExpense({ amount: 10 }), at('2026-02-05'));
+    const other = await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Other card expense',
+      amount: 300, category: 'outro', frequency: 'unica',
+      occurredAt: at('2026-02-01'), createdAt: at('2026-02-01'),
+    } });
+
+    // The shallow validator sees 300 + at most 5 x 10 <= 500.
+    // The actual projected cycle is January 2 x 100 + February 3 x 10 + 300 = 530.
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({ frequency: 'semanal' }), at('2026-02-06')),
+      /Limite insuficiente/,
+    );
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).frequency, 'mensal');
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: recurring.id } }), 2);
+
+    await prisma.expense.update({ where: { id: other.id }, data: { amount: 200 } });
+    await updateExpense(user.id, recurring.id, parseUpdateExpense({ frequency: 'semanal' }), at('2026-02-06'));
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).frequency, 'semanal');
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: recurring.id } }), 2);
+  } finally { await cleanup(user.id); }
+});
+
+test('Codex P2: removing an end date must include restored historical card occurrences', async () => {
+  const user = await fixture('P2 end date clear historical reserve');
+  try {
+    const card = await prisma.card.create({ data: {
+      userId: user.id, name: 'Card R$500', limit: 500, closingDay: 20,
+      createdAt: at('2026-01-01'), lastInvoicedOn: at('2026-01-20'),
+      lastBillingProcessedAt: at('2026-01-21'),
+    } });
+    const recurring = await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Short weekly series',
+      amount: 100, category: 'outro', frequency: 'semanal', dueDay: 21,
+      startsAt: at('2026-01-21'), endsAt: at('2026-02-01'), createdAt: at('2026-01-21'),
+    } });
+    await updateExpense(user.id, recurring.id, parseUpdateExpense({ amount: 10 }), at('2026-02-05'));
+    const other = await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Other card expense',
+      amount: 300, category: 'outro', frequency: 'unica',
+      occurredAt: at('2026-02-01'), createdAt: at('2026-02-01'),
+    } });
+
+    // Capped: January 2 x 100 + other 300 = 500.
+    // Clearing the end date restores February 3 x 10, yielding 530 > 500.
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({ endsAt: null }), at('2026-02-06')),
+      /Limite insuficiente/,
+    );
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).endsAt?.toISOString().slice(0, 10), '2026-02-01');
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: recurring.id } }), 2);
+
+    await prisma.expense.update({ where: { id: other.id }, data: { amount: 200 } });
+    await updateExpense(user.id, recurring.id, parseUpdateExpense({ endsAt: null }), at('2026-02-06'));
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).endsAt, null);
+  } finally { await cleanup(user.id); }
+});
