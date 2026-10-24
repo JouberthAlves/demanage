@@ -11,7 +11,14 @@ import {
   parsePayExpenseBody,
   parseUpdateExpense,
 } from './expense-input';
-import { cashAmountOf, existingSplitInputs } from './expenses';
+import {
+  assertExpenseFrequencyTransitionSafe,
+  assertOneOffMutationSafe,
+  cashAmountOf,
+  existingSplitInputs,
+  projectedRecurringEndAt,
+  requiresVersionedCardProjection,
+} from './expenses';
 
 function status(fn: () => unknown) {
   try {
@@ -22,6 +29,22 @@ function status(fn: () => unknown) {
   }
   return null;
 }
+
+test('schedule-only edits with historical versions must validate the full card cycle', () => {
+  assert.equal(requiresVersionedCardProjection(true, false, 2, 'semanal'), true);
+  assert.equal(requiresVersionedCardProjection(true, false, 2, 'mensal'), true);
+  assert.equal(requiresVersionedCardProjection(false, true, 0, 'mensal'), true);
+  assert.equal(requiresVersionedCardProjection(true, false, 0, 'mensal'), false);
+  assert.equal(requiresVersionedCardProjection(false, false, 2, 'mensal'), false);
+  assert.equal(requiresVersionedCardProjection(true, false, 2, 'unica'), false);
+});
+
+test('card projections respect explicit clearing of a recurring end date', () => {
+  const end = new Date('2026-02-01T16:00:00.000Z');
+  assert.equal(projectedRecurringEndAt(undefined, end), end);
+  assert.equal(projectedRecurringEndAt(null, end), null);
+  assert.equal(projectedRecurringEndAt(new Date('2026-02-10T16:00:00.000Z'), end)?.toISOString().slice(0, 10), '2026-02-10');
+});
 
 test('cash amount is the PIX share, or everything without splits', () => {
   assert.equal(cashAmountOf([], 120), 120);
@@ -76,6 +99,10 @@ test('create input enforces required fields and category rules', () => {
     400,
   );
   assert.equal(
+    status(() => parseCreateExpense({ ...base, category: 'investimento' })),
+    400,
+  );
+  assert.equal(
     status(() => parseCreateExpense({ ...base, frequency: 'diaria' })),
     400,
   );
@@ -105,6 +132,10 @@ test('update input keeps absent fields undefined', () => {
     status(() => parseUpdateExpense({ category: 'x' })),
     400,
   );
+  assert.equal(
+    status(() => parseUpdateExpense({ category: 'investimento' })),
+    400,
+  );
 });
 
 test('pay body needs a valid month', () => {
@@ -113,4 +144,89 @@ test('pay body needs a valid month', () => {
     status(() => parsePayExpenseBody({ month: '2026-9' })),
     400,
   );
+});
+
+test('F01: paid one-off cash cannot be repriced or moved to a card', () => {
+  assert.equal(
+    status(() =>
+      assertOneOffMutationSafe({
+        paymentCount: 1,
+        oldCashAmount: 100,
+        newCashAmount: 0,
+        hasCardSettlement: false,
+      }),
+    ),
+    409,
+  );
+  assert.equal(
+    status(() =>
+      assertOneOffMutationSafe({
+        paymentCount: 1,
+        oldCashAmount: 40,
+        newCashAmount: 60,
+        hasCardSettlement: true,
+      }),
+    ),
+    409,
+  );
+});
+
+test('F01: settled card cannot be repriced; unbilled card can switch to PIX once', () => {
+  assert.equal(
+    status(() =>
+      assertOneOffMutationSafe({
+        paymentCount: 0,
+        oldCashAmount: 0,
+        newCashAmount: 0,
+        hasCardSettlement: true,
+      }),
+    ),
+    409,
+  );
+  assert.equal(
+    assertOneOffMutationSafe({
+      paymentCount: 0,
+      oldCashAmount: 0,
+      newCashAmount: 35,
+      hasCardSettlement: false,
+    }),
+    true,
+  );
+  assert.equal(
+    assertOneOffMutationSafe({
+      paymentCount: 0,
+      oldCashAmount: 0,
+      newCashAmount: 0,
+      hasCardSettlement: false,
+    }),
+    false,
+  );
+});
+
+test('Codex P2: returning a one-off to recurring fails closed regardless of historical snapshot availability', () => {
+  for (const next of ['mensal', 'semanal']) {
+    assert.throws(
+      () => assertExpenseFrequencyTransitionSafe('unica', next),
+      /nova despesa|novo lançamento|histórico/i,
+    );
+  }
+  for (const [oldFrequency, nextFrequency] of [
+    ['mensal', 'unica'],
+    ['semanal', 'mensal'],
+    ['unica', 'unica'],
+  ]) {
+    assert.doesNotThrow(() => assertExpenseFrequencyTransitionSafe(oldFrequency, nextFrequency));
+  }
+});
+
+test('independent P2: recurring card debt cannot become a one-off and hide unbilled monthly obligations', () => {
+  assert.throws(
+    () => assertExpenseFrequencyTransitionSafe('mensal', 'unica', true),
+    /fatura|cartão|histórico|nova despesa/i,
+  );
+  assert.throws(
+    () => assertExpenseFrequencyTransitionSafe('semanal', 'unica', true),
+    /fatura|cartão|histórico|nova despesa/i,
+  );
+  assert.doesNotThrow(() => assertExpenseFrequencyTransitionSafe('mensal', 'unica', false));
 });

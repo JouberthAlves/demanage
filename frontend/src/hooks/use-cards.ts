@@ -10,17 +10,16 @@ import {
   processCardBilling,
   updateCard,
 } from '@/lib/cards-api';
+import { runDailyMaintenance } from '@/lib/daily-maintenance';
 import { invalidateDomain, queryKeys } from '@/lib/query-keys';
+import { useCalendarStore } from '@/stores/calendar-store';
 import type { Card } from '@/types/finance';
 
 const NO_CARDS: Card[] = [];
 
-// The QueryClient is session-scoped. Running billing maintenance for each
-// useCards consumer can create overlapping writes to the same account.
-const billingStartedForSession = new WeakSet<ReturnType<typeof useQueryClient>>();
-
 export function useCards(enabled = true) {
   const queryClient = useQueryClient();
+  const dayKey = useCalendarStore((state) => state.dayKey);
 
   const query = useQuery({
     queryKey: queryKeys.cards,
@@ -30,22 +29,21 @@ export function useCards(enabled = true) {
   });
 
   useEffect(() => {
-    if (!enabled || !query.isSuccess || billingStartedForSession.has(queryClient)) return;
-    billingStartedForSession.add(queryClient);
-
-    processCardBilling()
-      .then((billing) => {
+    if (!enabled || !query.isSuccess) return;
+    runDailyMaintenance(queryClient, 'cards', dayKey, {
+      run: processCardBilling,
+      needsRetry: () => false,
+      onResult: (billing) => {
         if (billing.createdCount > 0) {
-          return invalidateDomain(queryClient, 'cards').then(() => undefined);
+          return invalidateDomain(queryClient, 'cards');
         }
         return queryClient.invalidateQueries({ queryKey: queryKeys.cards });
-      })
-      .catch(() => {
-        // Allow a later mount to retry the maintenance run.
-        billingStartedForSession.delete(queryClient);
+      },
+      onError: () => {
         toast.error('Não foi possível atualizar as faturas agora.');
-      });
-  }, [enabled, query.isSuccess, queryClient]);
+      },
+    });
+  }, [enabled, query.isSuccess, queryClient, dayKey]);
 
   return query;
 }

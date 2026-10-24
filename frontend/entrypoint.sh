@@ -5,6 +5,7 @@ set -e
 : "${API_PORT:?API_PORT is required}"
 : "${PORT:=80}"
 : "${TRUST_CF_CONNECTING_IP:=0}"
+: "${TRUST_CF_INGRESS_VERIFIED:=0}"
 : "${APP_URL:=http://localhost}"
 : "${VITE_API_URL:=/api}"
 
@@ -58,9 +59,13 @@ case "$VITE_API_URL" in
 esac
 
 export API_HOST API_PORT PORT NGINX_RESOLVER NGINX_RESOLVER_IPV6 \
-  TRUST_CF_CONNECTING_IP APP_URL API_CSP_SOURCE
+  APP_URL API_CSP_SOURCE
 
-envsubst '${API_HOST} ${API_PORT} ${PORT} ${NGINX_RESOLVER} ${NGINX_RESOLVER_IPV6} ${TRUST_CF_CONNECTING_IP} ${APP_URL} ${API_CSP_SOURCE}' \
+# Never write raw user-provided variables into nginx directives. The helper
+# rejects missing, unverified or non-canonical ingress peers when enabled.
+sh /realip-config.sh > /etc/nginx/demanage-tunnel-realip.conf
+
+envsubst '${API_HOST} ${API_PORT} ${PORT} ${NGINX_RESOLVER} ${NGINX_RESOLVER_IPV6} ${APP_URL} ${API_CSP_SOURCE}' \
   < /etc/nginx/templates/default.conf.template \
   > /etc/nginx/conf.d/default.conf
 

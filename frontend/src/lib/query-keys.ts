@@ -7,6 +7,7 @@ import type { Asset } from '@/types/patrimony';
 export const queryKeys = {
   expenses: ['expenses'] as const,
   entries: ['entries'] as const,
+  financialHistory: ['financial-history'] as const,
   cards: ['cards'] as const,
   piggyBanks: {
     all: ['piggy-banks'] as const,
@@ -38,14 +39,29 @@ export const queryKeys = {
  */
 const DEPENDENTS = {
   // Cards carry `committed`/`available`, which every expense change moves.
-  expenses: [queryKeys.expenses, queryKeys.cards, queryKeys.patrimony.all],
-  entries: [queryKeys.entries, queryKeys.patrimony.all],
-  cards: [queryKeys.cards, queryKeys.expenses, queryKeys.patrimony.all],
+  expenses: [
+    queryKeys.expenses,
+    queryKeys.financialHistory,
+    queryKeys.cards,
+    queryKeys.patrimony.all,
+  ],
+  entries: [
+    queryKeys.entries,
+    queryKeys.financialHistory,
+    queryKeys.patrimony.all,
+  ],
+  cards: [
+    queryKeys.cards,
+    queryKeys.expenses,
+    queryKeys.financialHistory,
+    queryKeys.patrimony.all,
+  ],
   piggyBanks: [
     queryKeys.piggyBanks.all,
     queryKeys.expenses,
     queryKeys.cards,
     queryKeys.entries,
+    queryKeys.financialHistory,
     queryKeys.patrimony.all,
   ],
   assets: [
@@ -54,10 +70,15 @@ const DEPENDENTS = {
     queryKeys.expenses,
     queryKeys.cards,
     queryKeys.entries,
+    queryKeys.financialHistory,
     queryKeys.piggyBanks.all,
   ],
   patrimony: [queryKeys.patrimony.all],
-  profile: [queryKeys.entries, queryKeys.patrimony.all],
+  profile: [
+    queryKeys.entries,
+    queryKeys.financialHistory,
+    queryKeys.patrimony.all,
+  ],
 } as const;
 
 export type InvalidationDomain = keyof typeof DEPENDENTS;

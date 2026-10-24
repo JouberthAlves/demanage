@@ -5,16 +5,24 @@ import {
   EXPENSE_CATEGORY_COLORS,
   EXPENSE_CATEGORY_LABELS,
 } from '@/data/labels';
-import { useExpenseList } from '@/hooks/use-expenses';
 import { useFinancialNow } from '@/hooks/use-financial-now';
+import {
+  useAssetCashTransactions,
+  useFinancialHistory,
+} from '@/hooks/use-monthly-history';
 import { usePiggyCashMovements } from '@/hooks/use-piggy-banks';
 import { currentMonthKey } from '@/lib/dates';
-import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { formatCurrencyCompact } from '@/lib/format';
-import { piggyCashContribution } from '@/lib/monthly-history';
+import {
+  assetCashContribution,
+  financialExpenseThisMonth,
+  piggyCashContribution,
+} from '@/lib/monthly-history';
 import type { PiggyCashMovement } from '@/lib/piggy-api';
+import type { RecurringExpense } from '@/types/finance';
 
 const EMPTY_MOVEMENTS: PiggyCashMovement[] = [];
+const EMPTY_EXPENSES: RecurringExpense[] = [];
 
 type DonutItem = {
   key: string;
@@ -24,8 +32,9 @@ type DonutItem = {
 };
 
 export function CategoryDonutChart() {
-  const expenses = useExpenseList();
+  const expenses = useFinancialHistory().data?.expenses ?? EMPTY_EXPENSES;
   const piggyMovements = usePiggyCashMovements().data ?? EMPTY_MOVEMENTS;
+  const { transactions } = useAssetCashTransactions();
   const now = useFinancialNow();
   const [active, setActive] = useState<DonutItem | null>(null);
 
@@ -33,7 +42,7 @@ export function CategoryDonutChart() {
     const grouped = expenses.reduce<
       Record<string, { name: string; color: string; value: number }>
     >((acc, expense) => {
-      const value = expenseContributionThisMonth(expense, now);
+      const value = financialExpenseThisMonth([expense], now);
       if (value <= 0) return acc;
 
       const key = expense.customTag
@@ -55,12 +64,31 @@ export function CategoryDonutChart() {
       return acc;
     }, {});
 
-    const piggyDebits = piggyCashContribution(piggyMovements, currentMonthKey(now), 'deposit', now);
+    const piggyDebits = piggyCashContribution(
+      piggyMovements,
+      currentMonthKey(now),
+      'deposit',
+      now,
+    );
     if (piggyDebits > 0) {
       grouped.cofrinho = {
         name: EXPENSE_CATEGORY_LABELS.cofrinho,
         color: EXPENSE_CATEGORY_COLORS.cofrinho,
         value: (grouped.cofrinho?.value ?? 0) + piggyDebits,
+      };
+    }
+
+    const assetPurchases = assetCashContribution(
+      transactions,
+      currentMonthKey(now),
+      'BUY',
+      now,
+    );
+    if (assetPurchases > 0) {
+      grouped.investimento = {
+        name: EXPENSE_CATEGORY_LABELS.investimento,
+        color: EXPENSE_CATEGORY_COLORS.investimento,
+        value: (grouped.investimento?.value ?? 0) + assetPurchases,
       };
     }
 
@@ -73,7 +101,7 @@ export function CategoryDonutChart() {
       data: items,
       total: items.reduce((sum, item) => sum + item.value, 0),
     };
-  }, [expenses, now, piggyMovements]);
+  }, [expenses, now, piggyMovements, transactions]);
   const totalLabel = formatCurrencyCompact(total);
 
   return (

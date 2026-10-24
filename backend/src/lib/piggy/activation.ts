@@ -16,6 +16,16 @@ export function nextAutoDebitEnabledAt(
   return existing.autoDebit ? existing.autoDebitEnabledAt : now;
 }
 
+/** A completed goal pauses auto-debit until the withdrawal that reopens it. */
+export function autoDebitEnabledAtAfterGoalReopened(
+  wasCompleted: boolean,
+  nowBelowGoal: boolean,
+  previousEnabledAt: Date | null,
+  reopenedAt: Date,
+): Date | null {
+  return wasCompleted && nowBelowGoal ? reopenedAt : previousEnabledAt;
+}
+
 /**
  * When yield turns effective (disabled -> enabled, or CDI 0 -> >0) interest
  * must start accruing on that day, not at the bank's creation or at the old

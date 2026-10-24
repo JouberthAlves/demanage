@@ -4,6 +4,7 @@ import { Prisma } from '@/generated/prisma/client';
 import { badRequest, conflict, notFound } from '@/http/errors';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
+import { assertOAuthGrantActiveForFinancialWrite } from '@/oauth/connection';
 
 import {
   type FinanceAction,
@@ -15,6 +16,8 @@ import { withFreshInterest } from './piggy-banks';
 export type CommitFinanceOperationInput = {
   userId: string;
   clientId: string;
+  /** Verified grant from the MCP transport; internal service callers omit this. */
+  oauthGrantId?: string;
   idempotencyKey: string;
   intentNonce: string;
   payloadDigest: string;
@@ -125,6 +128,12 @@ export async function commitFinanceOperation(
   validateCommand(input);
   const { userId, clientId, idempotencyKey, intentNonce, payloadDigest, action } = input;
 
+  // Reject already-revoked bearer credentials before piggy maintenance runs.
+  // The authoritative second check runs under the user lock below.
+  if (input.oauthGrantId !== undefined) {
+    await assertOAuthGrantActiveForFinancialWrite(prisma, { userId, clientId, oauthGrantId: input.oauthGrantId });
+  }
+
   // Exactly like the website's piggy operation: close any due automatic debits
   // and CDI interest BEFORE taking the requested money movement's DB lock.
   // Preview remains read-only. Replays skip this unrelated catch-up, while the
@@ -137,6 +146,9 @@ export async function commitFinanceOperation(
   }
 
   return withUserWriteLockTransaction(userId, async (tx) => {
+    if (input.oauthGrantId !== undefined) {
+      await assertOAuthGrantActiveForFinancialWrite(tx, { userId, clientId, oauthGrantId: input.oauthGrantId });
+    }
     const byKey = await tx.financeMcpOperation.findUnique({
       where: { userId_clientId_idempotencyKey: { userId, clientId, idempotencyKey } },
       include: { undo: true },
@@ -196,6 +208,7 @@ export async function getRecentFinanceOperations(userId: string, clientId: strin
 type UndoFinanceInput = {
   userId: string;
   clientId: string;
+  oauthGrantId?: string;
   operationId: string;
   originalKey: string;
   intentNonce: string;
@@ -212,6 +225,9 @@ export async function undoFinanceOperation(input: UndoFinanceInput) {
   )) throw badRequest('Identificadores do desfazer inválidos');
 
   return withUserWriteLockTransaction(userId, async (tx) => {
+    if (input.oauthGrantId !== undefined) {
+      await assertOAuthGrantActiveForFinancialWrite(tx, { userId, clientId, oauthGrantId: input.oauthGrantId });
+    }
     const original = await tx.financeMcpOperation.findFirst({
       where: { id: operationId, userId, clientId, idempotencyKey: originalKey },
       include: { undo: true },

@@ -5,6 +5,7 @@ import { todayInSaoPaulo } from '@/lib/civil-date';
 import {
   currentAutoDebitCycle,
   hasAutoDebitInCycle,
+  isScheduledAutoDebitCycleStillDue,
   listDueAutoDebitCycles,
 } from '@/lib/piggy/auto-debit';
 import { balanceFromTransactions } from '@/lib/piggy/ledger';
@@ -221,4 +222,25 @@ test('catch-up cap still applies when enabled long ago', () => {
     new Date('2020-01-01T12:00:00.000Z'),
   );
   assert.equal(cycles.length, 60);
+});
+
+test('F04: queued debit is invalid after a concurrent day or activation change', () => {
+  const createdAt = new Date('2026-09-01T12:00:00.000Z');
+  const original = {
+    createdAt,
+    autoDebitDay: 5,
+    autoDebitEnabledAt: new Date('2026-09-01T12:00:00.000Z'),
+  };
+  const now = new Date('2026-10-20T16:00:00.000Z');
+  const cycle = listDueAutoDebitCycles(now, createdAt, 5, original.autoDebitEnabledAt)[1];
+  assert.equal(cycle.dueOn.toISOString(), '2026-10-05T12:00:00.000Z');
+  assert.equal(isScheduledAutoDebitCycleStillDue(cycle, now, original), true);
+  assert.equal(isScheduledAutoDebitCycleStillDue(cycle, now, { ...original, autoDebitDay: 25 }), false);
+  assert.equal(isScheduledAutoDebitCycleStillDue(cycle, now, {
+    ...original,
+    autoDebitEnabledAt: new Date('2026-10-10T12:00:00.000Z'),
+  }), false);
+  assert.equal(isScheduledAutoDebitCycleStillDue(cycle, new Date('2026-10-04T23:00:00.000Z'), original), false);
+  assert.equal(isScheduledAutoDebitCycleStillDue(cycle, new Date('2026-10-05T02:59:00.000Z'), original), false);
+  assert.equal(isScheduledAutoDebitCycleStillDue(cycle, new Date('2026-10-05T03:00:00.000Z'), original), true);
 });

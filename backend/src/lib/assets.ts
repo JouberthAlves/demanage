@@ -1,4 +1,8 @@
-import type { Asset } from '@/generated/prisma/client';
+import type {
+  Asset,
+  AssetTransaction,
+  Prisma,
+} from '@/generated/prisma/client';
 import {
   calculateAssetAccounting,
   enrichAccountingWithQuote,
@@ -126,130 +130,156 @@ export async function createAssetTransaction(
 export async function updateAssetTransaction(
   userId: string,
   transactionId: string,
-  input: UpdateAssetTransactionInput,
+  inputOrResolve:
+    | UpdateAssetTransactionInput
+    | ((stored: AssetTransaction) => UpdateAssetTransactionInput),
 ) {
-  return withUserWriteLockTransaction(userId, async (tx) => {
-    const target = await tx.assetTransaction.findFirst({
-      where: { id: transactionId, userId },
-    });
-    if (!target) {
-      throw new AssetValidationError('Movimentação não encontrada');
+  return withUserWriteLockTransaction(userId, (tx) =>
+    updateAssetTransactionUnderUserLock(
+      tx,
+      userId,
+      transactionId,
+      inputOrResolve,
+    ),
+  );
+}
+
+/** Caller must hold the per-user write lock (the public writer above does). */
+export async function updateAssetTransactionUnderUserLock(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  transactionId: string,
+  inputOrResolve:
+    | UpdateAssetTransactionInput
+    | ((stored: AssetTransaction) => UpdateAssetTransactionInput),
+) {
+  const target = await tx.assetTransaction.findFirst({
+    where: { id: transactionId, userId },
+  });
+  if (!target) {
+    throw new AssetValidationError('Movimentação não encontrada');
+  }
+
+  // Resolve partial PATCHes against the row observed *after* acquiring the
+  // user lock. A merged object prepared by the service before this lock
+  // can overwrite another request's disjoint-field update.
+  const input =
+    typeof inputOrResolve === 'function'
+      ? inputOrResolve(target)
+      : inputOrResolve;
+  const parsed = parseAssetTransactionValues(target.asset, input);
+  const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
+  const remaining = await tx.assetTransaction.findMany({
+    where: { userId, asset: target.asset, id: { not: target.id } },
+    orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
+  });
+
+  assertTransactionTimelineValid([
+    ...remaining,
+    {
+      id: target.id,
+      asset: target.asset,
+      type: input.type,
+      quantity,
+      cashAmountBrl: cash,
+      costBasisKnown,
+      date,
+      createdAt: target.createdAt,
+    },
+  ]);
+
+  let expenseId = target.expenseId;
+  let entryId = target.entryId;
+
+  if (input.type === 'BUY') {
+    if (entryId) {
+      await tx.entry.deleteMany({ where: { id: entryId, userId } });
+      entryId = null;
     }
-
-    const parsed = parseAssetTransactionValues(target.asset, input);
-    const { quantity, cash, feePercent, fee, date, costBasisKnown } = parsed;
-    const remaining = await tx.assetTransaction.findMany({
-      where: { userId, asset: target.asset, id: { not: target.id } },
-      orderBy: [{ date: 'asc' }, { createdAt: 'asc' }, { id: 'asc' }],
-    });
-
-    assertTransactionTimelineValid([
-      ...remaining,
-      {
-        id: target.id,
-        asset: target.asset,
-        type: input.type,
-        quantity,
-        cashAmountBrl: cash,
-        costBasisKnown,
-        date,
-        createdAt: target.createdAt,
-      },
-    ]);
-
-    let expenseId = target.expenseId;
-    let entryId = target.entryId;
-
-    if (input.type === 'BUY') {
-      if (entryId) {
-        await tx.entry.deleteMany({ where: { id: entryId, userId } });
-        entryId = null;
-      }
-      if (expenseId) {
-        await tx.expense.update({
-          where: { id: expenseId },
-          data: {
-            name: `Compra ${target.asset}`,
-            amount: money(cash),
-            category: 'investimento',
-            frequency: 'unica',
-            occurredAt: date,
-            systemOrigin: 'asset',
-            notes: input.note || `Transferência interna para ${target.asset}`,
-          },
-        });
-      } else {
-        const expense = await tx.expense.create({
-          data: {
-            userId,
-            name: `Compra ${target.asset}`,
-            amount: money(cash),
-            category: 'investimento',
-            frequency: 'unica',
-            occurredAt: date,
-            systemOrigin: 'asset',
-            notes: input.note || `Transferência interna para ${target.asset}`,
-          },
-        });
-        expenseId = expense.id;
-      }
-    } else if (input.type === 'SELL') {
-      if (expenseId) {
-        await tx.expense.deleteMany({ where: { id: expenseId, userId } });
-        expenseId = null;
-      }
-      if (entryId) {
-        await tx.entry.update({
-          where: { id: entryId },
-          data: {
-            name: `Venda ${target.asset}`,
-            amount: money(cash),
-            type: 'outro',
-            frequency: 'unica',
-            date,
-            systemOrigin: 'asset',
-          },
-        });
-      } else {
-        const entry = await tx.entry.create({
-          data: {
-            userId,
-            name: `Venda ${target.asset}`,
-            amount: money(cash),
-            type: 'outro',
-            frequency: 'unica',
-            date,
-            systemOrigin: 'asset',
-          },
-        });
-        entryId = entry.id;
-      }
+    if (expenseId) {
+      await tx.expense.update({
+        where: { id: expenseId },
+        data: {
+          name: `Compra ${target.asset}`,
+          amount: money(cash),
+          category: 'investimento',
+          frequency: 'unica',
+          occurredAt: date,
+          systemOrigin: 'asset',
+          notes: input.note || `Transferência interna para ${target.asset}`,
+        },
+      });
     } else {
-      if (expenseId) {
-        await tx.expense.deleteMany({ where: { id: expenseId, userId } });
-        expenseId = null;
-      }
-      if (entryId) {
-        await tx.entry.deleteMany({ where: { id: entryId, userId } });
-        entryId = null;
-      }
+      const expense = await tx.expense.create({
+        data: {
+          userId,
+          name: `Compra ${target.asset}`,
+          amount: money(cash),
+          category: 'investimento',
+          frequency: 'unica',
+          occurredAt: date,
+          systemOrigin: 'asset',
+          notes: input.note || `Transferência interna para ${target.asset}`,
+        },
+      });
+      expenseId = expense.id;
     }
+  } else if (input.type === 'SELL') {
+    if (expenseId) {
+      await tx.expense.deleteMany({ where: { id: expenseId, userId } });
+      expenseId = null;
+    }
+    if (entryId) {
+      await tx.entry.update({
+        where: { id: entryId },
+        data: {
+          name: `Venda ${target.asset}`,
+          amount: money(cash),
+          type: 'outro',
+          frequency: 'unica',
+          date,
+          systemOrigin: 'asset',
+        },
+      });
+    } else {
+      const entry = await tx.entry.create({
+        data: {
+          userId,
+          name: `Venda ${target.asset}`,
+          amount: money(cash),
+          type: 'outro',
+          frequency: 'unica',
+          date,
+          systemOrigin: 'asset',
+        },
+      });
+      entryId = entry.id;
+    }
+  } else {
+    if (expenseId) {
+      await tx.expense.deleteMany({ where: { id: expenseId, userId } });
+      expenseId = null;
+    }
+    if (entryId) {
+      await tx.entry.deleteMany({ where: { id: entryId, userId } });
+      entryId = null;
+    }
+  }
 
-    return tx.assetTransaction.update({
-      where: { id: target.id },
-      data: {
-        type: input.type,
-        quantity,
-        cashAmountBrl: cash,
-        feeAmountBrl: fee,
-        feePercent,
-        costBasisKnown,
-        date,
-        note: input.note,
-        expenseId,
-        entryId,
-      },
-    });
+  return tx.assetTransaction.update({
+    where: { id: target.id },
+    data: {
+      type: input.type,
+      quantity,
+      cashAmountBrl: cash,
+      feeAmountBrl: fee,
+      feePercent,
+      costBasisKnown,
+      date,
+      note: input.note,
+      expenseId,
+      entryId,
+    },
   });
 }
 

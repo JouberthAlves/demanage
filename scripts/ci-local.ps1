@@ -189,6 +189,11 @@ try {
   New-Item -ItemType Directory -Force -Path $LogDirectory | Out-Null
   Write-Host "CI logs: $LogDirectory"
 
+  # Provision the pinned PostgreSQL parser before any disposable credentials
+  # are generated or exposed to subprocess environments.
+  & python -m pip install --disable-pip-version-check -r (Join-Path $repoRoot 'ops/cd/requirements-approval.txt')
+  if ($LASTEXITCODE -ne 0) { throw 'Pinned PostgreSQL approval parser installation failed.' }
+
   # A brand-new PostgreSQL 18 container owns both CI databases. Never operate
   # on an existing container, and never drop an arbitrary local database.
   $pgPassword = New-CiRandomPassword

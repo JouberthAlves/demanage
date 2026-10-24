@@ -16,12 +16,16 @@ Um merge na `master` **não** aprova uma versão para produção e **não** alte
    com o SHA completo, e aprova o job do ambiente protegido **production**.
    O workflow verifica CI **e CodeQL** para o SHA exato, imagens disponíveis e
    bloqueia alterações no schema/migrations/entrypoint/Compose-base.
-5. Após aprovação, o GitHub grava **um único documento**
-   `production.json` na branch `production`, com as referências imutáveis
-   **por digest** de ambas as imagens. Nenhuma credencial SSH fica no GitHub.
-6. O Debian faz uma consulta **de saída** à branch `production` a cada
-   aproximadamente 10 minutos. O agente confere o SHA anterior, a identidade
-   do Compose e do banco, cria **backup custom do PostgreSQL**, baixa imagens
+5. Após aprovação, o workflow produz um artefato imutável cujo nome vincula
+   o ID/tentativa da execução e SHA256 dos bytes de `production.json`, e só então
+   publica o documento na branch `production`. As imagens são referenciadas
+   **por digest**. Nenhuma credencial SSH fica no GitHub.
+6. O Debian consulta **de saída** a branch `production` a cada
+   aproximadamente 10 minutos. O agente compara o conteúdo ao Git blob do
+   commit remoto, exige execução concluída com sucesso do workflow de promoção,
+   aprovação explícita do reviewer do ambiente e o artefato exato antes de
+   conferir o SHA anterior, a identidade do Compose e do banco, criar
+   **backup custom do PostgreSQL** e baixar imagens
    por digest e recria **somente backend e frontend** com `--no-deps --no-build`.
 7. Caso as imagens novas não fiquem saudáveis, tenta restaurar as imagens anteriores
    do backend/frontend. PostgreSQL, seu volume e Cloudflare Tunnel não são alvos.
@@ -30,6 +34,17 @@ Um merge na `master` **não** aprova uma versão para produção e **não** alte
 entrada. O serviço de polling NÃO roda Git ou código arbitrário das imagens, além
 do processo normal do app publicado, e NÃO executa `down`, `down -v`,
 `docker volume rm`, `prune` ou `git reset --hard`.
+
+**Limites da prova C01:** `approved_by` é apenas um campo informativo; não
+autoriza um deploy isoladamente. A branch `production` continua sem proteção
+própria, portanto um escritor ainda pode alterá-la ou causar negação de serviço,
+mas conteúdo novo sem artefato da execução aprovada é rejeitado. Há exceção
+fixa somente para o commit/blob histórico de `2026-10-19`, anterior ao formato
+v2. Artefatos expiram após até 90 dias; uma promoção não consumida até então
+precisa de nova execução aprovada. Falhas, limite de requisições ou mudanças
+na API pública do GitHub bloqueiam o agente. A política de branch com escritor
+exclusivo continua recomendada como segunda barreira. O atestado de uma
+promoção v2 ainda precisa de validação em execução hospedada após integrar o PR.
 
 **Limite importante:** o entrypoint normal do backend executa `prisma migrate
 deploy`. Por isso qualquer mudança nas migrations, schema, entrypoint ou Compose

@@ -50,11 +50,13 @@ export function createMcpHttpRouter({
     const userId = authInfo?.extra?.userId;
     const clientId = authInfo?.clientId;
     const scopes = authInfo?.scopes;
+    const oauthGrantId = authInfo?.extra?.oauthGrantId;
     if (typeof userId !== 'string' || typeof clientId !== 'string' || !Array.isArray(scopes)) {
       throw new Error('Identidade MCP não validada');
     }
     const server = new McpServer({ name: 'deManage Finance', version: '1.0.0' });
-    registerFinanceTools(server, { userId, clientId, scopes: new Set(scopes) });
+    registerFinanceTools(server, { userId, clientId, scopes: new Set(scopes),
+      oauthGrantId: typeof oauthGrantId === 'string' ? oauthGrantId : undefined });
     return server;
   }, { responseMode: 'json' });
   const nodeHandler = toNodeHandler(handler);
@@ -91,7 +93,7 @@ export function createMcpHttpRouter({
         token: (req.headers.authorization ?? '').slice(7),
         clientId: identity.clientId,
         scopes: [...identity.scopes],
-        extra: { userId: identity.userId },
+        extra: { userId: identity.userId, oauthGrantId: identity.oauthGrantId },
       },
     });
     Promise.resolve(nodeHandler(req, res)).catch(next);

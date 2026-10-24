@@ -2,16 +2,22 @@ import { decimal } from '@/lib/decimal';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
-import { type AutoDebitCycle,hasAutoDebitInCycle, listDueAutoDebitCycles } from './auto-debit';
+import {
+  type AutoDebitCycle,
+  hasAutoDebitInCycle,
+  isScheduledAutoDebitCycleStillDue,
+  listDueAutoDebitCycles,
+} from './auto-debit';
 import { balanceDecimalFromTransactions } from './ledger';
 import { depositToPiggyBankInTransaction } from './transactions';
 
 type CycleOutcome = 'created' | 'skipped' | 'stop';
 
-async function processCycle(
+export async function processPiggyAutoDebitCycle(
   userId: string,
   bankId: string,
   cycle: AutoDebitCycle,
+  now: Date,
 ): Promise<CycleOutcome> {
   return withUserWriteLockTransaction(userId, async (tx) => {
     const bank = await tx.piggyBank.findFirst({
@@ -25,6 +31,7 @@ async function processCycle(
       include: { transactions: true },
     });
     if (!bank || bank.monthlyGoal.lte(0)) return 'stop';
+    if (!isScheduledAutoDebitCycleStillDue(cycle, now, bank)) return 'skipped';
     if (hasAutoDebitInCycle(bank.transactions, cycle)) return 'skipped';
 
     let amount = bank.monthlyGoal;
@@ -74,7 +81,7 @@ export async function runPiggyAutoDebits(userId: string, now = new Date()) {
         bank.autoDebitEnabledAt,
       );
       for (const cycle of cycles) {
-        const outcome = await processCycle(userId, bank.id, cycle);
+        const outcome = await processPiggyAutoDebitCycle(userId, bank.id, cycle, now);
         if (outcome === 'created') createdCount += 1;
         if (outcome === 'stop') break;
       }

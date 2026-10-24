@@ -80,6 +80,12 @@ class LocalReleaseApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "acknowledge"):
             approval.promote(arguments(publish=True))
 
+    def test_local_publication_cannot_bypass_environment_witness(self):
+        with mock.patch.object(approval, "validate_ci_evidence") as evidence:
+            with self.assertRaisesRegex(RuntimeError, "environment-approved"):
+                approval.promote(arguments(publish=True, acknowledge_no_codeql=True))
+            evidence.assert_not_called()
+
     def test_refuse_other_github_actor(self):
         mocks = self.setup_success()
         mocks[1].return_value = {"login": "another-user"}
@@ -142,10 +148,10 @@ class LocalReleaseApprovalTests(unittest.TestCase):
             TARGET + " refs/heads/master", "", "",
             "backend/prisma/migrations/20261017120000_danger/migration.sql",
             "A\tbackend/prisma/migrations/20261017120000_danger/migration.sql",
-            "DROP TABLE \"User\";",
         ]):
-            with mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
-                with self.assertRaisesRegex(RuntimeError, "destructive migration"):
+            with mock.patch.object(approval, "read_git_sql", return_value='DROP TABLE "User";'), \
+                    mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                with self.assertRaisesRegex(RuntimeError, "manual audited runbook"):
                     approval.verify_git(Path("test-repo"), PREVIOUS, TARGET)
 
     def test_git_allows_additive_new_migration(self):
@@ -153,10 +159,76 @@ class LocalReleaseApprovalTests(unittest.TestCase):
             TARGET + " refs/heads/master", "", "",
             "backend/prisma/migrations/20261017120000_add/migration.sql",
             "A\tbackend/prisma/migrations/20261017120000_add/migration.sql",
-            'CREATE TABLE "NewTable" ("id" TEXT NOT NULL);',
         ]):
-            with mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
+            with mock.patch.object(approval, "read_git_sql", return_value='CREATE TABLE "NewTable" ("id" TEXT NOT NULL);'), \
+                    mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
                 self.assertTrue(approval.verify_git(Path("test-repo"), PREVIOUS, TARGET))
+
+    def test_git_reads_exact_sql_bytes_from_committed_blob(self):
+        root = Path(__file__).resolve().parents[3]
+        for folder in (
+            "20261023210000_piggy_correction_origin",
+            "20261023210100_oauth_token_connection_status",
+            "20261023211000_c04_owner_composite_fks",
+            "20261023213000_expense_obligation_versions",
+        ):
+            path = f"backend/prisma/migrations/{folder}/migration.sql"
+            with self.subTest(path=path):
+                self.assertEqual(approval.read_git_sql(root, "HEAD", path), (root / path).read_bytes().decode("utf-8"))
+
+    def test_git_accepts_all_four_exactly_reviewed_pr_migrations(self):
+        root = Path(__file__).resolve().parents[3]
+        files = [
+            f"backend/prisma/migrations/{folder}/migration.sql"
+            for folder in (
+                "20261023210000_piggy_correction_origin",
+                "20261023210100_oauth_token_connection_status",
+                "20261023211000_c04_owner_composite_fks",
+                "20261023213000_expense_obligation_versions",
+            )
+        ]
+        contents = [(root / path).read_text(encoding="utf-8") for path in files]
+        with mock.patch.object(approval, "call", side_effect=[
+            TARGET + " refs/heads/master", "", "",
+            "\n".join(["backend/prisma/schema.prisma", *files]),
+            "\n".join("A\t" + path for path in files),
+        ]):
+            with mock.patch.object(approval, "read_git_sql", side_effect=contents), \
+                    mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                self.assertTrue(approval.verify_git(Path("test-repo"), PREVIOUS, TARGET))
+
+    def test_git_refuses_c04_migration_before_safe_fk_revision(self):
+        path = "backend/prisma/migrations/20261023211000_c04_owner_composite_fks/migration.sql"
+        sql = (Path(__file__).resolve().parent / "fixtures/20261023211000_c04_owner_composite_fks.sql").read_text(encoding="utf-8")
+        with mock.patch.object(approval, "call", side_effect=[
+            TARGET + " refs/heads/master", "", "", path, "A\t" + path,
+        ]):
+            with mock.patch.object(approval, "read_git_sql", return_value=sql), \
+                    mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                with self.assertRaisesRegex(RuntimeError, "manual audited runbook"):
+                    approval.verify_git(Path("test-repo"), PREVIOUS, TARGET)
+
+    def test_git_rejects_modified_bytes_at_reviewed_c04_path(self):
+        root = Path(__file__).resolve().parents[3]
+        path = "backend/prisma/migrations/20261023211000_c04_owner_composite_fks/migration.sql"
+        altered = (root / path).read_text(encoding="utf-8") + "\n"
+        with mock.patch.object(approval, "call", side_effect=[
+            TARGET + " refs/heads/master", "", "", path, "A\t" + path,
+        ]):
+            with mock.patch.object(approval, "read_git_sql", return_value=altered), \
+                    mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                with self.assertRaisesRegex(RuntimeError, "manual audited runbook"):
+                    approval.verify_git(Path("test-repo"), PREVIOUS, TARGET)
+
+    def test_git_blocks_non_additive_column_type_change_that_old_regex_allowed(self):
+        file = "backend/prisma/migrations/20261023220000_sneaky/migration.sql"
+        with mock.patch.object(approval, "call", side_effect=[
+            TARGET + " refs/heads/master", "", "", file, "A\t" + file,
+        ]):
+            with mock.patch.object(approval, "read_git_sql", return_value='ALTER TABLE "Entry" ALTER COLUMN "amount" TYPE TEXT;'), \
+                    mock.patch.object(approval.subprocess, "run", return_value=mock.Mock(returncode=0)):
+                with self.assertRaisesRegex(RuntimeError, "manual audited runbook"):
+                    approval.verify_git(Path("test-repo"), PREVIOUS, TARGET)
 
 
 if __name__ == "__main__":

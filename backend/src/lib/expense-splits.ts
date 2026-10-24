@@ -1,16 +1,19 @@
-import type {
-  Card,
-  Expense,
-  ExpensePayment,
-  ExpenseSplit,
+import {
+  type Card,
+  type Expense,
+  type ExpensePayment,
+  type ExpenseSplit,
   Prisma,
 } from '@/generated/prisma/client';
 import {
+  type BillableExpense,
+  chargeAmountDecimal,
   chargesTotalDecimal,
   type CycleWindow,
   lateOneOffsDecimal,
 } from '@/lib/billing/charges';
 import { currentCycleWindow } from '@/lib/billing/cycle-window';
+import { parseObligationVersions } from '@/lib/billing/obligation-versions';
 import { dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 import {
@@ -89,6 +92,7 @@ export async function getCommittedByCard(args: {
   userId: string;
   excludeExpenseId?: string;
   tx?: Prisma.TransactionClient;
+  asOf?: Date;
 }) {
   const db = args.tx ?? prisma;
   const [cards, expenses] = await Promise.all([
@@ -102,19 +106,28 @@ export async function getCommittedByCard(args: {
           ? { id: { not: args.excludeExpenseId } }
           : {}),
       },
-      include: { splits: true },
+      include: {
+        splits: true,
+        obligationVersions: { orderBy: { sequence: 'asc' } },
+      },
     }),
   ]);
-  const todayKey = todayKeyInSaoPaulo();
+  // An edit can move the live split while an older month's obligation is
+  // still in the open card cycle. Use the same persisted versions as billing.
+  const billable = expenses.map((expense) => ({
+    ...expense,
+    obligationVersions: parseObligationVersions(expense.obligationVersions),
+  }));
+  const todayKey = todayKeyInSaoPaulo(args.asOf);
   const map = new Map<string, number>();
   for (const card of cards) {
     const window = currentCycleWindow(card, todayKey);
     const periodStartKey = window.periodStartKey;
-    const cycleAmount = chargesTotalDecimal(expenses, card.id, window);
+    const cycleAmount = chargesTotalDecimal(billable, card.id, window);
     const lateAdjustment =
       card.lastInvoicedOn && card.lastBillingProcessedAt
         ? lateOneOffsDecimal(
-            expenses,
+            billable,
             card.id,
             dayKeyToDate(periodStartKey),
             card.lastBillingProcessedAt,
@@ -126,6 +139,34 @@ export async function getCommittedByCard(args: {
     );
   }
   return map;
+}
+
+/** The edited expense is absent from otherCommittedByCard. Its projected
+ * versions include every old open-cycle charge and the new terms once.
+ * The full-cycle minimum for new splits is checked separately. */
+export function assertProspectiveVersionedCardLimits(args: {
+  cards: Card[];
+  otherCommittedByCard: Map<string, number>;
+  prospective: BillableExpense;
+  asOf: Date;
+}) {
+  const todayKey = todayKeyInSaoPaulo(args.asOf);
+  for (const card of args.cards) {
+    if (card.limit == null) continue;
+    const window = currentCycleWindow(card, todayKey);
+    const projected = chargeAmountDecimal(args.prospective, card.id, window);
+    // An unrelated overdrawn card must not block a cash-only or other-card
+    // schedule edit. Positive projected charges still require full headroom.
+    if (projected.lte(0)) continue;
+    const available = new Prisma.Decimal(card.limit).minus(
+      args.otherCommittedByCard.get(card.id) ?? 0,
+    );
+    if (projected.gt(available)) {
+      throw new ExpenseSplitError(
+        `Limite insuficiente no cartão ${card.name} (disponível R$ ${available.toFixed(2).replace('.', ',')})`,
+      );
+    }
+  }
 }
 
 export function serializeExpenseSplits(
@@ -201,6 +242,7 @@ export async function resolveAndValidateSplits(args: {
   excludeExpenseId?: string;
   tx?: Prisma.TransactionClient;
   validateLimits?: boolean;
+  asOf?: Date;
 }): Promise<ResolvedSplit[]> {
   const inputs = normalizeSplitInputs({
     splits: args.splits,
@@ -233,9 +275,10 @@ export async function resolveAndValidateSplits(args: {
       userId: args.userId,
       excludeExpenseId: args.excludeExpenseId,
       tx: args.tx,
+      asOf: args.asOf,
     });
 
-    const todayKey = todayKeyInSaoPaulo();
+    const todayKey = todayKeyInSaoPaulo(args.asOf);
     const windows = new Map<string, CycleWindow>(
       [...cards.values()].map((card) => [
         card.id,
