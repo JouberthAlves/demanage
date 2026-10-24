@@ -1,3 +1,4 @@
+import { dayKeyOf } from '@/lib/dates';
 import type { StatusNote } from '@/lib/expense-pay-state';
 import {
   isIncomeAutoReceivedThisMonth,
@@ -5,6 +6,7 @@ import {
   isSalaryManuallyReceived,
   isSalaryWaitingForConfirmation,
 } from '@/lib/income-schedule';
+import { formatDayKeyBr } from '@/lib/schedule-labels';
 import type { EntryReceiptOccurrence, Income } from '@/types/finance';
 
 /**
@@ -53,8 +55,16 @@ export function incomeStatus(income: Income, now: Date): IncomeStatus {
       note = waitingForDay;
     }
   } else if (oneOff) {
+    const receivedDay = oneOffReceipt
+      ? formatDayKeyBr(dayKeyOf(oneOffReceipt.receivedAt))
+      : null;
     note = oneOffReceipt
-      ? { tone: 'good', text: 'Recebimento confirmado' }
+      ? {
+          tone: 'good',
+          text: receivedDay
+            ? `Recebimento confirmado em ${receivedDay}`
+            : 'Recebimento confirmado',
+        }
       : { tone: 'warn', text: 'Aguardando confirmação' };
   } else {
     note = isIncomeReceivedThisMonth(income, now) ? null : waitingForDay;

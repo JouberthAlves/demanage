@@ -23,7 +23,10 @@ test('salary received automatically after its day', () => {
   const status = incomeStatus(income(), now);
   assert.equal(status.kind, 'salary');
   assert.equal(status.salaryAutomatic, true);
-  assert.deepEqual(status.note, { tone: 'good', text: 'Recebido automaticamente' });
+  assert.deepEqual(status.note, {
+    tone: 'good',
+    text: 'Recebido automaticamente',
+  });
   assert.equal(status.editable, false);
   assert.equal(salaryWaitLabel(status), 'Ainda não recebi');
 });
@@ -40,7 +43,10 @@ test('salary waiting for manual confirmation', () => {
 test('salary manually confirmed', () => {
   const status = incomeStatus(income({ receivedForMonth: '2026-10' }), now);
   assert.equal(status.salaryManual, true);
-  assert.deepEqual(status.note, { tone: 'good', text: 'Recebimento confirmado' });
+  assert.deepEqual(status.note, {
+    tone: 'good',
+    text: 'Recebimento confirmado',
+  });
 });
 
 test('salary before its day waits for the date', () => {
@@ -53,7 +59,10 @@ test('salary before its day waits for the date', () => {
 test('hold and receipts are compared against the São Paulo month', () => {
   // Midnight UTC on Nov 1 is still Oct 31 in São Paulo.
   const lateOctober = new Date('2026-11-01T00:30:00.000Z');
-  const status = incomeStatus(income({ receivedForMonth: '2026-10' }), lateOctober);
+  const status = incomeStatus(
+    income({ receivedForMonth: '2026-10' }),
+    lateOctober,
+  );
   assert.equal(status.salaryManual, true);
 });
 
@@ -64,9 +73,16 @@ test('one-off income depends on its receipt', () => {
   );
   assert.equal(pending.kind, 'one_off');
   assert.equal(pending.editable, true);
-  assert.deepEqual(pending.note, { tone: 'warn', text: 'Aguardando confirmação' });
+  assert.deepEqual(pending.note, {
+    tone: 'warn',
+    text: 'Aguardando confirmação',
+  });
 
-  const receipt = { month: '2026-10', amount: 3000, receivedAt: '2026-10-02T12:00:00Z' };
+  const receipt = {
+    month: '2026-10',
+    amount: 3000,
+    receivedAt: '2026-10-02T12:00:00Z',
+  };
   const done = incomeStatus(
     income({
       type: 'freelance',
@@ -77,7 +93,32 @@ test('one-off income depends on its receipt', () => {
     now,
   );
   assert.deepEqual(done.oneOffReceipt, receipt);
-  assert.deepEqual(done.note, { tone: 'good', text: 'Recebimento confirmado' });
+  assert.deepEqual(done.note, {
+    tone: 'good',
+    text: 'Recebimento confirmado em 02/10/2026',
+  });
+});
+
+test('one-off receipt date follows São Paulo even near UTC midnight', () => {
+  const status = incomeStatus(
+    income({
+      frequency: 'unica',
+      type: 'outro',
+      date: '2026-11-01',
+      receipts: [
+        {
+          month: '2026-10',
+          amount: 234.87,
+          receivedAt: '2026-11-01T00:30:00.000Z',
+        },
+      ],
+    }),
+    now,
+  );
+  assert.deepEqual(status.note, {
+    tone: 'good',
+    text: 'Recebimento confirmado em 31/10/2026',
+  });
 });
 
 test('recurring non-salary income shows a note only while waiting', () => {
@@ -86,7 +127,10 @@ test('recurring non-salary income shows a note only while waiting', () => {
   assert.equal(freelance(5).kind, 'recurring');
   assert.equal(freelance(5).note, null);
   assert.equal(freelance(5).editable, true);
-  assert.deepEqual(freelance(20).note, { tone: 'muted', text: 'Aguardando dia 20' });
+  assert.deepEqual(freelance(20).note, {
+    tone: 'muted',
+    text: 'Aguardando dia 20',
+  });
 });
 
 test('other salary cadences are managed in the profile', () => {

@@ -29,12 +29,15 @@ router.post('/', async (req, res) => {
 });
 
 router.post('/:id/receipt-state', async (req, res) => {
-  const { month, state } = parseReceiptStateBody(bodyOf(req));
+  const { month, state, receivedOn, expectedUpdatedAt } = parseReceiptStateBody(
+    bodyOf(req),
+  );
   const entry = await setReceiptState(
     requireUserId(req),
     paramOf(req),
     month,
     state,
+    { receivedOn, expectedUpdatedAt },
   );
   res.json(serializeEntry(entry));
 });

@@ -17,6 +17,7 @@ export type ApiEntry = {
   receivedForMonth?: string | null;
   receivedAt?: string | null;
   createdAt?: string;
+  updatedAt?: string;
   customTagId?: string | null;
   customTag?: {
     id: string;
@@ -24,6 +25,7 @@ export type ApiEntry = {
     color: string;
   } | null;
   receipts?: Array<{
+    id?: string;
     month: string;
     amount: string | number;
     receivedAt: string;
@@ -67,9 +69,11 @@ export function mapEntryToIncome(entry: ApiEntry): Income {
     receivedForMonth: entry.receivedForMonth ?? undefined,
     receivedAt: entry.receivedAt ?? undefined,
     createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
     customTagId: entry.customTagId ?? undefined,
     customTag: entry.customTag ?? undefined,
     receipts: entry.receipts?.map((receipt) => ({
+      id: receipt.id,
       month: receipt.month,
       amount: Number(receipt.amount),
       receivedAt: receipt.receivedAt,
@@ -96,10 +100,12 @@ export async function setEntryReceiptState(
   id: string,
   month: string,
   state: EntryReceiptState,
+  options: { receivedOn?: string; expectedUpdatedAt?: string } = {},
 ) {
   const { data } = await api.post<ApiEntry>(`/entries/${id}/receipt-state`, {
     month,
     state,
+    ...options,
   });
   return mapEntryToIncome(data);
 }
