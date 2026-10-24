@@ -1,11 +1,8 @@
-import type { Expense, ExpenseSplit } from '@/generated/prisma/client';
 import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
-import { parseObligationVersions } from './obligation-versions';
+import { loadBillableExpensesForCards } from './obligation-versions';
 import { planCardBilling } from './plan';
-
-type ExpenseForBilling = Expense & { splits?: ExpenseSplit[] };
 
 /**
  * Generates every pending card invoice for the user.
@@ -25,16 +22,7 @@ export async function processUserCardBilling(userId: string, now?: Date) {
       where: { userId, archivedAt: null },
     });
 
-    // Source every obligation owned by this account: an earlier version can
-    // reference a card that no longer appears in the current expense splits.
-    const expenses = await tx.expense.findMany({
-      where: { userId, isInvoice: false },
-      include: { splits: true, obligationVersions: { orderBy: { sequence: 'asc' } } },
-    });
-    const billable: ExpenseForBilling[] = expenses.map((expense) => ({
-      ...expense,
-      obligationVersions: parseObligationVersions(expense.obligationVersions),
-    }));
+    const billable = await loadBillableExpensesForCards(tx, userId);
 
     let createdCount = 0;
     const invoiceRows: Array<{

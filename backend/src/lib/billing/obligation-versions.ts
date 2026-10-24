@@ -58,6 +58,18 @@ export function parseObligationVersions(rows: ExpenseObligationVersion[]): Billa
   });
 }
 
+/** Historical card owners are not necessarily present in current card/split relations. */
+export async function loadBillableExpensesForCards(tx: Prisma.TransactionClient, userId: string) {
+  const expenses = await tx.expense.findMany({
+    where: { userId, isInvoice: false },
+    include: { splits: true, obligationVersions: { orderBy: { sequence: 'asc' } } },
+  });
+  return expenses.map((expense) => ({
+    ...expense,
+    obligationVersions: parseObligationVersions(expense.obligationVersions),
+  }));
+}
+
 /** Legacy records predate versioning. Anchor the original snapshot to the
  * schedule's first month, so a card cycle straddling the edit month still
  * bills old occurrences; never infer or reopen an already-closed invoice. */
