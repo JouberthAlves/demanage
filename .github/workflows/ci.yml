@@ -133,6 +133,9 @@ jobs:
       - name: Real PowerShell pg_dump and pg_restore regression
         shell: pwsh
         run: ./scripts/tests/backup-db.e2e.ps1
+      - name: PowerShell backup retention and failure regression
+        shell: pwsh
+        run: ./scripts/tests/backup-db.tests.ps1
       - name: Remove only this job's disposable PostgreSQL
         if: always()
         shell: bash
