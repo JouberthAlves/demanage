@@ -1,6 +1,8 @@
 """Fail-closed tests for the owner-owned local release approval channel."""
 
 import argparse
+import base64
+import hashlib
 import importlib.util
 import json
 import sys
@@ -14,6 +16,14 @@ MODULE = Path(__file__).resolve().parents[1] / "local_release_approval.py"
 spec = importlib.util.spec_from_file_location("local_release_approval", MODULE)
 approval = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(approval)
+from issue87_release_gate import (
+    PREVIOUS_COMMIT as ISSUE87_PREVIOUS,
+    TARGET_COMMIT as ISSUE87_TARGET,
+    BACKEND_IMAGE as ISSUE87_BACKEND,
+    FRONTEND_IMAGE as ISSUE87_FRONTEND,
+    BACKUP_SHA256 as ISSUE87_BACKUP,
+    REHEARSAL_SHA256 as ISSUE87_REHEARSAL,
+)
 
 TARGET = "a" * 40
 PREVIOUS = "b" * 40
@@ -29,6 +39,7 @@ def arguments(**updates):
         "source_commit": TARGET, "confirm_sha": TARGET,
         "log_directory": Path("imaginary"),
         "migration_proof": PROOF, "confirm_migration_backup_sha256": CHECKSUM,
+        "confirm_migration_rehearsal_sha256": None,
         "publish": False, "acknowledge_no_codeql": False,
     }
     data.update(updates)
@@ -55,6 +66,41 @@ def production_manifest():
 
 
 class LocalReleaseApprovalTests(unittest.TestCase):
+    def test_live_production_manifest_decodes_base64_content(self):
+        manifest = production_manifest()
+        encoded = base64.b64encode(json.dumps(manifest).encode()).decode()
+        with mock.patch.object(approval, "json_call", return_value={"content": encoded, "sha": "blob"}):
+            self.assertEqual(approval.read_live_manifest(), (manifest, "blob"))
+
+    def test_issue87_real_git_sensitive_diff_is_reviewed_as_one_shot(self):
+        repo = Path(__file__).resolve().parents[3]
+        with mock.patch.object(approval, "call", side_effect=[
+            ISSUE87_TARGET + " refs/heads/master", "", "", "docker-compose.prod.yml",
+        ]):
+            self.assertTrue(approval.verify_git(repo, ISSUE87_PREVIOUS, ISSUE87_TARGET))
+
+    def test_issue87_dry_run_requires_exact_explicit_rehearsal_acknowledgment(self):
+        mocks = self.setup_success()
+        mocks[2].return_value = ({**production_manifest(), "source_commit": ISSUE87_PREVIOUS}, "blob")
+        mocks[3].return_value = json.dumps({"source_commit": ISSUE87_PREVIOUS})
+        mocks[5].side_effect = lambda target, service: (
+            ISSUE87_BACKEND if service == "backend" else ISSUE87_FRONTEND
+        )
+        mocks[6].return_value = ({"backup_sha256": ISSUE87_BACKUP}, ISSUE87_REHEARSAL)
+        request = arguments(
+            source_commit=ISSUE87_TARGET, confirm_sha=ISSUE87_TARGET,
+            confirm_migration_backup_sha256=ISSUE87_BACKUP,
+        )
+        with self.assertRaisesRegex(RuntimeError, "rehearsal SHA-256"):
+            approval.promote(request)
+        request.confirm_migration_rehearsal_sha256 = "f" * 64
+        with self.assertRaisesRegex(RuntimeError, "rehearsal SHA-256"):
+            approval.promote(request)
+        request.confirm_migration_rehearsal_sha256 = ISSUE87_REHEARSAL
+        with mock.patch.object(approval, "verify_one_time_issue87_release", return_value=True) as strict:
+            self.assertEqual(approval.promote(request), "dry-run")
+        strict.assert_called_once()
+
     def setup_success(self):
         patches = [
             mock.patch.object(approval, "validate_ci_evidence", return_value="f" * 64),
@@ -114,10 +160,25 @@ class LocalReleaseApprovalTests(unittest.TestCase):
 
     def test_rehearsal_checks_snapshot_hash(self):
         data = migration_evidence()
-        with mock.patch.object(approval, "call", side_effect=[json.dumps(data), CHECKSUM + "  " + BACKUP]):
+        with mock.patch.object(approval, "binary_call", return_value=json.dumps(data).encode()), \
+                mock.patch.object(approval, "call", return_value=CHECKSUM + "  " + BACKUP):
             loaded, checksum = approval.read_migration_proof(PROOF, PREVIOUS, TARGET, BACKEND)
         self.assertEqual(loaded, data)
         self.assertEqual(len(checksum), 64)
+
+    def test_rehearsal_sha256_includes_exact_terminal_newline_from_ssh(self):
+        data = migration_evidence()
+        raw_bytes = (json.dumps(data) + "\n").encode("utf-8")
+
+        def fake_ssh_run(command, **options):
+            if command[-2:] == ("cat", PROOF) or command[-2:] == ["cat", PROOF]:
+                return mock.Mock(stdout=raw_bytes.decode("utf-8") if options.get("text") else raw_bytes)
+            return mock.Mock(stdout=CHECKSUM + "  " + BACKUP)
+
+        with mock.patch.object(approval.subprocess, "run", side_effect=fake_ssh_run):
+            loaded, actual_sha = approval.read_migration_proof(PROOF, PREVIOUS, TARGET, BACKEND)
+        self.assertEqual(loaded, data)
+        self.assertEqual(actual_sha, hashlib.sha256(raw_bytes).hexdigest())
 
     def test_rehearsal_uses_posix_path_even_on_windows(self):
         self.assertEqual(
@@ -127,19 +188,20 @@ class LocalReleaseApprovalTests(unittest.TestCase):
 
     def test_rehearsal_refuses_changed_dump(self):
         data = migration_evidence()
-        with mock.patch.object(approval, "call", side_effect=[json.dumps(data), "0" * 64 + "  " + BACKUP]):
+        with mock.patch.object(approval, "binary_call", return_value=json.dumps(data).encode()), \
+                mock.patch.object(approval, "call", return_value="0" * 64 + "  " + BACKUP):
             with self.assertRaisesRegex(RuntimeError, "changed since review"):
                 approval.read_migration_proof(PROOF, PREVIOUS, TARGET, BACKEND)
 
     def test_rehearsal_refuses_insufficient_schema_count(self):
         data = migration_evidence(migration_count_after=26)
-        with mock.patch.object(approval, "call", return_value=json.dumps(data)):
+        with mock.patch.object(approval, "binary_call", return_value=json.dumps(data).encode()):
             with self.assertRaisesRegex(RuntimeError, "not applied"):
                 approval.read_migration_proof(PROOF, PREVIOUS, TARGET, BACKEND)
 
     def test_rehearsal_refuses_mismatch(self):
         data = migration_evidence(source_commit="7" * 40)
-        with mock.patch.object(approval, "call", return_value=json.dumps(data)):
+        with mock.patch.object(approval, "binary_call", return_value=json.dumps(data).encode()):
             with self.assertRaisesRegex(RuntimeError, "not bound"):
                 approval.read_migration_proof(PROOF, PREVIOUS, TARGET, BACKEND)
 

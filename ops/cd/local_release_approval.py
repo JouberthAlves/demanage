@@ -8,6 +8,7 @@ No private credentials are included in the published manifest.
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import re
@@ -19,6 +20,14 @@ from pathlib import Path, PurePosixPath
 from demanage_cd.local_ci import SHA, validate_ci_evidence
 from demanage_cd.manifest import validate_release
 from demanage_cd.migration_gate import validate_additive_sql
+from issue87_release_gate import (
+    PREVIOUS_COMMIT as ISSUE87_PREVIOUS,
+    TARGET_COMMIT as ISSUE87_TARGET,
+    verify_exact_sensitive_diff,
+    verify_one_time_issue87_release,
+    EXPECTED_SENSITIVE_DIFF,
+    EXPECTED_BLOBS,
+)
 
 REPOSITORY = "bielxdh3/demanage"
 APPROVER = "bielxdh3"
@@ -37,6 +46,11 @@ SENSITIVE = (
 def call(*args: str) -> str:
     completed = subprocess.run(args, check=True, text=True, capture_output=True, timeout=180)
     return completed.stdout.strip()
+
+
+def binary_call(*args: str) -> bytes:
+    """Preserve the private proof exactly; checksums must include final newline."""
+    return subprocess.run(args, check=True, capture_output=True, timeout=180).stdout
 
 
 def read_git_sql(repo: Path, target: str, path: str) -> str:
@@ -74,7 +88,7 @@ def read_live_manifest() -> tuple[dict, str]:
 def read_migration_proof(path: str, previous: str, target: str, backend: str) -> tuple[dict, str]:
     if not MIGRATION_PROOF.fullmatch(path):
         raise RuntimeError("Invalid server rehearsal proof location")
-    raw = call("ssh", "-o", "BatchMode=yes", "servidor", "cat", path)
+    raw = binary_call("ssh", "-o", "BatchMode=yes", "servidor", "cat", path)
     evidence = json.loads(raw)
     required = {
         "version", "source_commit", "previous_commit", "backend_ref",
@@ -103,7 +117,7 @@ def read_migration_proof(path: str, previous: str, target: str, backend: str) ->
     live_checksum = call("ssh", "-o", "BatchMode=yes", "servidor", "sha256sum", backup).split()[0]
     if live_checksum != checksum:
         raise RuntimeError("Migration backup changed since review")
-    return evidence, hashlib.sha256(raw.encode("utf-8")).hexdigest()
+    return evidence, hashlib.sha256(raw).hexdigest()
 
 
 def verify_image(target: str, service: str) -> str:
@@ -135,6 +149,11 @@ def verify_git(repo: Path, previous: str, target: str) -> bool:
     changed = call("git", "-C", str(repo), "diff", "--name-only", previous, target, "--", *SENSITIVE)
     if not changed:
         return False
+    if (previous, target) == (ISSUE87_PREVIOUS, ISSUE87_TARGET):
+        # This is the only release whose conservative Compose change may pass.
+        # Compare the entire sensitive diff to fixed reviewed Git blobs.
+        verify_exact_sensitive_diff(repo, previous, target, EXPECTED_SENSITIVE_DIFF, EXPECTED_BLOBS)
+        return True
     # Entry point/compose mutations need a different runbook. Only additive
     # migrations and schema changes can be attested through this path.
     names = changed.splitlines()
@@ -190,6 +209,14 @@ def promote(args: argparse.Namespace) -> str:
         )
         if args.confirm_migration_backup_sha256 != migration["backup_sha256"]:
             raise RuntimeError("Migration backup was not explicitly acknowledged")
+        if (previous, args.source_commit) == (ISSUE87_PREVIOUS, ISSUE87_TARGET):
+            if args.confirm_migration_rehearsal_sha256 != rehearsal_sha:
+                raise RuntimeError("Issue87 rehearsal SHA-256 must be explicitly acknowledged")
+            verify_one_time_issue87_release(
+                repo=repo, previous=previous, target=args.source_commit,
+                dump_sha256=migration["backup_sha256"], rehearsal_sha256=rehearsal_sha,
+                backend=backend, frontend=frontend,
+            )
     elif args.migration_proof or args.confirm_migration_backup_sha256:
         raise RuntimeError("No migration review is needed for this release")
 
@@ -220,6 +247,7 @@ def main() -> int:
     parser.add_argument("--log-directory", type=Path, required=True)
     parser.add_argument("--migration-proof", help="Private proof path under /opt/demanage/backups/ on Debian")
     parser.add_argument("--confirm-migration-backup-sha256")
+    parser.add_argument("--confirm-migration-rehearsal-sha256", help="Issue87 only: owner-confirmed proof SHA256")
     parser.add_argument("--publish", action="store_true", help="Reserved; blocked until this channel has an authenticated approval witness")
     parser.add_argument("--acknowledge-no-codeql", action="store_true", help="Acknowledge that GitHub CodeQL did not run on this SHA")
     args = parser.parse_args()
