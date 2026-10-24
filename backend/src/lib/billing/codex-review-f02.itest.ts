@@ -190,3 +190,134 @@ test('Codex P2: removing an end date must include restored historical card occur
     assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).endsAt, null);
   } finally { await cleanup(user.id); }
 });
+
+test('Codex P1: settled February 15 charge cannot move to another card cycle or due day', async () => {
+  const user = await fixture('P1 immutable settled occurrence');
+  try {
+    const cardA = await prisma.card.create({ data: {
+      userId: user.id, name: 'A closes 20', closingDay: 20,
+      createdAt: at('2026-01-01'), lastInvoicedOn: at('2026-01-20'),
+      lastBillingProcessedAt: at('2026-01-21'),
+    } });
+    const cardB = await prisma.card.create({ data: {
+      userId: user.id, name: 'B closes 10', closingDay: 10,
+      createdAt: at('2026-01-01'), lastInvoicedOn: at('2026-02-10'),
+      lastBillingProcessedAt: at('2026-02-11'),
+    } });
+    const recurring = await prisma.expense.create({ data: {
+      userId: user.id, cardId: cardA.id, name: 'February 15 already billed',
+      amount: 100, category: 'outro', frequency: 'mensal', dueDay: 15,
+      startsAt: at('2026-02-01'), createdAt: at('2026-02-01'),
+    } });
+    assert.deepEqual(await processUserCardBilling(user.id, at('2026-02-21')), { createdCount: 1 });
+    const invoicesBefore = await prisma.expense.findMany({ where: { userId: user.id, isInvoice: true } });
+    assert.deepEqual(invoicesBefore.map((invoice) => [invoice.cardId, Number(invoice.amount)]), [[cardA.id, 100]]);
+
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({ cardId: cardB.id }), at('2026-02-25')),
+      /já faturadas/,
+    );
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({ dueDay: 25 }), at('2026-02-25')),
+      /já faturadas/,
+    );
+    const unchanged = await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } });
+    assert.equal(unchanged.cardId, cardA.id);
+    assert.equal(unchanged.dueDay, 15);
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: recurring.id } }), 0);
+
+    const unbilled = await prisma.expense.create({ data: {
+      userId: user.id, cardId: cardA.id, name: 'February 25 still unbilled',
+      amount: 80, category: 'outro', frequency: 'mensal', dueDay: 25,
+      startsAt: at('2026-02-01'), createdAt: at('2026-02-01'),
+    } });
+    await updateExpense(user.id, unbilled.id, parseUpdateExpense({ cardId: cardB.id }), at('2026-02-25'));
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: unbilled.id } })).cardId, cardB.id);
+    await processUserCardBilling(user.id, at('2026-03-11'));
+    const invoicesAfter = await prisma.expense.findMany({ where: { userId: user.id, isInvoice: true } });
+    assert.deepEqual(invoicesAfter.map((invoice) => [invoice.cardId, Number(invoice.amount)]).sort(),
+      [[cardA.id, 100], [cardB.id, 80]].sort(),
+      'the other card bills only the genuinely unbilled February 25 occurrence');
+  } finally { await cleanup(user.id); }
+});
+
+test('Codex P1: moving an unbilled charge behind the destination card closing date is rejected', async () => {
+  const user = await fixture('P1 zero-cycle destination');
+  try {
+    const cardA = await prisma.card.create({ data: {
+      userId: user.id, name: 'A closes 10', closingDay: 10,
+      createdAt: at('2026-01-01'), lastInvoicedOn: at('2026-02-10'),
+      lastBillingProcessedAt: at('2026-02-11'),
+    } });
+    const cardB = await prisma.card.create({ data: {
+      userId: user.id, name: 'B closes 20', closingDay: 20,
+      createdAt: at('2026-01-01'), lastInvoicedOn: at('2026-02-20'),
+      lastBillingProcessedAt: at('2026-02-21'),
+    } });
+    const recurring = await prisma.expense.create({ data: {
+      userId: user.id, cardId: cardA.id, name: 'February 15 still unbilled',
+      amount: 100, category: 'outro', frequency: 'mensal', dueDay: 15,
+      startsAt: at('2026-02-01'), createdAt: at('2026-02-01'),
+    } });
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({ cardId: cardB.id }), at('2026-02-25')),
+      /já faturadas/,
+    );
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).cardId, cardA.id);
+  } finally { await cleanup(user.id); }
+});
+
+test('Codex P1: equal overall totals cannot conceal schedule rewrites across settled invoices', async () => {
+  const user = await fixture('P1 equal total historical rebilling');
+  try {
+    const card = await prisma.card.create({ data: {
+      userId: user.id, name: 'A closes 20', closingDay: 20,
+      createdAt: at('2026-01-01'),
+    } });
+    const recurring = await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Two settled months',
+      amount: 99, category: 'outro', frequency: 'mensal', dueDay: 15,
+      startsAt: at('2026-01-15'), createdAt: at('2026-01-15'),
+    } });
+    assert.deepEqual(await processUserCardBilling(user.id, at('2026-01-21')), { createdCount: 1 });
+    assert.deepEqual(await processUserCardBilling(user.id, at('2026-02-21')), { createdCount: 1 });
+    await assert.rejects(
+      () => updateExpense(user.id, recurring.id, parseUpdateExpense({
+        frequency: 'semanal', startsAt: '2026-02-01', dueDay: 1, amount: 66,
+      }), at('2026-02-25')),
+      /já faturadas/,
+    );
+    const unchanged = await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } });
+    assert.equal(unchanged.frequency, 'mensal');
+    assert.equal(Number(unchanged.amount), 99);
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: recurring.id } }), 0);
+    assert.deepEqual((await prisma.expense.findMany({
+      where: { userId: user.id, isInvoice: true }, orderBy: { billingPeriodEnd: 'asc' },
+    })).map((invoice) => Number(invoice.amount)), [99, 99]);
+
+    await updateExpense(user.id, recurring.id, parseUpdateExpense({ endsAt: '2026-03-01' }), at('2026-02-25'));
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: recurring.id } })).endsAt?.toISOString().slice(0, 10), '2026-03-01');
+  } finally { await cleanup(user.id); }
+});
+
+test('Codex P2: legacy null startsAt cannot forget a December São Paulo settlement', async () => {
+  const user = await fixture('P2 legacy civil date settlement');
+  try {
+    const card = await prisma.card.create({ data: {
+      userId: user.id, name: 'Legacy closing December 31', closingDay: 31,
+      createdAt: at('2025-12-01'), lastInvoicedOn: at('2025-12-31'),
+      lastBillingProcessedAt: at('2026-01-01'),
+    } });
+    const legacy = await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'UTC January, São Paulo December',
+      amount: 100, category: 'outro', frequency: 'mensal', dueDay: 31,
+      startsAt: null, createdAt: new Date('2026-01-01T01:00:00.000Z'),
+    } });
+    await assert.rejects(
+      () => updateExpense(user.id, legacy.id, parseUpdateExpense({ startsAt: '2026-01-01' }), at('2026-01-02')),
+      /já faturadas/,
+    );
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: legacy.id } })).startsAt, null);
+    assert.equal(await prisma.expenseObligationVersion.count({ where: { expenseId: legacy.id } }), 0);
+  } finally { await cleanup(user.id); }
+});

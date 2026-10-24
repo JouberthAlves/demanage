@@ -7,7 +7,7 @@ import {
   parseObligationVersions,
   scheduleMovesEarlier,
 } from '@/lib/billing/obligation-versions';
-import { hasRetroactiveClosedCardCharge } from '@/lib/billing/retroactive-recurring';
+import { hasRetroactiveClosedCardCharge, hasSettledRecurringMutation } from '@/lib/billing/retroactive-recurring';
 import { todayInSaoPaulo } from '@/lib/card-billing';
 import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { dateKey } from '@/lib/decimal';
@@ -510,9 +510,14 @@ export async function updateExpense(
       ], now);
     }
 
-    if (requiresVersionedCardProjection(
+    const needsVersionedProjection = requiresVersionedCardProjection(
       oldScheduleChanged, recurringVersionChange, oldVersions.length, nextFrequency,
-    )) {
+    );
+    // Schedule fields are live across historical versions. Even when there is
+    // no financial version change, forbid moving a previously closed charge
+    // into another card's open cycle (or behind its processed-through date).
+    if (existing.frequency !== 'unica' && nextFrequency !== 'unica' &&
+      (oldScheduleChanged || recurringVersionChange)) {
       const previousVersions = oldVersions.length
         ? parseObligationVersions(oldVersions)
         : [{
@@ -548,20 +553,38 @@ export async function updateExpense(
           }] : []),
         ],
       };
-      const [cards, otherCommittedByCard] = await Promise.all([
-        tx.card.findMany({ where: { userId, archivedAt: null } }),
-        getCommittedByCard({ userId, excludeExpenseId: id, tx, asOf: editNow }),
+      const [allCards, otherCommittedByCard] = await Promise.all([
+        // An archived source card can still have an immutable invoice.
+        tx.card.findMany({ where: { userId } }),
+        needsVersionedProjection
+          ? getCommittedByCard({ userId, excludeExpenseId: id, tx, asOf: editNow })
+          : Promise.resolve(new Map<string, number>()),
       ]);
-      try {
-        assertProspectiveVersionedCardLimits({
-          cards,
-          otherCommittedByCard,
-          prospective: projectedExpense,
-          asOf: editNow,
-        });
-      } catch (error) {
-        if (error instanceof ExpenseSplitError) throw conflict(error.message);
-        throw error;
+      if (hasSettledRecurringMutation(
+        {
+          ...existing,
+          // Legacy rows have no authenticated per-month baseline. Do not
+          // retroactively invent one when inspecting their settled history.
+          obligationVersions: oldVersions.length ? previousVersions : [],
+        },
+        projectedExpense,
+        allCards,
+        effectiveMonth,
+      )) {
+        throw conflict('Alteração de cartão ou agenda afetaria cobranças já faturadas; crie uma nova recorrência para os próximos vencimentos');
+      }
+      if (needsVersionedProjection) {
+        try {
+          assertProspectiveVersionedCardLimits({
+            cards: allCards.filter((card) => !card.archivedAt),
+            otherCommittedByCard,
+            prospective: projectedExpense,
+            asOf: editNow,
+          });
+        } catch (error) {
+          if (error instanceof ExpenseSplitError) throw conflict(error.message);
+          throw error;
+        }
       }
     }
 
