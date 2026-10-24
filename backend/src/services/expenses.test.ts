@@ -12,6 +12,7 @@ import {
   parseUpdateExpense,
 } from './expense-input';
 import {
+  assertExpenseFrequencyTransitionSafe,
   assertOneOffMutationSafe,
   cashAmountOf,
   existingSplitInputs,
@@ -182,4 +183,20 @@ test('F01: settled card cannot be repriced; unbilled card can switch to PIX once
     }),
     false,
   );
+});
+
+test('Codex P2: returning a one-off to recurring fails closed regardless of historical snapshot availability', () => {
+  for (const next of ['mensal', 'semanal']) {
+    assert.throws(
+      () => assertExpenseFrequencyTransitionSafe('unica', next),
+      /nova despesa|novo lançamento|histórico/i,
+    );
+  }
+  for (const [oldFrequency, nextFrequency] of [
+    ['mensal', 'unica'],
+    ['semanal', 'mensal'],
+    ['unica', 'unica'],
+  ]) {
+    assert.doesNotThrow(() => assertExpenseFrequencyTransitionSafe(oldFrequency, nextFrequency));
+  }
 });

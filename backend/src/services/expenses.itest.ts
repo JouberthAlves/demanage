@@ -149,6 +149,59 @@ test('F01: a paid recurring PIX expense cannot turn into one-off and duplicate i
   }
 });
 
+test('Codex P2: recurring to one-off to recurring cannot revive a stale obligation version', async () => {
+  const user = await createTestUser();
+  try {
+    const card = await createTestCard(user.id, 'Card-only obligation history');
+    const expense = await createExpense(
+      user.id,
+      parseCreateExpense({
+        name: 'Old recurring card debt',
+        amount: 100,
+        category: 'outro',
+        frequency: 'mensal',
+        startsAt: day,
+        dueDay: Number(day.slice(-2)),
+        cardId: card.id,
+      }),
+    );
+    await updateExpense(
+      user.id,
+      expense.id,
+      parseUpdateExpense({ frequency: 'unica', date: day, amount: 200 }),
+    );
+    const oneOff = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    assert.equal(oneOff.frequency, 'unica');
+    assert.equal(Number(oneOff.amount), 200);
+    assert.equal(await prisma.expensePayment.count({ where: { expenseId: expense.id } }), 0);
+
+    for (const amount of [200, 100]) {
+      await assert.rejects(
+        () => updateExpense(user.id, expense.id, parseUpdateExpense({
+          frequency: 'mensal',
+          startsAt: day,
+          dueDay: Number(day.slice(-2)),
+          amount,
+        })),
+        /nova despesa|novo lançamento|histórico/i,
+      );
+    }
+
+    const persisted = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    assert.equal(persisted.frequency, 'unica', 'failed reentry must not mutate frequency');
+    assert.equal(Number(persisted.amount), 200, 'failed reentry must not mutate amount');
+    assert.deepEqual(
+      (await prisma.expenseObligationVersion.findMany({
+        where: { expenseId: expense.id }, orderBy: { sequence: 'asc' },
+      })).map((version) => [version.effectiveMonth, Number(version.amount)]),
+      [[day.slice(0, 7), 100]],
+      'immutable original historical obligation must survive the rejected transition',
+    );
+  } finally {
+    await cleanup(user.id);
+  }
+});
+
 test('F01: settled split PIX + billed card cannot change amount, split, card or frequency', async () => {
   const user = await createTestUser();
   try {

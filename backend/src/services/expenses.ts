@@ -93,6 +93,18 @@ export function assertOneOffMutationSafe(args: {
   return args.newCashAmount > 0;
 }
 
+/** A one-off cannot restart an old recurring obligation's immutable price chain. */
+export function assertExpenseFrequencyTransitionSafe(
+  currentFrequency: string,
+  nextFrequency: string,
+) {
+  if (currentFrequency === 'unica' && nextFrequency !== 'unica') {
+    throw conflict(
+      'Para voltar à recorrência, crie uma nova despesa; o histórico anterior não pode ser reativado',
+    );
+  }
+}
+
 /**
  * Parcela que sai do caixa na hora (PIX). Sem splits, a despesa inteira é caixa.
  */
@@ -336,6 +348,7 @@ export async function updateExpense(
 
     const nextCategory = input.category ?? existing.category;
     const nextFrequency = input.frequency ?? existing.frequency;
+    assertExpenseFrequencyTransitionSafe(existing.frequency, nextFrequency);
     const nextAmount = input.amount ?? Number(existing.amount);
     const nextCustomTagId =
       resolvedTagId !== undefined ? resolvedTagId : existing.customTagId;
