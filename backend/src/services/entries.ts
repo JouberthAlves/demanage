@@ -14,6 +14,13 @@ import {
   parseRequiredText,
 } from '@/http/parsers';
 import { parseOptionalNote, parsePatchNote } from '@/http/request';
+import {
+  dayKeyInSaoPaulo,
+  dayKeyToDate,
+  monthKey,
+  parseDayKey,
+  todayKeyInSaoPaulo,
+} from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { isValidEntryType, isValidFrequency } from '@/lib/validate';
@@ -162,6 +169,8 @@ export type ReceiptState = 'automatic' | 'received' | 'waiting';
 export function parseReceiptStateBody(body: Record<string, unknown>): {
   month: string;
   state: ReceiptState;
+  receivedOn?: string;
+  expectedUpdatedAt?: string;
 } {
   const month = parseMonthKey(body.month);
   const state = body.state;
@@ -171,7 +180,37 @@ export function parseReceiptStateBody(body: Record<string, unknown>): {
   ) {
     throw badRequest('Estado de recebimento inválido');
   }
-  return { month, state };
+  const receivedOn = body.receivedOn;
+  const expectedUpdatedAt = body.expectedUpdatedAt;
+  if (receivedOn !== undefined) {
+    if (
+      state !== 'received' ||
+      typeof receivedOn !== 'string' ||
+      !parseDayKey(receivedOn) ||
+      monthKey(receivedOn) !== month ||
+      receivedOn > todayKeyInSaoPaulo()
+    ) {
+      throw badRequest('Data efetiva do recebimento inválida');
+    }
+  }
+  if (expectedUpdatedAt !== undefined) {
+    if (
+      typeof expectedUpdatedAt !== 'string' ||
+      !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(
+        expectedUpdatedAt,
+      ) ||
+      Number.isNaN(Date.parse(expectedUpdatedAt)) ||
+      new Date(expectedUpdatedAt).toISOString() !== expectedUpdatedAt
+    ) {
+      throw badRequest('Versão de entrada inválida');
+    }
+  }
+  return {
+    month,
+    state,
+    ...(receivedOn !== undefined ? { receivedOn } : {}),
+    ...(expectedUpdatedAt !== undefined ? { expectedUpdatedAt } : {}),
+  };
 }
 
 // -------------------------------------------------------------- operations
@@ -262,7 +301,11 @@ export async function updateEntry(
         where: { entryId: id },
         select: { id: true },
       });
-      assertEntryFrequencyTransition(existing.frequency, nextFrequency, receipt !== null);
+      assertEntryFrequencyTransition(
+        existing.frequency,
+        nextFrequency,
+        receipt !== null,
+      );
     }
     const nextCustomTagId =
       resolvedTagId !== undefined ? resolvedTagId : existing.customTagId;
@@ -330,6 +373,7 @@ export async function setReceiptState(
   id: string,
   month: string,
   state: ReceiptState,
+  options: { receivedOn?: string; expectedUpdatedAt?: string } = {},
 ) {
   return withUserWriteLockTransaction(userId, async (tx) => {
     const existing = await tx.entry.findFirst({
@@ -351,6 +395,69 @@ export async function setReceiptState(
       );
     }
 
+    let oneOffReceipt: EntryReceipt | null = null;
+    if (isOneTimeIncome) {
+      if (
+        !options.expectedUpdatedAt ||
+        Number.isNaN(Date.parse(options.expectedUpdatedAt))
+      ) {
+        throw badRequest(
+          'Atualize as entradas antes de confirmar o recebimento',
+        );
+      }
+      if (
+        state === 'received' &&
+        (!options.receivedOn ||
+          !parseDayKey(options.receivedOn) ||
+          monthKey(options.receivedOn) !== month ||
+          options.receivedOn > todayKeyInSaoPaulo())
+      ) {
+        throw badRequest('Informe a data efetiva do recebimento');
+      }
+      if (state !== 'received' && options.receivedOn !== undefined) {
+        throw badRequest('Data efetiva não é permitida nesta operação');
+      }
+      oneOffReceipt = await tx.entryReceipt.findFirst({
+        where: { entryId: id },
+      });
+      if (existing.updatedAt.toISOString() !== options.expectedUpdatedAt) {
+        // A retried confirmation is safe only when it already has the exact
+        // recorded effect. A stale request cannot recreate an undone receipt.
+        if (
+          state === 'received' &&
+          oneOffReceipt?.month === month &&
+          dayKeyInSaoPaulo(oneOffReceipt.receivedAt) === options.receivedOn
+        ) {
+          return tx.entry.findFirstOrThrow({
+            where: { id, userId, archivedAt: null, systemOrigin: 'manual' },
+            include: entryInclude,
+          });
+        }
+        if (state === 'waiting' && !oneOffReceipt) {
+          return tx.entry.findFirstOrThrow({
+            where: { id, userId, archivedAt: null, systemOrigin: 'manual' },
+            include: entryInclude,
+          });
+        }
+        throw conflict(CONFLICT_MESSAGE);
+      }
+      if (
+        oneOffReceipt &&
+        (oneOffReceipt.month !== month ||
+          (state === 'received' &&
+            dayKeyInSaoPaulo(oneOffReceipt.receivedAt) !== options.receivedOn))
+      ) {
+        throw conflict('Essa entrada avulsa já tem um recebimento registrado');
+      }
+    } else if (
+      options.receivedOn !== undefined ||
+      options.expectedUpdatedAt !== undefined
+    ) {
+      throw badRequest(
+        'Data e versão explícitas são reservadas às entradas avulsas',
+      );
+    }
+
     if (isMonthlySalary) {
       const bounds = monthBounds(month);
       if (existing.startsAt && existing.startsAt > bounds.end) {
@@ -363,16 +470,6 @@ export async function setReceiptState(
 
     let receivedAt: Date | null = null;
     if (state === 'received') {
-      if (isOneTimeIncome) {
-        const existingReceipt = await tx.entryReceipt.findFirst({
-          where: { entryId: id },
-        });
-        if (existingReceipt && existingReceipt.month !== month) {
-          throw conflict(
-            'Essa entrada avulsa já tem um recebimento registrado',
-          );
-        }
-      }
       const receipt = await tx.entryReceipt.upsert({
         where: { entryId_month: { entryId: id, month } },
         update: {},
@@ -380,7 +477,9 @@ export async function setReceiptState(
           entryId: id,
           month,
           amount: existing.amount,
-          receivedAt: new Date(),
+          receivedAt: isOneTimeIncome
+            ? dayKeyToDate(options.receivedOn!, 'noon')
+            : new Date(),
         },
       });
       receivedAt = receipt.receivedAt;
@@ -393,6 +492,20 @@ export async function setReceiptState(
         where: { id },
         data: salaryReceiptFields(state, month, receivedAt),
       });
+    } else if (
+      (state === 'received' && !oneOffReceipt) ||
+      (state === 'waiting' && oneOffReceipt)
+    ) {
+      // Monotonic optimistic version: protects against stale requests, including
+      // replay after undo, even when two transactions execute within one ms.
+      const nextUpdatedAt = new Date(
+        Math.max(Date.now(), existing.updatedAt.getTime() + 1),
+      );
+      const { count } = await tx.entry.updateMany({
+        where: { id, userId, updatedAt: existing.updatedAt },
+        data: { updatedAt: nextUpdatedAt },
+      });
+      if (count !== 1) throw conflict(CONFLICT_MESSAGE);
     }
 
     return tx.entry.findFirstOrThrow({

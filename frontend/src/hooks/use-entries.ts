@@ -55,11 +55,16 @@ export function useEntryReceiptState() {
       id,
       month,
       state,
+      receivedOn,
+      expectedUpdatedAt,
     }: {
       id: string;
       month: string;
       state: EntryReceiptState;
-    }) => setEntryReceiptState(id, month, state),
+      receivedOn?: string;
+      expectedUpdatedAt?: string;
+    }) =>
+      setEntryReceiptState(id, month, state, { receivedOn, expectedUpdatedAt }),
   );
 }
 
