@@ -17,6 +17,7 @@ import {
 } from '@/lib/expense-splits';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
+import { getFinancialOverview } from '@/mcp/financial-overview';
 import { parseCreateExpense, parseUpdateExpense } from '@/services/expense-input';
 import { createExpense, updateExpense } from '@/services/expenses';
 
@@ -138,6 +139,65 @@ test('entry create, list and edit keep description independent of title and inco
     assert.equal(persisted.notes, null);
     assert.equal(persisted.name, 'Presente');
     assert.equal(persisted.customTagId, tag.id);
+  } finally {
+    await api.close();
+    await cleanupUser(user.id);
+  }
+});
+
+test('a received one-off cannot become recurring and inflate MCP cash beyond dashboard receipts', async () => {
+  const user = await createUser('One-off receipt frequency guard');
+  const today = todayInSaoPaulo();
+  const day = today.toISOString().slice(0, 10);
+  const month = day.slice(0, 7);
+  const entry = await prisma.entry.create({
+    data: {
+      userId: user.id,
+      name: 'Freela já recebido',
+      amount: 100,
+      type: 'outro',
+      frequency: 'unica',
+      date: today,
+      receipts: { create: [{
+        month,
+        amount: 100,
+        receivedAt: new Date(`${day}T14:00:00.000Z`),
+      }] },
+    },
+  });
+  const api = await startApi(user.id);
+
+  try {
+    const changed = await api.request(`/entries/${entry.id}`, 'PATCH', {
+      frequency: 'mensal', amount: 200, receiveDay: 1, startsAt: `${month}-01`,
+    });
+    assert.equal(changed.response.status, 409);
+
+    const saved = await prisma.entry.findUniqueOrThrow({
+      where: { id: entry.id }, include: { receipts: true },
+    });
+    assert.equal(saved.frequency, 'unica');
+    assert.equal(Number(saved.amount), 100);
+    assert.equal(saved.receipts.length, 1);
+    assert.equal(Number(saved.receipts[0].amount), 100);
+
+    const cashNow = new Date(`${day}T18:00:00.000Z`);
+    assert.equal((await getFinancialOverview(user.id, cashNow)).monthly.incomeBrl, '100.00');
+
+    const rename = await api.request(`/entries/${entry.id}`, 'PATCH', { name: 'Freela confirmado' });
+    assert.equal(rename.response.status, 200, 'non-financial edits must still work');
+
+    const pending = await prisma.entry.create({
+      data: {
+        userId: user.id, name: 'Freela não recebido', amount: 100,
+        type: 'outro', frequency: 'unica', date: today,
+      },
+    });
+    const allowed = await api.request(`/entries/${pending.id}`, 'PATCH', {
+      frequency: 'mensal', amount: 200, receiveDay: 1, startsAt: `${month}-01`,
+    });
+    assert.equal(allowed.response.status, 200, 'unreceived one-offs can still become recurring');
+    assert.equal((allowed.data as { frequency: string }).frequency, 'mensal');
   } finally {
     await api.close();
     await cleanupUser(user.id);
