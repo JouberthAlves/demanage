@@ -204,6 +204,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
+          # Issue87 release policy verifies exact historic committed Git blobs;
+          # the default shallow PR merge checkout lacks the live prior SHA.
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:

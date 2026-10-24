@@ -6,9 +6,19 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = ROOT / ".github" / "workflows" / "promote-production.yml"
+CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
 class ProductionPromotionAncestryTests(unittest.TestCase):
+    def test_hosted_deploy_safety_checks_out_history_for_exact_release_git_blobs(self):
+        # PR merge checkout defaults to depth=1, which omits the prior live
+        # commit and invalidates real Git ancestry/blob policy verification.
+        ci = CI_WORKFLOW.read_text(encoding="utf-8")
+        job = ci.split("  deploy-safety:\n", 1)[1]
+        checkout = job.split("- uses: actions/checkout@v7", 1)[1].split("- uses:", 1)[0]
+        self.assertIn("fetch-depth: 0", checkout)
+        self.assertIn("persist-credentials: false", checkout)
+
     def test_both_target_app_and_live_gate_workflow_have_successful_hosted_checks(self):
         workflow = WORKFLOW.read_text(encoding="utf-8")
         step = workflow.split("- name: Verify master ancestry", 1)[1].split(
