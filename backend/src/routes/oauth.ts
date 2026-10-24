@@ -17,6 +17,28 @@ import { APP_URL, JWT_SECRET } from '@/utils/var';
 
 const ALLOWED_SCOPES = new Set(['finance:read', 'finance:write']);
 
+function authorizationServerMetadata(provider: Provider) {
+  const issuer = provider.issuer;
+  return {
+    issuer,
+    authorization_endpoint: `${issuer}/auth`,
+    token_endpoint: `${issuer}/token`,
+    revocation_endpoint: `${issuer}/token/revocation`,
+    jwks_uri: `${issuer}/jwks`,
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
+    token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'],
+    token_endpoint_auth_signing_alg_values_supported: ['RS256'],
+    code_challenge_methods_supported: ['S256'],
+    // oidc-provider@9.12.2 includes `iss` in authorization-code redirects
+    // and redirectable authorization errors (RFC 9207).
+    authorization_response_iss_parameter_supported: true,
+    // Mirrors the configured CIMD feature, allowing ChatGPT to discover it.
+    client_id_metadata_document_supported: true,
+    scopes_supported: [...ALLOWED_SCOPES, 'openid', 'offline_access'],
+  };
+}
+
 function consentToken(uid: string, userId: string) {
   // The JWT secret is a separate key from the provider's persisted cookie keys.
   return createHmac('sha256', JWT_SECRET).update(`${uid}\0${userId}`).digest('hex');
@@ -54,6 +76,12 @@ async function interactionForUser(provider: Provider, req: Request, res: Paramet
 
 export function createOAuthRouter(provider = getOAuthProvider()) {
   const router = Router();
+  // nginx rewrites public /api/oauth/.well-known/* to /oauth/.well-known/*.
+  // Answer before oidc-provider's callback, whose mount-relative discovery
+  // advertises /oauth/* even though the canonical issuer uses /api/oauth/*.
+  router.get('/.well-known/oauth-authorization-server', (_req, res) => {
+    res.json(authorizationServerMetadata(provider));
+  });
   router.get('/connections', requireAuth, async (req, res) => {
     const connections = await prisma.oAuthConnection.findMany({
       where: { userId: requireUserId(req), revokedAt: null },
@@ -177,25 +205,7 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
 export function createOAuthDiscoveryRouter(provider = getOAuthProvider()) {
   const router = Router();
   router.get(['/.well-known/oauth-authorization-server', '/.well-known/oauth-authorization-server/api/oauth'], (_req, res) => {
-    const issuer = provider.issuer;
-    res.json({
-      issuer,
-      authorization_endpoint: `${issuer}/auth`,
-      token_endpoint: `${issuer}/token`,
-      revocation_endpoint: `${issuer}/token/revocation`,
-      jwks_uri: `${issuer}/jwks`,
-      response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code', 'refresh_token'],
-      token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'],
-      token_endpoint_auth_signing_alg_values_supported: ['RS256'],
-      code_challenge_methods_supported: ['S256'],
-      // oidc-provider@9.12.2 includes `iss` in authorization-code redirects
-      // and redirectable authorization errors (RFC 9207).
-      authorization_response_iss_parameter_supported: true,
-      // Mirrors the configured CIMD feature, allowing ChatGPT to discover it.
-      client_id_metadata_document_supported: true,
-      scopes_supported: [...ALLOWED_SCOPES, 'openid', 'offline_access'],
-    });
+    res.json(authorizationServerMetadata(provider));
   });
   router.get(['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/api/mcp'], (_req, res) => {
     res.json({
