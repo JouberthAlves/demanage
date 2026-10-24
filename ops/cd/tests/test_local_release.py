@@ -32,6 +32,10 @@ FRONTEND = "ghcr.io/bielxdh3/demanage-frontend@sha256:" + "d" * 64
 PROOF = "/opt/demanage/backups/cd-20261017T140000Z-" + TARGET[:12] + "/local-migration-rehearsal.json"
 BACKUP = str(PurePosixPath(PROOF).parent / "demanage.dump")
 CHECKSUM = "e" * 64
+# Exact reviewed gate-only master commit (PR #89), after the Issue87 app SHA.
+# HEAD on a later application PR is *not* that gate and must never be treated
+# as reviewed just because the test is running from the new checkout.
+ISSUE87_GATE_MASTER = "53d5464cbd17d39fcf043fe4e198887d53cfc118"
 
 
 def arguments(**updates):
@@ -81,7 +85,8 @@ class LocalReleaseApprovalTests(unittest.TestCase):
 
     def test_issue87_local_dry_run_allows_only_the_reviewed_gate_delta_after_master_merge(self):
         repo = Path(__file__).resolve().parents[3]
-        gate_sha = approval.call("git", "-C", str(repo), "rev-parse", "HEAD")
+        gate_sha = approval.call("git", "-C", str(repo), "rev-parse", ISSUE87_GATE_MASTER)
+        self.assertEqual(gate_sha, ISSUE87_GATE_MASTER)
         original = approval.call
 
         def reviewed_master(*cmd):
@@ -94,7 +99,8 @@ class LocalReleaseApprovalTests(unittest.TestCase):
 
     def test_issue87_local_dry_run_refuses_extra_application_changes_on_master(self):
         repo = Path(__file__).resolve().parents[3]
-        gate_sha = approval.call("git", "-C", str(repo), "rev-parse", "HEAD")
+        gate_sha = approval.call("git", "-C", str(repo), "rev-parse", ISSUE87_GATE_MASTER)
+        self.assertEqual(gate_sha, ISSUE87_GATE_MASTER)
         original = approval.call
 
         def altered_master(*cmd):
@@ -106,6 +112,22 @@ class LocalReleaseApprovalTests(unittest.TestCase):
 
         with mock.patch.object(approval, "call", side_effect=altered_master):
             with self.assertRaisesRegex(RuntimeError, "unreviewed master changes"):
+                approval.verify_git(repo, ISSUE87_PREVIOUS, ISSUE87_TARGET)
+
+    def test_issue87_gate_rejects_later_application_pr_head_as_reviewed_gate(self):
+        repo = Path(__file__).resolve().parents[3]
+        later_head = approval.call("git", "-C", str(repo), "rev-parse", "HEAD")
+        if later_head == ISSUE87_GATE_MASTER:
+            self.skipTest("No subsequent application changes in this checkout")
+        original = approval.call
+
+        def unreviewed_master(*cmd):
+            if cmd[-2:] == ("origin", "refs/heads/master"):
+                return later_head + " refs/heads/master"
+            return original(*cmd)
+
+        with mock.patch.object(approval, "call", side_effect=unreviewed_master):
+            with self.assertRaisesRegex(RuntimeError, "Issue87 unreviewed master changes"):
                 approval.verify_git(repo, ISSUE87_PREVIOUS, ISSUE87_TARGET)
 
     def test_issue87_dry_run_requires_exact_explicit_rehearsal_acknowledgment(self):
