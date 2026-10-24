@@ -89,6 +89,22 @@ test('F08: asset cash purchases and sales enter dashboard cash exactly once, wit
   });
 });
 
+test('P2 review: API-format asset timestamps are included on their São Paulo calendar day', () => {
+  const now = new Date('2026-10-24T16:00:00.000Z');
+  const assets: AssetTransaction[] = [
+    assetTransaction({ id: 'bought-today', date: '2026-10-24T12:00:00.000Z', cashAmountBrl: '175.50' }),
+    assetTransaction({
+      id: 'sold-today', type: 'SELL', date: '2026-10-24T13:00:00.000Z', cashAmountBrl: '80',
+      expenseId: null, entryId: 'linked-internal-sale',
+    }),
+    assetTransaction({ id: 'not-yet', date: '2026-10-25T12:00:00.000Z', cashAmountBrl: '999' }),
+  ];
+
+  assert.deepEqual(buildMonthlyHistory([], [], now, 1, [], assets), [
+    { month: '2026-10', income: 80, expense: 175.5, hasActivity: true },
+  ]);
+});
+
 test('histórico ignora itens vencidos sem pagamento ou recebimento registrado', () => {
   const now = new Date(2026, 8, 9, 12);
   const history = buildMonthlyHistory([expense()], [income()], now);
