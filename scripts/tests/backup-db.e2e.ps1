@@ -43,6 +43,41 @@ FROM public.o04_backup_restore_fixture ORDER BY row_id;
   return [Convert]::ToHexString([System.Security.Cryptography.SHA256]::HashData($bytes)).ToLowerInvariant()
 }
 
+function Assert-FixtureSchema {
+  param([Parameter(Mandatory)][string]$Database)
+  $columnsSql = @'
+SELECT 'COLUMN|' || attname || '|' || format_type(atttypid, atttypmod) || '|' ||
+       CASE WHEN attnotnull THEN 'NOT NULL' ELSE 'NULL' END
+FROM pg_attribute
+WHERE attrelid = 'public.o04_backup_restore_fixture'::regclass
+  AND attnum > 0 AND NOT attisdropped
+ORDER BY attnum;
+'@
+  $columns = @(Invoke-OwnedDocker -Command @('exec', $containerName, 'psql', '-X', '-A', '-t',
+    '-v', 'ON_ERROR_STOP=1', '-U', 'demanage', '-d', $Database, '-c', $columnsSql))
+  $expected = @('COLUMN|row_id|integer|NOT NULL',
+    'COLUMN|amount|numeric(18,4)|NOT NULL', 'COLUMN|note|text|NULL')
+  if (($columns -join "`n") -ne ($expected -join "`n")) {
+    throw "O04 unexpected fixture column schema in $Database"
+  }
+  $primaryKey = @(Invoke-OwnedDocker -Command @('exec', $containerName, 'psql', '-X', '-A', '-t',
+    '-v', 'ON_ERROR_STOP=1', '-U', 'demanage', '-d', $Database, '-c',
+    "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'public.o04_backup_restore_fixture'::regclass AND contype = 'p';"))
+  if ($primaryKey.Count -ne 1 -or $primaryKey[0] -ne 'PRIMARY KEY (row_id)') {
+    throw "O04 unexpected fixture primary key in $Database"
+  }
+}
+
+function Assert-ArchiveRejected {
+  param([Parameter(Mandatory)][string]$Archive, [Parameter(Mandatory)][string]$Case)
+  Assert-OwnedContainer
+  & docker exec $containerName pg_restore --list $Archive 2>$null | Out-Null
+  if ($LASTEXITCODE -eq 0) { throw "O04 accepted $Case archive" }
+  # A failed Docker daemon/container must never masquerade as archive rejection.
+  [void](Invoke-OwnedDocker -Command @('exec', $containerName, 'pg_isready',
+    '-U', 'demanage', '-d', 'demanage'))
+}
+
 Assert-OwnedContainer
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -53,8 +88,12 @@ $fixtureBackups = Join-Path $fixtureRoot 'backups'
 $fixtureScript = Join-Path $fixtureScripts 'backup-db.ps1'
 $restoreDb = "o04_restore_$([guid]::NewGuid().ToString('N').Substring(0, 16))"
 $stagedDump = "/tmp/o04-restore-$([guid]::NewGuid().ToString('N')).dump"
+$stagedTampered = "/tmp/o04-tampered-$([guid]::NewGuid().ToString('N')).dump"
+$stagedTruncated = "/tmp/o04-truncated-$([guid]::NewGuid().ToString('N')).dump"
 $restoreCreated = $false
 $dumpStaged = $false
+$tamperedStaged = $false
+$truncatedStaged = $false
 
 try {
   New-Item -ItemType Directory -Path $fixtureScripts -Force | Out-Null
@@ -74,6 +113,7 @@ INSERT INTO public.o04_backup_restore_fixture (row_id, amount, note) VALUES
 '@
   [void](Invoke-OwnedDocker -Command @('exec', $containerName, 'psql', '-X',
     '-v', 'ON_ERROR_STOP=1', '-U', 'demanage', '-d', 'demanage', '-c', $seed))
+  Assert-FixtureSchema -Database 'demanage'
   $before = Get-FixtureFingerprint -Database 'demanage'
 
   # Execute the *unaltered* real backup-db.ps1 against the disposable database.
@@ -93,14 +133,33 @@ INSERT INTO public.o04_backup_restore_fixture (row_id, amount, note) VALUES
     throw 'O04 backup archive does not contain the fixture table data.'
   }
 
+  # Known-bad copies must be rejected by the same real pg_restore parser.
+  # The original freshly generated dump remains untouched for the restore.
+  $tampered = Join-Path $fixtureRoot 'tampered.dump'
+  Copy-Item -LiteralPath $dumps[0].FullName -Destination $tampered
+  $stream = [System.IO.File]::Open($tampered, 'Open', 'Write', 'None')
+  try { $stream.WriteByte(0) } finally { $stream.Dispose() }
+  [void](Invoke-OwnedDocker -Command @('cp', $tampered, "${containerName}:$stagedTampered"))
+  $tamperedStaged = $true
+  Assert-ArchiveRejected -Archive $stagedTampered -Case 'tampered'
+
+  $truncated = Join-Path $fixtureRoot 'truncated.dump'
+  Copy-Item -LiteralPath $dumps[0].FullName -Destination $truncated
+  $stream = [System.IO.File]::Open($truncated, 'Open', 'Write', 'None')
+  try { $stream.SetLength(8) } finally { $stream.Dispose() }
+  [void](Invoke-OwnedDocker -Command @('cp', $truncated, "${containerName}:$stagedTruncated"))
+  $truncatedStaged = $true
+  Assert-ArchiveRejected -Archive $stagedTruncated -Case 'truncated'
+
   [void](Invoke-OwnedDocker -Command @('exec', $containerName, 'createdb', '-U', 'demanage', $restoreDb))
   $restoreCreated = $true
   [void](Invoke-OwnedDocker -Command @('exec', $containerName, 'pg_restore', '-U', 'demanage',
     '-d', $restoreDb, '--no-owner', '--no-privileges', '--exit-on-error', $stagedDump))
+  Assert-FixtureSchema -Database $restoreDb
   $after = Get-FixtureFingerprint -Database $restoreDb
   if ($before -ne $after) { throw "O04 restored rows do not match their source: $before != $after" }
 
-  Write-Host "PASS O04: real pg_dump + pg_restore, 4 rows, content SHA256=$before, dump SHA256=$dumpHash"
+  Write-Host "PASS O04: real pg_dump + pg_restore, schema/PK, 4 rows, tampered/truncated rejected, content SHA256=$before, dump SHA256=$dumpHash"
 } finally {
   # All cleanup targets are private to this run; never delete other containers,
   # databases, dumps or user files. The CI job removes its own labeled container.
@@ -109,6 +168,12 @@ INSERT INTO public.o04_backup_restore_fixture (row_id, amount, note) VALUES
   }
   if ($dumpStaged) {
     [void](Invoke-OwnedDocker -Command @('exec', $containerName, 'rm', '-f', $stagedDump))
+  }
+  if ($tamperedStaged) {
+    [void](Invoke-OwnedDocker -Command @('exec', $containerName, 'rm', '-f', $stagedTampered))
+  }
+  if ($truncatedStaged) {
+    [void](Invoke-OwnedDocker -Command @('exec', $containerName, 'rm', '-f', $stagedTruncated))
   }
   if (Test-Path -LiteralPath $fixtureRoot) {
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force
