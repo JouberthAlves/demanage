@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'sonner';
 
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { cancelDailyMaintenance } from '@/lib/daily-maintenance';
 import { shouldRetryReadRequest } from '@/lib/query-retry';
 import { router } from '@/router';
 import { useAuthStore } from '@/stores/auth-store';
@@ -26,7 +27,13 @@ function createQueryClient() {
  */
 function SessionQueryProvider({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(createQueryClient);
-  useEffect(() => () => queryClient.clear(), [queryClient]);
+  useEffect(
+    () => () => {
+      cancelDailyMaintenance(queryClient);
+      queryClient.clear();
+    },
+    [queryClient],
+  );
   return (
     <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );

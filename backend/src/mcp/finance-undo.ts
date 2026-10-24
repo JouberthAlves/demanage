@@ -31,7 +31,7 @@ export async function previewUndoFinanceOperation(
   };
 }
 
-export async function commitUndoFinanceOperation(identity: FinanceIntentIdentity, undoIntentToken: string) {
+export async function commitUndoFinanceOperation(identity: FinanceIntentIdentity & { oauthGrantId?: string }, undoIntentToken: string) {
   const { action, nonce } = verifySignedFinanceIntent(undoIntentToken, identity, getMcpIntentSecret());
   if (
     Object.keys(action).sort().join(',') !== 'kind,operationId,originalKey' ||

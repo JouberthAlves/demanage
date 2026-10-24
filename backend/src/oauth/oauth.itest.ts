@@ -90,6 +90,24 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
   app.use('/oauth', createOAuthRouter(provider));
   app.use('/api/oauth', createOAuthRouter(provider));
 
+  async function connectionsFor(userIndex: number) {
+    const user = users[userIndex];
+    const jar = new Map<string, string>([['demanage-token', signAuthToken(user.id, user.sessionVersion)]]);
+    const response = await request(`${base}/oauth/connections`, jar);
+    assert.equal(response.status, 200);
+    return (await response.json() as {
+      connections: Array<{ clientId: string; status: string; connectedAt: string | null }>;
+    }).connections;
+  }
+
+  async function assertConnectionState(userIndex: number, expectedClientId: string, status: string) {
+    const connections = await connectionsFor(userIndex);
+    const connection = connections.find((entry) => entry.clientId === expectedClientId);
+    assert.ok(connection, `User ${userIndex} must see the authorized client`);
+    assert.equal(connection.status, status);
+    assert.equal(Boolean(connection.connectedAt), status === 'token_issued');
+  }
+
   async function authorize(userIndex: number, scope: string, oauthClientId = clientId, redirectUri = callback) {
     const user = users[userIndex];
     const jar = new Map<string, string>([['demanage-token', signAuthToken(user.id, user.sessionVersion)]]);
@@ -220,12 +238,16 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.equal(rejectedRedirect.status, 400, 'redirect URI must match the CIMD registration exactly');
 
     const chatgptMissingAssertion = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
+    await assertConnectionState(0, chatgptClientId, 'authorization_pending');
+    assert.deepEqual(await connectionsFor(1), [], 'another account cannot see OAuth connection state');
     const publicExchange = await exchange(chatgptMissingAssertion.code, chatgptMissingAssertion.pkceVerifier, chatgptClientId, chatgptCallback);
     assert.notEqual(publicExchange.status, 200, 'private_key_jwt must not silently downgrade to public-client auth');
+    await assertConnectionState(0, chatgptClientId, 'authorization_pending');
 
     const chatgptBadSignature = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
     const invalidSignature = await exchange(chatgptBadSignature.code, chatgptBadSignature.pkceVerifier, chatgptClientId, chatgptCallback, signedChatgptAssertion(otherKey.privateKey));
     assert.notEqual(invalidSignature.status, 200, 'assertion signed with unknown key must be denied');
+    await assertConnectionState(0, chatgptClientId, 'authorization_pending');
 
     const chatgptBadAudience = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
     const invalidAudience = await exchange(chatgptBadAudience.code, chatgptBadAudience.pkceVerifier, chatgptClientId, chatgptCallback, signedChatgptAssertion(chatgptKey.privateKey, { aud: 'https://attacker.example/token' }));
@@ -238,9 +260,13 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     const chatgptValid = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
     const tokenFromChatgpt = await exchange(chatgptValid.code, chatgptValid.pkceVerifier, chatgptClientId, chatgptCallback, signedChatgptAssertion());
     assert.equal(tokenFromChatgpt.status, 200, `ChatGPT private_key_jwt exchange: ${await tokenFromChatgpt.clone().text()}`);
+    await assertConnectionState(0, chatgptClientId, 'token_issued');
+    const initialConnectionTime = (await connectionsFor(0)).find((entry) => entry.clientId === chatgptClientId)?.connectedAt;
+    assert.ok(initialConnectionTime);
     const { access_token: chatgptToken, refresh_token: chatgptRefresh } = await tokenFromChatgpt.json() as { access_token: string; refresh_token: string };
     assert.deepEqual(await getOAuthGrantSubject(chatgptToken, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(chatgptToken))!.grantId,
     });
 
     const refreshArtifact = await provider.RefreshToken.find(chatgptRefresh);
@@ -270,7 +296,10 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.notEqual(refreshed.refresh_token, chatgptRefresh, 'rotating refresh token');
     assert.deepEqual(await getOAuthGrantSubject(refreshed.access_token, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(refreshed.access_token))!.grantId,
     });
+    assert.equal((await connectionsFor(0)).find((entry) => entry.clientId === chatgptClientId)?.connectedAt,
+      initialConnectionTime, 'refresh should not change the original connection time');
     const concurrentRefresh = await Promise.all([0, 1].map(() => fetch(`${base}/api/oauth/token`, {
       method: 'POST',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
@@ -288,9 +317,11 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
       'a parallel refresh must not revoke the successful client grant');
     assert.deepEqual(await getOAuthGrantSubject(chatgptToken, resource, provider), {
       userId: users[0].id, clientId: chatgptClientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(chatgptToken))!.grantId,
     });
     const revokedChatGpt = await revokeClientGrant(users[0].id, chatgptClientId);
     assert.equal(revokedChatGpt, true);
+    assert.equal((await connectionsFor(0)).some((entry) => entry.clientId === chatgptClientId), false);
     assert.equal(await getOAuthGrantSubject(refreshed.access_token, resource, provider), null,
       'revocation immediately invalidates the refreshed access token');
     const renewalAfterRevoke = await fetch(`${base}/api/oauth/token`, {
@@ -308,12 +339,25 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     // The browser sees /api/oauth/token behind nginx, while the old internal
     // /oauth/token mount generates the wrong accepted private_key_jwt audience.
     const publicAuth = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
+    await assertConnectionState(0, chatgptClientId, 'authorization_pending');
+    // A token arriving late for a revoked grant must not complete the new
+    // consent. This checks the grant/user/client binding in the adapter.
+    const { OAuthPrismaAdapter } = await import('./adapter');
+    const staleTokenId = `stale-${randomUUID()}`;
+    await new OAuthPrismaAdapter('AccessToken').upsert(staleTokenId, {
+      grantId: refreshArtifact.grantId,
+      accountId: users[0].id,
+      clientId: chatgptClientId,
+    }, 60);
+    await assertConnectionState(0, chatgptClientId, 'authorization_pending');
+    await prisma.oAuthArtifact.delete({ where: { model_id: { model: 'AccessToken', id: staleTokenId } } });
     const publicAudienceExchange = await exchange(
       publicAuth.code, publicAuth.pkceVerifier, chatgptClientId, chatgptCallback,
       signedChatgptAssertion(chatgptKey.privateKey, { aud: `${base}/api/oauth/token` }),
       '/api/oauth/token',
     );
     assert.equal(publicAudienceExchange.status, 200, 'Signed public token audience must succeed on the public token path');
+    await assertConnectionState(0, chatgptClientId, 'token_issued');
 
     const duplicateAssertion = signedChatgptAssertion();
     const signedOnce = await authorize(0, 'finance:read', chatgptClientId, chatgptCallback);
@@ -345,6 +389,7 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     assert.ok(firstToken);
     assert.deepEqual(await getOAuthGrantSubject(firstToken, resource, provider), {
       userId: users[0].id, clientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(firstToken))!.grantId,
     });
     assert.equal(await getOAuthGrantSubject(firstToken, `${resource}/other`, provider), null);
 
@@ -354,10 +399,70 @@ test('OAuth issuer PKCE, consent, scoped bearer and revocation isolate two accou
     const { access_token: secondToken } = await secondResponse.json() as { access_token: string };
     assert.deepEqual(await getOAuthGrantSubject(secondToken, resource, provider), {
       userId: users[1].id, clientId, scopes: new Set(['finance:write']),
+      oauthGrantId: (await provider.AccessToken.find(secondToken))!.grantId,
+    });
+    const signedPreRecovery = await authorize(1, 'finance:read', chatgptClientId, chatgptCallback);
+    const signedPreRecoveryResponse = await exchange(signedPreRecovery.code, signedPreRecovery.pkceVerifier,
+      chatgptClientId, chatgptCallback, signedChatgptAssertion());
+    assert.equal(signedPreRecoveryResponse.status, 200);
+    const signedPreRecoveryTokens = await signedPreRecoveryResponse.json() as { access_token: string; refresh_token: string };
+    const pendingCode = await authorize(1, 'finance:write');
+    const recoveryCode = '23456-789AB-CDEFG-HJKLM';
+    const { hashRecoveryCode } = await import('@/lib/recovery-code');
+    const { recoverPassword } = await import('@/services/auth');
+    await prisma.user.update({ where: { id: users[1].id }, data: { recoveryCodeHash: hashRecoveryCode(recoveryCode) } });
+    await recoverPassword({ email: users[1].email, recoveryCode, newPassword: 'SecurePassword123!' });
+    assert.equal(await getOAuthGrantSubject(secondToken, resource, provider), null);
+    assert.equal(await getOAuthGrantSubject(signedPreRecoveryTokens.access_token, resource, provider), null);
+    const refreshAfterReset = await fetch(`${base}/api/oauth/token`, {
+      method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token', client_id: chatgptClientId,
+        refresh_token: signedPreRecoveryTokens.refresh_token,
+        client_assertion_type: 'urn:ietf:params:oauth:client-assertion-type:jwt-bearer',
+        client_assertion: signedChatgptAssertion(chatgptKey.privateKey, { aud: `${base}/api/oauth/token` }),
+      }),
+    });
+    assert.equal(refreshAfterReset.status, 400, 'pre-recovery refresh tokens must be invalid');
+    const exchangedAfterRecovery = await exchange(pendingCode.code, pendingCode.pkceVerifier);
+    assert.equal(exchangedAfterRecovery.status, 400, 'codes issued before password recovery must be invalid');
+    assert.deepEqual(await getOAuthGrantSubject(firstToken, resource, provider), {
+      userId: users[0].id, clientId, scopes: new Set(['finance:read']),
+      oauthGrantId: (await provider.AccessToken.find(firstToken))!.grantId,
     });
     assert.equal(await revokeClientGrant(users[0].id, clientId), true);
     assert.equal(await getOAuthGrantSubject(firstToken, resource, provider), null);
-    assert.notEqual(await getOAuthGrantSubject(secondToken, resource, provider), null);
+    assert.equal(await getOAuthGrantSubject(secondToken, resource, provider), null);
+
+    // Account recovery wins the per-user lock before a pending consent write.
+    // A request authenticated with the older session version cannot restore
+    // its grant, even though it reached the consent handler before recovery.
+    const { withUserWriteLockTransaction } = await import('@/lib/user-write-transaction');
+    const { persistOAuthConsentForSession } = await import('./connection');
+    const beforeRecovery = await prisma.oAuthConnection.findUniqueOrThrow({
+      where: { userId_clientId: { userId: users[0].id, clientId } },
+    });
+    let releaseRecovery!: () => void;
+    let signalLocked!: () => void;
+    const blocked = new Promise<void>((resolve) => { releaseRecovery = resolve; });
+    const locked = new Promise<void>((resolve) => { signalLocked = resolve; });
+    const recovery = withUserWriteLockTransaction(users[0].id, async (tx) => {
+      signalLocked();
+      await blocked;
+      await tx.user.update({ where: { id: users[0].id }, data: { sessionVersion: { increment: 1 } } });
+    });
+    await locked;
+    const lateConsent = persistOAuthConsentForSession(users[0].id, users[0].sessionVersion, {
+      clientId, clientName: 'late old-session client', grantId: randomUUID(), scopes: ['finance:read'],
+    });
+    releaseRecovery();
+    await recovery;
+    assert.equal(await lateConsent, false, 'stale consent cannot commit after session recovery');
+    const afterRecovery = await prisma.oAuthConnection.findUniqueOrThrow({
+      where: { userId_clientId: { userId: users[0].id, clientId } },
+    });
+    assert.equal(afterRecovery.grantId, beforeRecovery.grantId);
+    assert.deepEqual(afterRecovery.revokedAt, beforeRecovery.revokedAt);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));

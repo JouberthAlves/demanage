@@ -25,12 +25,22 @@ export type BillableExpense = {
   cardId: string | null;
   isInvoice: boolean;
   frequency: string;
+  dueDay?: number | null;
   startsAt: Date | null;
   endsAt: Date | null;
   occurredAt: Date | null;
   createdAt: Date;
   archivedAt?: Date | null;
   splits?: BillableSplit[];
+  obligationVersions?: BillableObligationVersion[];
+};
+
+export type BillableObligationVersion = {
+  sequence: number;
+  effectiveMonth: string;
+  amount: MoneyInput;
+  cardId: string | null;
+  splits: BillableSplit[];
 };
 
 export type SplitTarget =
@@ -60,10 +70,7 @@ export function splitShareFor(
       (split) => split.kind === 'card' && split.cardId === target.cardId,
     );
     if (cardSplits.length > 0) {
-      return cardSplits.reduce(
-        (sum, split) => sum.plus(split.amount),
-        ZERO,
-      );
+      return cardSplits.reduce((sum, split) => sum.plus(split.amount), ZERO);
     }
     return expense.cardId === target.cardId
       ? new Prisma.Decimal(expense.amount)
@@ -92,9 +99,7 @@ export const MAX_CHARGES_PER_CYCLE = {
 } as const;
 
 export function maxChargesPerCycle(frequency: string): number {
-  return (
-    (MAX_CHARGES_PER_CYCLE as Record<string, number>)[frequency] ?? 1
-  );
+  return (MAX_CHARGES_PER_CYCLE as Record<string, number>)[frequency] ?? 1;
 }
 
 export type CycleWindow = {
@@ -135,18 +140,25 @@ export function countWeeklyOccurrences(
 }
 
 /**
- * Number of monthly occurrences (day-of-month of `anchorKey`, clamped to the
- * month length) falling in [lo, hi] and not before the anchor.
+ * Number of monthly occurrences (true dueDay, or anchor day for legacy rows,
+ * clamped to each month) falling in [lo, hi] and not before the start date.
  */
 export function countMonthlyOccurrences(
   anchorKey: DayKey,
   loKey: DayKey,
   hiKey: DayKey,
+  dueDay?: number | null,
 ): number {
   const anchor = parseDayKey(anchorKey);
-  const lo = parseDayKey(compareDayKeys(loKey, anchorKey) >= 0 ? loKey : anchorKey);
+  const lo = parseDayKey(
+    compareDayKeys(loKey, anchorKey) >= 0 ? loKey : anchorKey,
+  );
   const hi = parseDayKey(hiKey);
   if (!anchor || !lo || !hi) return 0;
+  const day =
+    dueDay != null && Number.isInteger(dueDay) && dueDay >= 1 && dueDay <= 31
+      ? dueDay
+      : anchor.day;
   const effectiveLo = compareDayKeys(loKey, anchorKey) >= 0 ? loKey : anchorKey;
   if (compareDayKeys(effectiveLo, hiKey) > 0) return 0;
 
@@ -157,7 +169,7 @@ export function countMonthlyOccurrences(
     const occurrence = formatDayKey(
       year,
       month,
-      clampDayToMonth(year, month, anchor.day),
+      clampDayToMonth(year, month, day),
     );
     if (
       compareDayKeys(occurrence, effectiveLo) >= 0 &&
@@ -179,8 +191,8 @@ export function countMonthlyOccurrences(
  * - invoices are never charged on a card;
  * - one-offs: once, if dated inside the cycle;
  * - weekly: real weekday occurrences from startsAt in the cycle (4 or 5);
- * - monthly: real day-of-month occurrences in the cycle, so a cycle that
- *   spans two months (skipped closing) bills both.
+ * - monthly: true dueDay occurrences in the cycle, independent of startsAt;
+ *   a cycle spanning two months (skipped closing) bills both.
  * Recurring charges stop at endsAt and at the archive day.
  */
 export function chargeOccurrences(
@@ -215,7 +227,7 @@ export function chargeOccurrences(
 
   return expense.frequency === 'semanal'
     ? countWeeklyOccurrences(startKey, lowerInclusive, hi)
-    : countMonthlyOccurrences(startKey, lowerInclusive, hi);
+    : countMonthlyOccurrences(startKey, lowerInclusive, hi, expense.dueDay);
 }
 
 /**
@@ -281,6 +293,40 @@ export function chargeAmountDecimal(
   cardId: string,
   window: CycleWindow,
 ): Prisma.Decimal {
+  const versions = expense.obligationVersions;
+  if (expense.frequency !== 'unica' && versions?.length) {
+    // A closing cycle may span several calendar months when the card's
+    // closing day changes. Apply the financial terms valid at EACH month,
+    // preserving the original schedule/weekday across split boundaries.
+    const lo = window.includePeriodStart
+      ? window.periodStartKey
+      : addDaysToKey(window.periodStartKey, 1);
+    let cursor = lo;
+    let total = ZERO;
+    while (compareDayKeys(cursor, window.closingKey) <= 0) {
+      const month = cursor.slice(0, 7);
+      const [year, monthNumber] = month.split('-').map(Number);
+      const nextMonth = monthNumber === 12
+        ? `${String(year + 1).padStart(4, '0')}-01-01`
+        : `${String(year).padStart(4, '0')}-${String(monthNumber + 1).padStart(2, '0')}-01`;
+      const monthEnd = addDaysToKey(nextMonth, -1);
+      const hi = compareDayKeys(monthEnd, window.closingKey) < 0 ? monthEnd : window.closingKey;
+      const active = versions
+        .filter((version) => version.effectiveMonth <= month)
+        .sort((a, b) => b.sequence - a.sequence)[0];
+      if (active) {
+        const occurrences = chargeOccurrences(
+          { ...expense, amount: active.amount, cardId: active.cardId, splits: active.splits },
+          { periodStartKey: addDaysToKey(cursor, -1), closingKey: hi, includePeriodStart: false },
+        );
+        if (occurrences) {
+          total = total.plus(splitShareFor({ ...expense, ...active }, { kind: 'card', cardId }).mul(occurrences));
+        }
+      }
+      cursor = addDaysToKey(hi, 1);
+    }
+    return total;
+  }
   const occurrences = chargeOccurrences(expense, window);
   if (occurrences <= 0) return ZERO;
   return splitShareFor(expense, { kind: 'card', cardId }).mul(occurrences);

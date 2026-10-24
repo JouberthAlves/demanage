@@ -18,6 +18,8 @@ function recoveryStore(waitForBothReads = false) {
     recoveryCodeHash: hashRecoveryCode(initialCode),
     passwordHash: 'old-password-hash',
     sessionVersion: 0,
+    activeGrants: new Set(['grant-a', 'grant-b']),
+    deletedGrants: new Set<string>(),
   };
   let reads = 0;
   let releaseReads: () => void = () => {};
@@ -36,39 +38,56 @@ function recoveryStore(waitForBothReads = false) {
     state.sessionVersion += data.sessionVersion.increment;
   };
 
+  const findUnique = async ({ where }: { where: { email: string } }) => {
+    if (where.email !== email) return null;
+    const snapshot = {
+      id: 'test-user',
+      recoveryCodeHash: state.recoveryCodeHash,
+    };
+    if (waitForBothReads) {
+      reads += 1;
+      if (reads === 2) releaseReads();
+      await bothRead;
+    }
+    return snapshot;
+  };
+  const updateMany = async ({
+    where,
+    data,
+  }: {
+    where: { id: string; recoveryCodeHash: string };
+    data: Write;
+  }) => {
+    if (
+      where.id !== 'test-user' ||
+      where.recoveryCodeHash !== state.recoveryCodeHash
+    ) {
+      return { count: 0 };
+    }
+    apply(data);
+    return { count: 1 };
+  };
   const store = {
-    async findUnique({ where }: { where: { email: string } }) {
-      if (where.email !== email) return null;
-      const snapshot = {
-        id: 'test-user',
-        recoveryCodeHash: state.recoveryCodeHash,
-      };
-      if (waitForBothReads) {
-        reads += 1;
-        if (reads === 2) releaseReads();
-        await bothRead;
-      }
-      return snapshot;
-    },
-    async update({ data }: { data: Write }) {
-      apply(data);
-      return { id: 'test-user' };
-    },
-    async updateMany({
-      where,
-      data,
-    }: {
-      where: { id: string; recoveryCodeHash: string };
-      data: Write;
-    }) {
-      if (
-        where.id !== 'test-user' ||
-        where.recoveryCodeHash !== state.recoveryCodeHash
-      ) {
-        return { count: 0 };
-      }
-      apply(data);
-      return { count: 1 };
+    user: { findUnique },
+    async $transaction(operation: (tx: unknown) => Promise<unknown>) {
+      return operation({
+        user: { updateMany },
+        oAuthConnection: {
+          async findMany() {
+            return [...state.activeGrants].map((grantId) => ({ grantId }));
+          },
+          async updateMany() {
+            state.activeGrants.clear();
+            return { count: 2 };
+          },
+        },
+        oAuthArtifact: {
+          async deleteMany({ where }: { where: { OR: [{ grantId: { in: string[] } }] } }) {
+            for (const grantId of where.OR[0].grantId.in) state.deletedGrants.add(grantId);
+            return { count: state.deletedGrants.size };
+          },
+        },
+      });
     },
   } as unknown as NonNullable<Parameters<typeof recoverPassword>[1]>;
 
@@ -100,6 +119,8 @@ test('simultaneous recovery requests consume a code exactly once', async () => {
     'E-mail ou código de recuperação inválidos',
   );
   assert.equal(state.sessionVersion, 1);
+  assert.equal(state.activeGrants.size, 0);
+  assert.deepEqual([...state.deletedGrants].sort(), ['grant-a', 'grant-b']);
   assert.equal(
     state.recoveryCodeHash,
     hashRecoveryCode((winners[0] as PromiseFulfilledResult<string>).value),
@@ -120,6 +141,7 @@ test('a recovery code is rejected on sequential reuse', async () => {
     return true;
   });
   assert.equal(state.sessionVersion, 1);
+  assert.equal(state.activeGrants.size, 0);
 });
 
 test('valid recovery rotates the code and revokes previous sessions', async () => {
@@ -135,4 +157,5 @@ test('valid recovery rotates the code and revokes previous sessions', async () =
     true,
   );
   assert.equal(state.sessionVersion, 1);
+  assert.equal(state.activeGrants.size, 0);
 });

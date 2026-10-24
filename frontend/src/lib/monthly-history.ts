@@ -5,13 +5,19 @@ import {
   parseDayKey,
   todayKey,
 } from '@/lib/dates';
+import { expenseContributionThisMonth } from '@/lib/expense-schedule';
 import { expenseCashAmount } from '@/lib/expense-splits';
+import {
+  incomeContributionThisMonth,
+  incomeReceiptsInMonth,
+} from '@/lib/income-schedule';
 import type { PiggyCashMovement } from '@/lib/piggy-api';
 import type {
   Income,
   MonthlySnapshot,
   RecurringExpense,
 } from '@/types/finance';
+import type { AssetTransaction } from '@/types/patrimony';
 
 /** Month of a past timestamp; timestamps after today are ignored. */
 function monthFromTimestamp(value: string, now: Date) {
@@ -20,10 +26,16 @@ function monthFromTimestamp(value: string, now: Date) {
   return day.slice(0, 7);
 }
 
-/** Month of a past date-only value; future or invalid dates are ignored. */
+/** Month of a civil date or API ISO timestamp; future/invalid dates are ignored. */
 function monthFromDateOnly(value: string | undefined, now: Date) {
-  if (!value || !parseDayKey(value) || value > todayKey(now)) return null;
-  return value.slice(0, 7);
+  if (!value || !parseDayKey(value)) return null;
+  // API asset transactions are serialized as full UTC ISO timestamps, while
+  // planned expenses and cofrinho movements contain plain YYYY-MM-DD keys.
+  // Do not parse date-only keys as UTC midnight (which shifts them to yesterday
+  // in São Paulo); do not compare timestamps lexically with YYYY-MM-DD either.
+  const day = value.length === 10 ? value : dayKeyOf(value);
+  if (!day || day > todayKey(now)) return null;
+  return day.slice(0, 7);
 }
 
 /** Cash-only cofrinho movements: opt-out deposits and corrections are excluded by the API. */
@@ -40,6 +52,29 @@ export function piggyCashContribution(
         : sum,
     0,
   );
+}
+
+/** Asset trades create an internal ledger expense/entry hidden from normal CRUD.
+ * Count the source transaction once, only if its cash ledger movement exists.
+ * Manual position adjustments have no cash impact.
+ */
+export function assetCashContribution(
+  transactions: AssetTransaction[],
+  month: string,
+  type: 'BUY' | 'SELL',
+  now: Date,
+) {
+  return transactions.reduce((sum, transaction) => {
+    if (
+      transaction.type !== type ||
+      monthFromDateOnly(transaction.date, now) !== month ||
+      (type === 'BUY' ? !transaction.expenseId : !transaction.entryId)
+    ) {
+      return sum;
+    }
+    const cash = Number(transaction.cashAmountBrl);
+    return sum + (Number.isFinite(cash) && cash > 0 ? cash : 0);
+  }, 0);
 }
 
 function sumPaidExpenses(
@@ -77,18 +112,38 @@ function sumPaidExpenses(
 }
 
 function sumReceivedIncome(incomes: Income[], month: string, now: Date) {
-  return incomes.reduce((sum, income) => {
-    const receipts = income.receipts ?? [];
-    const receivedAmount = receipts.reduce((received, receipt) => {
-      if (monthFromTimestamp(receipt.receivedAt, now) !== month) {
-        return received;
-      }
-      const amount = Number(receipt.amount);
-      return received + (Number.isFinite(amount) && amount > 0 ? amount : 0);
-    }, 0);
+  return incomes.reduce(
+    (sum, income) => sum + incomeReceiptsInMonth(income, month, now),
+    0,
+  );
+}
 
-    return sum + receivedAmount;
-  }, 0);
+/** Live templates use schedule rules; archived ones contribute recorded cash only. */
+export function financialExpenseThisMonth(
+  expenses: RecurringExpense[],
+  now: Date,
+) {
+  const month = currentMonthKey(now);
+  return expenses.reduce(
+    (sum, expense) =>
+      sum +
+      (expense.archivedAt
+        ? sumPaidExpenses([expense], month, now)
+        : expenseContributionThisMonth(expense, now)),
+    0,
+  );
+}
+
+export function financialIncomeThisMonth(incomes: Income[], now: Date) {
+  const month = currentMonthKey(now);
+  return incomes.reduce(
+    (sum, income) =>
+      sum +
+      (income.archivedAt
+        ? incomeReceiptsInMonth(income, month, now)
+        : incomeContributionThisMonth(income, now)),
+    0,
+  );
 }
 
 export function buildMonthlyHistory(
@@ -97,6 +152,7 @@ export function buildMonthlyHistory(
   now = new Date(),
   monthCount = 6,
   piggyMovements: PiggyCashMovement[] = [],
+  assetTransactions: AssetTransaction[] = [],
 ): MonthlySnapshot[] {
   if (monthCount <= 0) return [];
 
@@ -104,10 +160,14 @@ export function buildMonthlyHistory(
   const currentMonth = currentMonthKey(now);
   for (let offset = monthCount - 1; offset >= 0; offset -= 1) {
     const monthKey = addMonths(currentMonth, -offset);
-    const income = sumReceivedIncome(incomes, monthKey, now)
-      + piggyCashContribution(piggyMovements, monthKey, 'withdraw', now);
-    const expense = sumPaidExpenses(expenses, monthKey, now)
-      + piggyCashContribution(piggyMovements, monthKey, 'deposit', now);
+    const income =
+      sumReceivedIncome(incomes, monthKey, now) +
+      piggyCashContribution(piggyMovements, monthKey, 'withdraw', now) +
+      assetCashContribution(assetTransactions, monthKey, 'SELL', now);
+    const expense =
+      sumPaidExpenses(expenses, monthKey, now) +
+      piggyCashContribution(piggyMovements, monthKey, 'deposit', now) +
+      assetCashContribution(assetTransactions, monthKey, 'BUY', now);
 
     history.push({
       month: monthKey,

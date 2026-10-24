@@ -4,6 +4,7 @@ import {
   parseDayOfMonth,
   parseRequiredText,
 } from '@/http/parsers';
+import { loadBillableExpensesForCards } from '@/lib/billing/obligation-versions';
 import {
   chargesTotalForClosing,
   lateOneOffsTotalForClosing,
@@ -119,28 +120,15 @@ export function archiveCard(userId: string, id: string) {
   return withUserWriteLockTransaction(userId, async (tx) => {
     const card = await tx.card.findFirst({
       where: { id, userId, archivedAt: null },
-      include: {
-        expenses: { include: { splits: true } },
-        expenseSplits: {
-          where: { kind: 'card' },
-          include: { expense: { include: { splits: true } } },
-        },
-      },
     });
     if (!card) throw notFound(NOT_FOUND_MESSAGE);
 
-    const expenseMap = new Map(
-      card.expenses.map((expense) => [expense.id, expense]),
-    );
-    for (const split of card.expenseSplits) {
-      expenseMap.set(split.expense.id, split.expense);
-    }
+    const expenses = await loadBillableExpensesForCards(tx, userId);
 
     const today = todayInSaoPaulo();
     const periodStart = card.lastInvoicedOn
       ? dateOnlyUtc(card.lastInvoicedOn)
       : todayInSaoPaulo(card.createdAt);
-    const expenses = [...expenseMap.values()];
     const cycleAmount = chargesTotalForClosing(
       expenses,
       card.id,

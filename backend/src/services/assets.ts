@@ -167,11 +167,9 @@ export async function patchTransaction(
   id: string,
   patch: AssetTransactionPatch,
 ) {
-  const stored = await findOwnedTransaction(userId, id);
-  return updateAssetTransaction(
-    userId,
-    id,
-    mergeAssetTransactionPatch(stored, patch),
+  await findOwnedTransaction(userId, id);
+  return updateAssetTransaction(userId, id, (current) =>
+    mergeAssetTransactionPatch(current, patch),
   );
 }
 

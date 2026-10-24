@@ -70,3 +70,19 @@ test('oversized bodies are rejected by the size cap', async () => {
     /limite/,
   );
 });
+
+test('market provider requests refuse redirects to an internal address', async () => {
+  let redirectPolicy: RequestRedirect | undefined;
+  globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+    redirectPolicy = init?.redirect;
+    // Model the default fetch behavior: following a provider redirect returns
+    // private-network data to this caller. Redirect-error must fail closed.
+    if (init?.redirect !== 'error') {
+      return json({ privateNetwork: '127.0.0.1' });
+    }
+    throw new TypeError('redirect not permitted');
+  }) as typeof fetch;
+
+  await assert.rejects(() => getJson('https://f.example/resource'));
+  assert.equal(redirectPolicy, 'error');
+});

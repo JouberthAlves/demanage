@@ -3,8 +3,11 @@ import { type Request,Router, urlencoded } from 'express';
 import type Provider from 'oidc-provider';
 
 import { requireUserId } from '@/http/request';
+import { AUTH_COOKIE_NAME, verifyAuthToken } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { requireAuth } from '@/middlewares/require-auth';
+import { persistOAuthConsentForSession } from '@/oauth/connection';
+import { parseConsentDecision } from '@/oauth/consent-decision';
 import {
   getOAuthProvider,
   oauthSettings,
@@ -13,6 +16,28 @@ import {
 import { APP_URL, JWT_SECRET } from '@/utils/var';
 
 const ALLOWED_SCOPES = new Set(['finance:read', 'finance:write']);
+
+function authorizationServerMetadata(provider: Provider) {
+  const issuer = provider.issuer;
+  return {
+    issuer,
+    authorization_endpoint: `${issuer}/auth`,
+    token_endpoint: `${issuer}/token`,
+    revocation_endpoint: `${issuer}/token/revocation`,
+    jwks_uri: `${issuer}/jwks`,
+    response_types_supported: ['code'],
+    grant_types_supported: ['authorization_code', 'refresh_token'],
+    token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'],
+    token_endpoint_auth_signing_alg_values_supported: ['RS256'],
+    code_challenge_methods_supported: ['S256'],
+    // oidc-provider@9.12.2 includes `iss` in authorization-code redirects
+    // and redirectable authorization errors (RFC 9207).
+    authorization_response_iss_parameter_supported: true,
+    // Mirrors the configured CIMD feature, allowing ChatGPT to discover it.
+    client_id_metadata_document_supported: true,
+    scopes_supported: [...ALLOWED_SCOPES, 'openid', 'offline_access'],
+  };
+}
 
 function consentToken(uid: string, userId: string) {
   // The JWT secret is a separate key from the provider's persisted cookie keys.
@@ -51,15 +76,22 @@ async function interactionForUser(provider: Provider, req: Request, res: Paramet
 
 export function createOAuthRouter(provider = getOAuthProvider()) {
   const router = Router();
+  // nginx rewrites public /api/oauth/.well-known/* to /oauth/.well-known/*.
+  // Answer before oidc-provider's callback, whose mount-relative discovery
+  // advertises /oauth/* even though the canonical issuer uses /api/oauth/*.
+  router.get('/.well-known/oauth-authorization-server', (_req, res) => {
+    res.json(authorizationServerMetadata(provider));
+  });
   router.get('/connections', requireAuth, async (req, res) => {
     const connections = await prisma.oAuthConnection.findMany({
       where: { userId: requireUserId(req), revokedAt: null },
       orderBy: { createdAt: 'desc' },
-      select: { clientId: true, clientName: true, scopes: true, createdAt: true },
+      select: { clientId: true, clientName: true, scopes: true, createdAt: true, connectedAt: true },
     });
     res.json({ connections: connections.map((connection) => ({
       ...connection,
       scopes: connection.scopes.split(' '),
+      status: connection.connectedAt ? 'token_issued' : 'authorization_pending',
     })) });
   });
 
@@ -110,10 +142,15 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
         res.status(400).send('Solicitação OAuth inválida');
         return;
       }
-      // The choice is user consent, not a privilege check. Session, origin,
-      // signed CSRF token, and OAuth interaction were validated first.
-      // codeql[js/user-controlled-bypass] Explicit approval is the protected action itself.
-      if (req.body.decision !== 'approve') {
+      // User intent must match a fixed, expected action. It is not used to
+      // bypass authorization: session, origin, signed CSRF and interaction
+      // identity are all verified above, for BOTH approve and deny.
+      const decision = parseConsentDecision(req.body?.decision);
+      if (decision === null) {
+        res.status(400).send('Escolha de autorização inválida');
+        return;
+      }
+      if (decision === 'deny') {
         await provider.interactionFinished(req, res, { error: 'access_denied' }, { mergeWithLastSubmission: false });
         return;
       }
@@ -136,11 +173,22 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
       const grantId = await grant.save();
       const client = await provider.Client.find(clientId);
       const clientName = client?.clientName || clientId;
-      await prisma.oAuthConnection.upsert({
-        where: { userId_clientId: { userId, clientId } },
-        create: { userId, clientId, clientName, grantId, scopes: financeScopes.join(' ') },
-        update: { clientName, grantId, scopes: financeScopes.join(' '), revokedAt: null, createdAt: new Date() },
+      // Authentication was checked by requireAuth before this interaction, but
+      // account recovery can revoke the session before the consent is persisted.
+      // Serialize with recovery and revalidate inside the user's write lock.
+      const cookie: unknown = req.cookies?.[AUTH_COOKIE_NAME];
+      const claims = typeof cookie === 'string' ? verifyAuthToken(cookie) : null;
+      if (claims?.userId !== userId || !Number.isSafeInteger(claims.sessionVersion ?? 0)) {
+        res.status(401).send('Sessão expirada');
+        return;
+      }
+      const persisted = await persistOAuthConsentForSession(userId, claims.sessionVersion ?? 0, {
+        clientId, clientName, grantId, scopes: financeScopes,
       });
+      if (!persisted) {
+        res.status(401).send('Sessão expirada');
+        return;
+      }
       // Existing access tokens are invalidated immediately by grantId mismatch
       // in getOAuthGrantSubject; leave old provider interactions to expire.
       await provider.interactionFinished(req, res, { consent: { grantId } }, { mergeWithLastSubmission: false });
@@ -157,25 +205,7 @@ export function createOAuthRouter(provider = getOAuthProvider()) {
 export function createOAuthDiscoveryRouter(provider = getOAuthProvider()) {
   const router = Router();
   router.get(['/.well-known/oauth-authorization-server', '/.well-known/oauth-authorization-server/api/oauth'], (_req, res) => {
-    const issuer = provider.issuer;
-    res.json({
-      issuer,
-      authorization_endpoint: `${issuer}/auth`,
-      token_endpoint: `${issuer}/token`,
-      revocation_endpoint: `${issuer}/token/revocation`,
-      jwks_uri: `${issuer}/jwks`,
-      response_types_supported: ['code'],
-      grant_types_supported: ['authorization_code', 'refresh_token'],
-      token_endpoint_auth_methods_supported: ['none', 'private_key_jwt'],
-      token_endpoint_auth_signing_alg_values_supported: ['RS256'],
-      code_challenge_methods_supported: ['S256'],
-      // oidc-provider@9.12.2 includes `iss` in authorization-code redirects
-      // and redirectable authorization errors (RFC 9207).
-      authorization_response_iss_parameter_supported: true,
-      // Mirrors the configured CIMD feature, allowing ChatGPT to discover it.
-      client_id_metadata_document_supported: true,
-      scopes_supported: [...ALLOWED_SCOPES, 'openid', 'offline_access'],
-    });
+    res.json(authorizationServerMetadata(provider));
   });
   router.get(['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/api/mcp'], (_req, res) => {
     res.json({
