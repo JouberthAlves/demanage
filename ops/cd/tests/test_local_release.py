@@ -80,6 +80,12 @@ class LocalReleaseApprovalTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "acknowledge"):
             approval.promote(arguments(publish=True))
 
+    def test_local_publication_cannot_bypass_environment_witness(self):
+        with mock.patch.object(approval, "validate_ci_evidence") as evidence:
+            with self.assertRaisesRegex(RuntimeError, "environment-approved"):
+                approval.promote(arguments(publish=True, acknowledge_no_codeql=True))
+            evidence.assert_not_called()
+
     def test_refuse_other_github_actor(self):
         mocks = self.setup_success()
         mocks[1].return_value = {"login": "another-user"}
