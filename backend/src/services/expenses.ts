@@ -12,8 +12,11 @@ import { todayInSaoPaulo } from '@/lib/card-billing';
 import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { dateKey } from '@/lib/decimal';
 import {
+  assertProspectiveVersionedCardLimits,
   denormalizedCardId,
+  ExpenseSplitError,
   expenseSplitInclude,
+  getCommittedByCard,
   replaceExpenseSplits,
   resolveAndValidateSplits,
   type ResolvedSplit,
@@ -324,7 +327,8 @@ export async function updateExpense(
   now?: Date,
 ) {
   return withUserWriteLockTransaction(userId, async (tx) => {
-    const effectiveMonth = todayKeyInSaoPaulo(now ?? new Date()).slice(0, 7);
+    const editNow = now ?? new Date();
+    const effectiveMonth = todayKeyInSaoPaulo(editNow).slice(0, 7);
     const existing = await tx.expense.findFirst({
       where: { id, userId },
       include: { splits: true, payments: true },
@@ -399,6 +403,7 @@ export async function updateExpense(
       input,
       nextAmount,
       nextFrequency,
+      asOf: editNow,
     });
 
     const oldSplits = existing.splits.map((split) => ({
@@ -483,6 +488,59 @@ export async function updateExpense(
         ...(nextSplits ?? []).map((split) => split.cardId),
         ...priorCardIds,
       ], now);
+    }
+
+    if (recurringVersionChange) {
+      const previousVersions = oldVersions.length
+        ? parseObligationVersions(oldVersions)
+        : [{
+            sequence: 1,
+            effectiveMonth: legacyBaselineMonth(existing.startsAt, existing.createdAt),
+            amount: existing.amount,
+            cardId: existing.cardId,
+            splits: existing.splits,
+          }];
+      const proposedCardId = nextSplits
+        ? denormalizedCardId(nextSplits)
+        : existing.cardId;
+      const proposedSplits = nextSplits ?? existing.splits;
+      const projectedExpense = {
+        ...existing,
+        amount: nextAmount,
+        cardId: proposedCardId,
+        splits: proposedSplits,
+        frequency: nextFrequency,
+        dueDay: schedule.day ?? existing.dueDay,
+        startsAt: schedule.startsAt ?? existing.startsAt,
+        endsAt: schedule.endsAt ?? existing.endsAt,
+        obligationVersions: [
+          ...previousVersions,
+          {
+            sequence: oldVersions.length
+              ? oldVersions[oldVersions.length - 1].sequence + 1
+              : 2,
+            effectiveMonth,
+            amount: nextAmount,
+            cardId: proposedCardId,
+            splits: proposedSplits,
+          },
+        ],
+      };
+      const [cards, otherCommittedByCard] = await Promise.all([
+        tx.card.findMany({ where: { userId, archivedAt: null } }),
+        getCommittedByCard({ userId, excludeExpenseId: id, tx, asOf: editNow }),
+      ]);
+      try {
+        assertProspectiveVersionedCardLimits({
+          cards,
+          otherCommittedByCard,
+          prospective: projectedExpense,
+          asOf: editNow,
+        });
+      } catch (error) {
+        if (error instanceof ExpenseSplitError) throw conflict(error.message);
+        throw error;
+      }
     }
 
     let recordNewOneOffCash = false;
@@ -687,8 +745,9 @@ async function resolveNextSplits(args: {
   input: UpdateExpenseInput;
   nextAmount: number;
   nextFrequency: string;
+  asOf: Date;
 }): Promise<ResolvedSplit[] | null> {
-  const { userId, id, tx, existing, input, nextAmount, nextFrequency } = args;
+  const { userId, id, tx, existing, input, nextAmount, nextFrequency, asOf } = args;
   const splitsProvided =
     input.splits !== undefined || input.cardId !== undefined;
 
@@ -701,6 +760,7 @@ async function resolveNextSplits(args: {
       frequency: nextFrequency,
       excludeExpenseId: id,
       tx,
+      asOf,
     });
   }
 
@@ -720,6 +780,7 @@ async function resolveNextSplits(args: {
     frequency: nextFrequency,
     excludeExpenseId: id,
     tx,
+    asOf,
   });
 }
 

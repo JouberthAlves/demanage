@@ -1,11 +1,13 @@
-import type {
-  Card,
-  Expense,
-  ExpensePayment,
-  ExpenseSplit,
+import {
+  type Card,
+  type Expense,
+  type ExpensePayment,
+  type ExpenseSplit,
   Prisma,
 } from '@/generated/prisma/client';
 import {
+  type BillableExpense,
+  chargeAmountDecimal,
   chargesTotalDecimal,
   type CycleWindow,
   lateOneOffsDecimal,
@@ -90,6 +92,7 @@ export async function getCommittedByCard(args: {
   userId: string;
   excludeExpenseId?: string;
   tx?: Prisma.TransactionClient;
+  asOf?: Date;
 }) {
   const db = args.tx ?? prisma;
   const [cards, expenses] = await Promise.all([
@@ -115,7 +118,7 @@ export async function getCommittedByCard(args: {
     ...expense,
     obligationVersions: parseObligationVersions(expense.obligationVersions),
   }));
-  const todayKey = todayKeyInSaoPaulo();
+  const todayKey = todayKeyInSaoPaulo(args.asOf);
   const map = new Map<string, number>();
   for (const card of cards) {
     const window = currentCycleWindow(card, todayKey);
@@ -136,6 +139,31 @@ export async function getCommittedByCard(args: {
     );
   }
   return map;
+}
+
+/** The edited expense is absent from otherCommittedByCard. Its projected
+ * versions include every old open-cycle charge and the new terms once.
+ * The full-cycle minimum for new splits is checked separately. */
+export function assertProspectiveVersionedCardLimits(args: {
+  cards: Card[];
+  otherCommittedByCard: Map<string, number>;
+  prospective: BillableExpense;
+  asOf: Date;
+}) {
+  const todayKey = todayKeyInSaoPaulo(args.asOf);
+  for (const card of args.cards) {
+    if (card.limit == null) continue;
+    const window = currentCycleWindow(card, todayKey);
+    const projected = chargeAmountDecimal(args.prospective, card.id, window);
+    const available = new Prisma.Decimal(card.limit).minus(
+      args.otherCommittedByCard.get(card.id) ?? 0,
+    );
+    if (projected.gt(available)) {
+      throw new ExpenseSplitError(
+        `Limite insuficiente no cartão ${card.name} (disponível R$ ${available.toFixed(2).replace('.', ',')})`,
+      );
+    }
+  }
 }
 
 export function serializeExpenseSplits(
@@ -211,6 +239,7 @@ export async function resolveAndValidateSplits(args: {
   excludeExpenseId?: string;
   tx?: Prisma.TransactionClient;
   validateLimits?: boolean;
+  asOf?: Date;
 }): Promise<ResolvedSplit[]> {
   const inputs = normalizeSplitInputs({
     splits: args.splits,
@@ -243,9 +272,10 @@ export async function resolveAndValidateSplits(args: {
       userId: args.userId,
       excludeExpenseId: args.excludeExpenseId,
       tx: args.tx,
+      asOf: args.asOf,
     });
 
-    const todayKey = todayKeyInSaoPaulo();
+    const todayKey = todayKeyInSaoPaulo(args.asOf);
     const windows = new Map<string, CycleWindow>(
       [...cards.values()].map((card) => [
         card.id,
