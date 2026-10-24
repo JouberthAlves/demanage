@@ -72,6 +72,8 @@
       "@prisma/config>deepmerge-ts": "8.0.2",
       "ajv@6": "6.14.0",
       "brace-expansion@1": "1.1.21",
+      "body-parser": "2.4.0",
+      "fast-uri": "3.1.9",
       "flatted": "3.4.2",
       "ip-address": "10.7.4",
       "js-yaml": "4.3.2",
