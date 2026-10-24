@@ -18,15 +18,22 @@ except ImportError:  # The approval channel must never fall back to regexes.
     pg_parse_sql = None
 
 
-# Individually reviewed exceptions: bounded OAuth token issuance backfill and
-# piggy provenance immutability trigger. Complex future migrations (including
-# C04) remain blocked until final SQL is independently reviewed and pinned.
+# Individually reviewed SQL blobs. Each SHA-256 covers the complete Git blob,
+# including leading/trailing whitespace. Any byte or path change needs review.
+# This is only the SQL-shape gate; production still requires owner approval,
+# a disposable PostgreSQL rehearsal, and verified backup evidence.
 REVIEWED_SQL = {
     "backend/prisma/migrations/20261023210000_piggy_correction_origin/migration.sql": (
-        "be32187d748161dd32d998545536cf362fe2b89fe636e47f9a7ea3593534d594"
+        "ea23be8728984dd689ebeed2b180846da85367af9e6e2d0ee1f891de60f3b468"
     ),
     "backend/prisma/migrations/20261023210100_oauth_token_connection_status/migration.sql": (
-        "1798e389d3e2af97318bced4f682d8d76e5eed82faf63f31ee78e1085edbac76"
+        "3bb58025e8e191696e774df29d54578356b9f903d9ffe5f9c8a0ca8bad820b2b"
+    ),
+    "backend/prisma/migrations/20261023211000_c04_owner_composite_fks/migration.sql": (
+        "09767182912349193394712d9ef6bceda51638fc32ad5d531325c2dfbf079bdb"
+    ),
+    "backend/prisma/migrations/20261023213000_expense_obligation_versions/migration.sql": (
+        "01a359d263051d5745325ec099b5e12e633171c0ec64146e3bd7cc9a33f8915e"
     ),
 }
 
@@ -288,8 +295,11 @@ def validate_additive_sql(sql: str, path: str) -> None:
         raise RuntimeError("Invalid PostgreSQL migration SQL") from error
     if not statements:
         _deny("no executable statements")
-    digest = hashlib.sha256(sql.strip().encode("utf-8")).hexdigest()
-    if REVIEWED_SQL.get(path) == digest:
+    digest = hashlib.sha256(sql.encode("utf-8")).hexdigest()
+    reviewed_digest = REVIEWED_SQL.get(path)
+    if reviewed_digest is not None:
+        if digest != reviewed_digest:
+            _deny("reviewed migration SQL bytes changed")
         return
     for statement in statements:
         kind, body = _node(statement["stmt"])
