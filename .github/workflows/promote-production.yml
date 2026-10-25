@@ -15,6 +15,14 @@ on:
         description: 'One-time PR47 migration exception only: SHA256 of verified production dump after successful restore/rehearsal'
         required: false
         type: string
+      reviewed_issue87_backup_sha256:
+        description: 'Issue 87 only: independently verified production backup SHA256; requires human environment approval'
+        required: false
+        type: string
+      reviewed_issue87_rehearsal_sha256:
+        description: 'Issue 87 only: SHA256 of fresh private PostgreSQL 31-to-35 rehearsal proof'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -39,6 +47,8 @@ jobs:
       TARGET_SHA: ${{ inputs.commit_sha }}
       INITIAL_LIVE_SHA: ${{ inputs.initial_live_sha }}
       REVIEWED_PR47_BACKUP_SHA256: ${{ inputs.reviewed_pr47_backup_sha256 }}
+      REVIEWED_ISSUE87_BACKUP_SHA256: ${{ inputs.reviewed_issue87_backup_sha256 }}
+      REVIEWED_ISSUE87_REHEARSAL_SHA256: ${{ inputs.reviewed_issue87_rehearsal_sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -66,14 +76,18 @@ jobs:
           git cat-file -e "$TARGET_SHA^{commit}"
           git merge-base --is-ancestor "$TARGET_SHA" origin/master
 
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$TARGET_SHA&event=push&per_page=100" > "$RUNNER_TEMP/checks.json"
-          for workflow in CI CodeQL; do
-            jq -e --arg sha "$TARGET_SHA" --arg name "$workflow" \
-              '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .name == $name and .conclusion == "success")] | length > 0' \
-              "$RUNNER_TEMP/checks.json" > /dev/null || {
-                echo "::error::$workflow was not successful for this exact push SHA"
-                exit 1
-              }
+          # The app image may be from the earlier merge SHA; the newly merged
+          # approval workflow also must have passed hosted CI and CodeQL.
+          for check_sha in "$TARGET_SHA" "$GITHUB_SHA"; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$check_sha&event=push&per_page=100" > "$RUNNER_TEMP/checks-$check_sha.json"
+            for workflow in CI CodeQL; do
+              jq -e --arg sha "$check_sha" --arg name "$workflow" \
+                '[.workflow_runs[] | select(.head_sha == $sha and .event == "push" and .name == $name and .conclusion == "success")] | length > 0' \
+                "$RUNNER_TEMP/checks-$check_sha.json" > /dev/null || {
+                  echo "::error::$workflow was not successful for exact push SHA $check_sha"
+                  exit 1
+                }
+            done
           done
 
           if git ls-remote --exit-code --heads origin production > /dev/null; then
@@ -98,6 +112,13 @@ jobs:
             echo "::error::Normal production promotion must be a fast-forward from the live release; use a separately reviewed rollback procedure."
             exit 1
           fi
+          if [[ -n "$REVIEWED_ISSUE87_BACKUP_SHA256" || -n "$REVIEWED_ISSUE87_REHEARSAL_SHA256" ]]; then
+            if [[ "$PREVIOUS_SHA" != 'ec2a3d40a6c8218ab0550258305e1745ee3b1fbc' ||
+                  "$TARGET_SHA" != '62e98ccea16dd0d3164ab1689c11fe770b983393' ]]; then
+              echo "::error::Issue87 evidence inputs must never be reused on other promotions."
+              exit 1
+            fi
+          fi
           if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
             backend/prisma backend/prisma.config.ts backend/entrypoint.sh docker-compose.prod.yml; then
             # Strictly scoped, single-release exception: this exact SHA was
@@ -107,6 +128,14 @@ jobs:
                   "$TARGET_SHA" == '1d6377b94d539003a3f0a7c543d91503980a2ba9' &&
                   "$REVIEWED_PR47_BACKUP_SHA256" == '7db1db9c53de1f3aa982cdc514771046db5d9348287af2dad4934f62d5da979b' ]]; then
               echo "::notice::Explicit PR47-only DB migration approval attested by reviewed backup SHA; deployment still requires protected production environment approval."
+            elif [[ "$PREVIOUS_SHA" == 'ec2a3d40a6c8218ab0550258305e1745ee3b1fbc' &&
+                    "$TARGET_SHA" == '62e98ccea16dd0d3164ab1689c11fe770b983393' &&
+                    -n "$REVIEWED_ISSUE87_BACKUP_SHA256" &&
+                    -n "$REVIEWED_ISSUE87_REHEARSAL_SHA256" ]]; then
+              # Eligibility is NOT approval. Recheck the entire exact Git diff,
+              # reviewed proof, expiry and both OCI digests after resolution.
+              echo "ISSUE87_IMAGE_CHECK_REQUIRED=1" >> "$GITHUB_ENV"
+              echo "::notice::Issue87 exact migration candidate; awaiting immutable OCI verification."
             else
               echo "::error::Migrations, entrypoint or base Compose changed; production promotion blocked. A separate reviewed migration is required."
               exit 1
@@ -120,8 +149,21 @@ jobs:
             ref="ghcr.io/$GITHUB_REPOSITORY-$service:sha-$TARGET_SHA"
             digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' | jq -er '.digest')"
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
-            echo "${service^^}_IMAGE=ghcr.io/$GITHUB_REPOSITORY-$service@$digest" >> "$GITHUB_ENV"
+            image="ghcr.io/$GITHUB_REPOSITORY-$service@$digest"
+            echo "${service^^}_IMAGE=$image" >> "$GITHUB_ENV"
+            if [[ "$service" == backend ]]; then
+              BACKEND_IMAGE="$image"
+            else
+              FRONTEND_IMAGE="$image"
+            fi
           done
+          if [[ "${ISSUE87_IMAGE_CHECK_REQUIRED:-}" == 1 ]]; then
+            python3 ops/cd/issue87_release_gate.py \
+              --repo . --previous "$PREVIOUS_SHA" --target "$TARGET_SHA" \
+              --dump-sha256 "$REVIEWED_ISSUE87_BACKUP_SHA256" \
+              --rehearsal-sha256 "$REVIEWED_ISSUE87_REHEARSAL_SHA256" \
+              --backend "$BACKEND_IMAGE" --frontend "$FRONTEND_IMAGE"
+          fi
       - name: Prepare exact production pointer bytes
         id: prepare
         run: |

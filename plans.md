@@ -22,6 +22,11 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 ---
 
+### Regressão financeira após deploy — 24/10/2026
+
+- [x] **Implementação em branch de correção** — Confirmação explícita de entradas avulsas com data efetiva histórica, recibo imutável para valor/data, isolamento por usuário, versão otimista contra concorrência/replay e interface autenticada "Já recebi". Previsões sem confirmação continuam fora do saldo.
+- [ ] **Publicação e recuperação da conta** — Aguardar CI PostgreSQL/CodeQL e revisão formal do PR; implantar somente após gates protegidos e backup verificado. O titular deve registrar individualmente os recebimentos de 09/10/2026 (R$ 700,00 e R$ 234,87) na própria sessão autenticada; conferir então o saldo, sem SQL administrativo nem conversão automática de previsões.
+
 ## P0 — Dados (maior prioridade)
 
 ### Schema e banco
