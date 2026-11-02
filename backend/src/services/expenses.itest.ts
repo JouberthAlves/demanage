@@ -7,7 +7,7 @@ import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 
 import { parseCreateExpense, parseUpdateExpense } from './expense-input';
-import { createExpense, payExpense, updateExpense } from './expenses';
+import { archiveExpense, createExpense, payExpense, updateExpense } from './expenses';
 
 const day = todayKeyInSaoPaulo();
 const [year, month] = day.split('-').map(Number);
@@ -42,7 +42,7 @@ async function createTestCard(userId: string, name: string) {
   });
 }
 
-test('F01: a settled PIX one-off cannot be moved to card or repriced; descriptive edit preserves one payment', async () => {
+test('F01: a settled PIX one-off permits correcting a typo in amount but never changing payment method', async () => {
   const user = await createTestUser();
   try {
     const card = await createTestCard(user.id, 'PIX change target');
@@ -58,7 +58,6 @@ test('F01: a settled PIX one-off cannot be moved to card or repriced; descriptiv
     );
 
     for (const change of [
-      { amount: 200 },
       { cardId: card.id },
       {
         splits: [
@@ -83,10 +82,11 @@ test('F01: a settled PIX one-off cannot be moved to card or repriced; descriptiv
       user.id,
       expense.id,
       parseUpdateExpense({
-        amount: 100,
+        amount: 125.50,
       }),
     );
-    assert.equal(Number(renamed.amount), 100);
+    const corrected = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    assert.equal(Number(corrected.amount), 125.50);
     assert.equal(renamed.cardId, null);
     assert.deepEqual(
       (
@@ -94,7 +94,7 @@ test('F01: a settled PIX one-off cannot be moved to card or repriced; descriptiv
           where: { expenseId: expense.id },
         })
       ).map((payment) => Number(payment.amount)),
-      [100],
+      [125.50],
     );
     assert.deepEqual(
       await processUserCardBilling(user.id, afterCurrentClosing),
@@ -102,6 +102,33 @@ test('F01: a settled PIX one-off cannot be moved to card or repriced; descriptiv
         createdCount: 0,
       },
     );
+  } finally {
+    await cleanup(user.id);
+  }
+});
+
+test('deleting a paid manual PIX expense voids the ledger without deleting its audit payment', async () => {
+  const user = await createTestUser();
+  try {
+    const expense = await createExpense(user.id, parseCreateExpense({
+      name: 'Mistaken expense', amount: 85, category: 'outro',
+      frequency: 'unica', date: day,
+    }));
+    const original = await prisma.expensePayment.findFirstOrThrow({
+      where: { expenseId: expense.id },
+    });
+    await archiveExpense(user.id, expense.id);
+    const voided = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    assert.ok(voided.archivedAt);
+    assert.ok(voided.voidedAt);
+    assert.equal(Number(voided.amount), 85);
+    const payment = await prisma.expensePayment.findFirstOrThrow({
+      where: { expenseId: expense.id },
+    });
+    assert.equal(payment.id, original.id);
+    assert.equal(Number(payment.amount), 85);
+    await assert.rejects(() => archiveExpense(user.id, expense.id), /não encontrada/i);
+    await assert.rejects(() => updateExpense(user.id, expense.id, parseUpdateExpense({amount: 100})), /não encontrada/i);
   } finally {
     await cleanup(user.id);
   }
