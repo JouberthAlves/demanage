@@ -102,7 +102,6 @@ class DatabaseUrlReservedPasswordTests(unittest.TestCase):
             envfile = Path(temp) / 'test.env'
             password = 'ab@cd#ef%gh:ij'
             envfile.write_text(
-                "POSTGRES_PASSWORD='" + password + "'\n"
                 "JWT_SECRET=local-test-only\n"
                 "DEMANAGE_BACKEND_IMAGE=backend:test\n"
                 "DEMANAGE_FRONTEND_IMAGE=frontend:test\n",
