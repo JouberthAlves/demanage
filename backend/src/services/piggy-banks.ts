@@ -17,11 +17,11 @@ import {
   piggyGoalAmount,
   withdrawFromPiggyBank,
 } from '@/lib/piggy';
-import { hasAutoDebitInCurrentMonth } from '@/lib/piggy/model';
 import {
   interestAccruedThroughOnActivation,
   nextAutoDebitEnabledAt,
 } from '@/lib/piggy/activation';
+import { hasAutoDebitInCurrentMonth } from '@/lib/piggy/model';
 import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
