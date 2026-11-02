@@ -1,13 +1,26 @@
 import { act, createElement } from 'react';
-import { Window } from 'happy-dom';
 import { AxiosError, type AxiosResponse, type InternalAxiosRequestConfig } from 'axios';
+import { Window } from 'happy-dom';
 import assert from 'node:assert/strict';
+import { createHook } from 'node:async_hooks';
+import { registerHooks } from 'node:module';
 import test from 'node:test';
 
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 
 test('A01 App and real router keep recovery code through session remount until explicit confirmation', async () => {
+  // Some app-wide background timers outlive a mounted dashboard in a simulated
+  // DOM. Track only timers created during this isolated client test so they can
+  // be unrefed after unmount rather than keeping the Node test worker alive.
+  const timers = new Set<{ unref: () => void }>();
+  const hook = createHook({ init(_id, type, _trigger, resource) {
+    const timer = resource as { unref?: () => void };
+    if (type === 'Timeout' && typeof timer.unref === 'function') {
+      timers.add(timer as { unref: () => void });
+    }
+  } });
+  hook.enable();
   const browser = new Window({ url: 'http://localhost:5180/register' });
   const globalKeys = [
     'window', 'document', 'navigator', 'location', 'history',
@@ -48,10 +61,22 @@ test('A01 App and real router keep recovery code through session remount until e
       }
       return response([]);
     };
+    // The real App imports an image URL through a sidebar. Node's test runner
+    // does not have Vite's asset loader; only that static image needs a stub.
+    registerHooks({
+      resolve(specifier, context, nextResolve) {
+        if (specifier.endsWith('/favicon.svg')) {
+          return { url: 'data:text/javascript,export default "/favicon.svg";', shortCircuit: true };
+        }
+        return nextResolve(specifier, context);
+      },
+    });
     const { App } = await import('@/App');
     const { createRoot } = await import('react-dom/client');
-    const host = browser.document.createElement('div');
-    browser.document.body.appendChild(host);
+    // Happy DOM implements the browser DOM, but its TypeScript declarations are
+    // distinct from lib.dom types expected by React and querySelector generics.
+    const host = browser.document.createElement('div') as unknown as HTMLDivElement;
+    browser.document.body.appendChild(host as unknown as InstanceType<typeof browser.HTMLElement>);
     root = createRoot(host);
     await act(async () => {
       root!.render(createElement(App));
@@ -65,7 +90,7 @@ test('A01 App and real router keep recovery code through session remount until e
         const setter = Object.getOwnPropertyDescriptor(browser.HTMLInputElement.prototype, 'value')?.set;
         assert.ok(setter);
         setter.call(input, value);
-        input.dispatchEvent(new browser.Event('input', { bubbles: true }));
+        input.dispatchEvent(new browser.Event('input', { bubbles: true }) as unknown as Event);
       });
     };
     await fill('register-name', 'Registered');
@@ -75,7 +100,7 @@ test('A01 App and real router keep recovery code through session remount until e
     const previousRevision = useAuthStore.getState().sessionRevision;
     await act(async () => {
       host.querySelector('form')!.dispatchEvent(
-        new browser.Event('submit', { bubbles: true, cancelable: true }),
+        new browser.Event('submit', { bubbles: true, cancelable: true }) as unknown as Event,
       );
       await new Promise<void>((resolve) => setImmediate(resolve));
     });
@@ -98,13 +123,18 @@ test('A01 App and real router keep recovery code through session remount until e
     assert.doesNotMatch(host.textContent ?? '', /BCDF-GHJK-LMNP-QRST/);
   } finally {
     if (root) await act(async () => { root!.unmount(); });
+    const { router } = await import('@/router');
+    router.dispose();
     api.defaults.adapter = originalAdapter;
     useAuthStore.getState().setUser(null);
+    browser.close();
     for (const key of globalKeys) {
       const descriptor = originals.get(key);
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
       else Reflect.deleteProperty(globalThis, key);
     }
     await browser.happyDOM.abort();
+    hook.disable();
+    for (const timer of timers) timer.unref();
   }
 });
