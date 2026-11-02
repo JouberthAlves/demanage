@@ -69,6 +69,7 @@ test('uses a confirmed expense amount and date snapshot after the template chang
   );
 });
 
+
 test('does not project an unpaid recurring expense into historical cash flow', () => {
   assert.deepEqual(flows([expense()]), []);
 });

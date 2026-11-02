@@ -26,7 +26,7 @@ export async function readPatrimonySnapshot(
     const [expenses, entries, assetTransactions, piggyTransactions] =
       await Promise.all([
         tx.expense.findMany({
-          where: { userId },
+          where: { userId, voidedAt: null },
           include: { splits: true, payments: true },
         }),
         tx.entry.findMany({ where: { userId }, include: { receipts: true } }),
