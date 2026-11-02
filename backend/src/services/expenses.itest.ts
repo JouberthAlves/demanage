@@ -107,6 +107,45 @@ test('F01: a settled PIX one-off cannot be moved to card or repriced; descriptiv
   }
 });
 
+test('correcting a one-off PIX date atomically moves its payment and monthly cash, without duplication', async () => {
+  const user = await createTestUser();
+  const correctedDay = new Date(`${day}T12:00:00Z`);
+  correctedDay.setUTCDate(correctedDay.getUTCDate() - 2);
+  const correctedKey = correctedDay.toISOString().slice(0, 10);
+  try {
+    const expense = await createExpense(user.id, parseCreateExpense({
+      name: 'Data digitada errada', amount: 123.45,
+      category: 'outro', frequency: 'unica', date: day,
+    }));
+    const before = await prisma.expensePayment.findMany({ where: { expenseId: expense.id } });
+    assert.equal(before.length, 1);
+
+    await updateExpense(user.id, expense.id, parseUpdateExpense({
+      date: correctedKey, name: 'Data corrigida', amount: 123.45,
+    }));
+    const corrected = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    const payments = await prisma.expensePayment.findMany({ where: { expenseId: expense.id } });
+    assert.equal(corrected.occurredAt?.toISOString().slice(0, 10), correctedKey);
+    assert.equal(corrected.name, 'Data corrigida');
+    assert.equal(payments.length, 1);
+    assert.equal(payments[0].id, before[0].id);
+    assert.equal(payments[0].paidAt.toISOString().slice(0, 10), correctedKey);
+    assert.equal(payments[0].month, correctedKey.slice(0, 7));
+    assert.equal(Number(payments[0].amount), 123.45);
+
+    await updateExpense(user.id, expense.id, parseUpdateExpense({ date: correctedKey }));
+    assert.equal(await prisma.expensePayment.count({ where: { expenseId: expense.id } }), 1);
+    await assert.rejects(
+      () => updateExpense(user.id, expense.id, parseUpdateExpense({
+        date: day, amount: 200,
+      })),
+      /pagamento|consolidado|data/i,
+    );
+  } finally {
+    await cleanup(user.id);
+  }
+});
+
 test('F01: a paid recurring PIX expense cannot turn into one-off and duplicate its paid cycle', async () => {
   const user = await createTestUser();
   try {
