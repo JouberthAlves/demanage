@@ -1,7 +1,7 @@
-import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
-import { Tooltip } from 'recharts';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Children, isValidElement, type ReactElement, type ReactNode } from 'react';
+import { Tooltip } from 'recharts';
 
 import { MonthCompareBarChart } from '@/components/dashboard/month-compare-bar-chart';
 import type { MonthlySnapshot } from '@/types/finance';
