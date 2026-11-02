@@ -14,6 +14,7 @@ type IncomeRow = {
   endsAt?: Day;
   date?: Day;
   receiptHoldForMonth?: string | null;
+  salaryHolds?: Array<{ month: string }>;
   receivedForMonth?: string | null;
   archivedAt?: Day;
   receipts?: Array<{ month: string; amount: Prisma.Decimal | number; receivedAt: Day }>;
@@ -96,7 +97,9 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
       continue;
     }
     if (!active(day, entry)) continue;
-    if (salary && entry.receiptHoldForMonth === month) {
+    if (salary && (entry.salaryHolds
+      ? entry.salaryHolds.some((hold) => hold.month === month)
+      : entry.receiptHoldForMonth === month)) {
       continue;
     } else if (day <= today) {
       income = income.plus(frequencyAmount(entry.amount, entry.frequency));
@@ -146,6 +149,7 @@ export async function getFinancialOverview(userId: string, now = new Date()) {
         amount: true, frequency: true, type: true, receiveDay: true,
         startsAt: true, endsAt: true, date: true, archivedAt: true,
         receiptHoldForMonth: true, receivedForMonth: true,
+        salaryHolds: { select: { month: true } },
         receipts: { select: { month: true, amount: true, receivedAt: true } },
       },
     }),

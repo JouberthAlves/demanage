@@ -343,6 +343,8 @@ model Entry {
   customTag           CustomTag?        @relation(fields: [customTagId], references: [id], onDelete: SetNull)
   assetTransaction    AssetTransaction?
   receipts            EntryReceipt[]
+  salaryVersions      SalaryVersion[]
+  salaryHolds         SalaryHold[]
   piggyTransactions   PiggyTransaction[]
 
   // Leading-userId composite below also serves userId-only lookups.
@@ -358,6 +360,30 @@ model EntryReceipt {
   receivedAt DateTime
   createdAt  DateTime @default(now())
   entry      Entry    @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, month])
+}
+
+// Salary changes take effect in the São Paulo civil month, keeping older projections stable.
+model SalaryVersion {
+  id         String   @id @default(uuid())
+  entryId    String
+  month      String
+  amount     Decimal  @db.Decimal(12, 2)
+  receiveDay Int
+  createdAt  DateTime @default(now())
+  entry      Entry    @relation(fields: [entryId], references: [id], onDelete: Restrict)
+
+  @@unique([entryId, month])
+}
+
+// One outstanding salary hold per period; other months are never reset.
+model SalaryHold {
+  id        String   @id @default(uuid())
+  entryId   String
+  month     String
+  createdAt DateTime @default(now())
+  entry     Entry    @relation(fields: [entryId], references: [id], onDelete: Restrict)
 
   @@unique([entryId, month])
 }
