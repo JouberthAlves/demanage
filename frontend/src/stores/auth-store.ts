@@ -194,11 +194,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
       setLocalLogoutPending(true);
       setSessionUser(null, true);
       publishAuthSessionChange();
-      try {
-        await api.post('/auth/logout');
-      } catch (error) {
-        throw error;
-      }
+      await api.post('/auth/logout');
     },
     externalSessionChanged: () => {
       // Drop the previous account immediately; only /auth/me can establish
