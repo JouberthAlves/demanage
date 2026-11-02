@@ -231,10 +231,18 @@ function resolveMonthlyGoal(args: {
   goalAmount: number | null;
   targetDate: Date | null;
   autoDebit: boolean;
+  autoDebitDay: number;
+  balance?: number;
   fallback: unknown;
 }) {
-  const computed = computeMonthlyGoal(args.goalAmount, args.targetDate);
-  if (!args.autoDebit || computed > 0) return computed;
+  const computed = computeMonthlyGoal(
+    args.goalAmount,
+    args.targetDate,
+    new Date(),
+    args.balance ?? 0,
+    args.autoDebit ? args.autoDebitDay : undefined,
+  );
+  if (!args.autoDebit || (args.goalAmount != null && args.targetDate)) return computed;
 
   const parsed = parsePositiveAmount(args.fallback);
   if (parsed == null) throw badRequest(AUTO_DEBIT_VALUE_MESSAGE);
@@ -242,19 +250,20 @@ function resolveMonthlyGoal(args: {
 }
 
 export function createPiggyBank(userId: string, input: CreatePiggyInput) {
-  const monthlyGoal = resolveMonthlyGoal({
-    goalAmount: input.goalAmount,
-    targetDate: input.targetDate,
-    autoDebit: input.autoDebit,
-    fallback: input.monthlyGoal,
-  });
-
   let autoDebitDay = 1;
   if (input.autoDebit) {
     const day = parseAutoDebitDay(input.autoDebitDay ?? 1);
     if (day == null) throw badRequest(AUTO_DEBIT_DAY_MESSAGE);
     autoDebitDay = day;
   }
+
+  const monthlyGoal = resolveMonthlyGoal({
+    goalAmount: input.goalAmount,
+    targetDate: input.targetDate,
+    autoDebit: input.autoDebit,
+    autoDebitDay,
+    fallback: input.monthlyGoal,
+  });
 
   return prisma.piggyBank.create({
     data: {
@@ -298,17 +307,6 @@ export async function updatePiggyBank(
         input.targetDate !== undefined ? input.targetDate : existing.targetDate;
       const autoDebit = input.autoDebit ?? existing.autoDebit;
 
-      const monthlyGoal = resolveMonthlyGoal({
-        goalAmount,
-        targetDate,
-        autoDebit,
-        // `monthlyGoal` persistido é Prisma.Decimal: converter para string.
-        fallback:
-          input.monthlyGoal !== undefined
-            ? input.monthlyGoal
-            : existing.monthlyGoal.toString(),
-      });
-
       let autoDebitDay = existing.autoDebitDay;
       if (
         input.autoDebitDay !== undefined ||
@@ -322,6 +320,19 @@ export async function updatePiggyBank(
         if (autoDebit && day == null) throw badRequest(AUTO_DEBIT_DAY_MESSAGE);
         if (day != null) autoDebitDay = day;
       }
+
+      const monthlyGoal = resolveMonthlyGoal({
+        goalAmount,
+        targetDate,
+        autoDebit,
+        autoDebitDay,
+        balance: balanceFromTransactions(existing.transactions),
+        // `monthlyGoal` persistido é Prisma.Decimal: converter para string.
+        fallback:
+          input.monthlyGoal !== undefined
+            ? input.monthlyGoal
+            : existing.monthlyGoal.toString(),
+      });
 
       const yieldEnabled = input.yieldEnabled ?? existing.yieldEnabled;
       const cdiPercent = yieldEnabled
@@ -382,11 +393,8 @@ export function archivePiggyBank(userId: string, id: string) {
     if (bank.archivedAt) throw badRequest('Cofre já arquivado');
 
     const balance = balanceFromTransactions(bank.transactions);
-    const goalAmount = piggyGoalAmount(bank.goalAmount);
-    const goalReached =
-      goalAmount == null || Boolean(bank.completedAt) || balance >= goalAmount;
-    if (!goalReached) {
-      throw badRequest('Arquivar só é permitido após atingir a meta');
+    if (balance > 0) {
+      throw conflict('Saque o saldo do cofrinho antes de arquivar');
     }
 
     return tx.piggyBank.update({

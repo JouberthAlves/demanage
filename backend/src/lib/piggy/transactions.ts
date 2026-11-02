@@ -7,6 +7,7 @@ import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
 import { autoDebitEnabledAtAfterGoalReopened } from './activation';
 import { balanceDecimalFromTransactions } from './ledger';
+import { computeMonthlyGoal } from './model';
 
 export type DepositParams = {
   userId: string;
@@ -113,7 +114,20 @@ export async function depositToPiggyBankInTransaction(
     goalAmount != null && nextBalance.gte(goalAmount) && !bank.completedAt;
   const updatedBank = await tx.piggyBank.update({
     where: { id: bank.id },
-    data: completed ? { completedAt: day } : {},
+    data: {
+      ...(completed ? { completedAt: day } : {}),
+      ...(bank.goalAmount != null && bank.targetDate
+        ? {
+            monthlyGoal: computeMonthlyGoal(
+              bank.goalAmount,
+              bank.targetDate,
+              new Date(),
+              nextBalance,
+              bank.autoDebit ? bank.autoDebitDay : undefined,
+            ),
+          }
+        : {}),
+    },
     include: { transactions: true },
   });
 
@@ -289,6 +303,17 @@ export async function withdrawFromPiggyBank({
       where: { id: bank.id },
       data: {
         completedAt: reopenedGoal ? null : bank.completedAt,
+        ...(bank.goalAmount != null && bank.targetDate
+          ? {
+              monthlyGoal: computeMonthlyGoal(
+                bank.goalAmount,
+                bank.targetDate,
+                new Date(),
+                nextBalance,
+                bank.autoDebit ? bank.autoDebitDay : undefined,
+              ),
+            }
+          : {}),
         // Resume at the withdrawal, never charging the months spent complete.
         autoDebitEnabledAt: bank.autoDebit
           ? autoDebitEnabledAtAfterGoalReopened(
