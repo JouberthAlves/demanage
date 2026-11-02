@@ -45,6 +45,12 @@ async function cleanupUser(userId: string) {
   await prisma.entryReceipt.deleteMany({
     where: { entryId: { in: entryIds } },
   });
+  await prisma.salaryHold.deleteMany({
+    where: { entryId: { in: entryIds } },
+  });
+  await prisma.salaryVersion.deleteMany({
+    where: { entryId: { in: entryIds } },
+  });
   await prisma.expenseSplit.deleteMany({
     where: { expenseId: { in: expenseIds } },
   });
