@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildMonthlyHistory } from '@/lib/monthly-history';
+import {
+  buildMonthlyHistory,
+  cashCarryoverBeforeCurrentMonth,
+  financialExpenseThisMonth,
+  financialIncomeThisMonth,
+} from '@/lib/monthly-history';
 import type { Income, RecurringExpense } from '@/types/finance';
 import type { AssetTransaction } from '@/types/patrimony';
 
@@ -51,6 +56,92 @@ function assetTransaction(
     ...overrides,
   };
 }
+
+test('November starts with October cash instead of resetting the dashboard to zero', () => {
+  const november2 = new Date('2026-11-02T15:00:00.000Z');
+  const incomes = [
+    income({
+      frequency: 'unica',
+      date: '2026-10-09',
+      amount: 2614.87,
+      receipts: [
+        { month: '2026-10', amount: 2614.87, receivedAt: '2026-10-09T13:00:00Z' },
+      ],
+    }),
+  ];
+  const expenses = [
+    expense({
+      frequency: 'unica',
+      amount: 2053.91,
+      occurredAt: '2026-10-18T12:00:00Z',
+      registeredAt: '2026-10-18',
+    }),
+  ];
+
+  assert.equal(financialIncomeThisMonth(incomes, november2), 0);
+  assert.equal(financialExpenseThisMonth(expenses, november2), 0);
+  const carryover = cashCarryoverBeforeCurrentMonth(expenses, incomes, november2);
+  assert.equal(Math.round(carryover * 100), 56096);
+  assert.equal(buildMonthlyHistory(expenses, incomes, november2).at(-2)?.hasActivity, true);
+});
+
+test('carryover uses all recorded months, archived parents, and cash-only piggy/asset flows', () => {
+  const now = new Date('2026-11-02T15:00:00Z');
+  const incomes = [
+    income({
+      archivedAt: '2026-09-05T12:00:00Z',
+      receipts: [
+        { month: '2026-01', amount: 200, receivedAt: '2026-01-20T13:00:00Z' },
+        { month: '2026-11', amount: 500, receivedAt: '2026-11-03T13:00:00Z' },
+      ],
+    }),
+  ];
+  const expenses = [
+    expense({
+      archivedAt: '2026-10-01T12:00:00Z',
+      payments: [{ month: '2026-09', amount: 40, paidAt: '2026-09-04T13:00:00Z' }],
+    }),
+  ];
+  const piggy = [
+    { type: 'deposit' as const, amount: 30, date: '2026-10-15' },
+    { type: 'withdraw' as const, amount: 5, date: '2026-10-16' },
+    { type: 'deposit' as const, amount: 100, date: '2026-11-03' },
+  ];
+  const assets = [
+    assetTransaction({ id: 'buy', date: '2026-10-15', cashAmountBrl: '20' }),
+    assetTransaction({ id: 'adjust', type: 'MANUAL_ADJUSTMENT', date: '2026-10-15', cashAmountBrl: '500', expenseId: null }),
+    assetTransaction({ id: 'unlinked', date: '2026-10-15', cashAmountBrl: '1000', expenseId: null }),
+    assetTransaction({ id: 'sell', type: 'SELL', date: '2026-10-15', cashAmountBrl: '10', expenseId: null, entryId: 'internal-sale' }),
+  ];
+
+  assert.equal(cashCarryoverBeforeCurrentMonth(expenses, incomes, now, piggy, assets), 125);
+  assert.equal(buildMonthlyHistory(expenses, incomes, now).at(0)?.hasActivity, false);
+});
+
+test('a one-off paid in its own month counts once, preserving prior recurring payments', () => {
+  const now = new Date('2026-11-02T15:00:00Z');
+  const expenses = [
+    expense({
+      frequency: 'unica', amount: 90,
+      occurredAt: '2026-09-08T12:00:00Z', registeredAt: '2026-09-08',
+      payments: [
+        { month: '2026-08', amount: 50, paidAt: '2026-08-04T13:00:00Z' },
+        { month: '2026-09', amount: 90, paidAt: '2026-09-08T13:00:00Z' },
+      ],
+    }),
+  ];
+  assert.equal(cashCarryoverBeforeCurrentMonth(expenses, [], now), -140);
+});
+
+test('late October Sao Paulo timestamp stays in October opening cash', () => {
+  const beforeMidnight = new Date('2026-11-01T02:45:00Z');
+  const afterMidnight = new Date('2026-11-01T03:15:00Z');
+  const incomes = [income({
+    receipts: [{ month: '2026-10', amount: 80, receivedAt: '2026-11-01T02:30:00Z' }],
+  })];
+  assert.equal(cashCarryoverBeforeCurrentMonth([], incomes, beforeMidnight), 0);
+  assert.equal(cashCarryoverBeforeCurrentMonth([], incomes, afterMidnight), 80);
+});
 
 test('F08: asset cash purchases and sales enter dashboard cash exactly once, without adjustments', () => {
   const now = new Date('2026-09-10T16:00:00.000Z');

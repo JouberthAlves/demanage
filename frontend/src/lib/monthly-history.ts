@@ -146,6 +146,94 @@ export function financialIncomeThisMonth(incomes: Income[], now: Date) {
   );
 }
 
+/**
+ * Cash recorded before the current month is the opening balance of this month.
+ * Unlike the six-month chart, this must include the entire recorded history:
+ * rolling the calendar over must never reset the user's accumulated cash.
+ *
+ * Past recurring schedules without an actual receipt/payment are not cash
+ * evidence. The current month's scheduled amounts are added separately by
+ * financialIncomeThisMonth/financialExpenseThisMonth.
+ */
+export function cashCarryoverBeforeCurrentMonth(
+  expenses: RecurringExpense[],
+  incomes: Income[],
+  now: Date,
+  piggyMovements: PiggyCashMovement[] = [],
+  assetTransactions: AssetTransaction[] = [],
+) {
+  const currentMonth = currentMonthKey(now);
+  const isPastMonth = (month: string | null) =>
+    month !== null && month < currentMonth;
+  const cashAmount = (value: number | string) => {
+    const amount = Number(value);
+    return Number.isFinite(amount) && amount > 0 ? amount : 0;
+  };
+
+  const received = incomes.reduce(
+    (total, income) =>
+      total +
+      (income.receipts ?? []).reduce(
+        (sum, receipt) =>
+          sum +
+          (isPastMonth(monthFromTimestamp(receipt.receivedAt, now))
+            ? cashAmount(receipt.amount)
+            : 0),
+        0,
+      ),
+    0,
+  );
+
+  const spent = expenses.reduce((total, expense) => {
+    const payments = (expense.payments ?? []).filter((payment) =>
+      monthFromTimestamp(payment.paidAt, now),
+    );
+    const paidBefore = payments.reduce(
+      (sum, payment) =>
+        sum +
+        (isPastMonth(monthFromTimestamp(payment.paidAt, now))
+          ? cashAmount(payment.amount)
+          : 0),
+      0,
+    );
+
+    // Match the historical chart: an occurred one-off adds cash unless a
+    // payment already records that same calendar month. Older payments of a
+    // former recurring template may be different, legitimate cash events.
+    const registeredMonth = monthFromDateOnly(expense.registeredAt, now);
+    const unreceiptedOneOff =
+      !expense.isInvoice &&
+      expense.frequency === 'unica' &&
+      expense.occurredAt &&
+      isPastMonth(registeredMonth) &&
+      !payments.some(
+        (payment) => monthFromTimestamp(payment.paidAt, now) === registeredMonth,
+      )
+        ? cashAmount(expenseCashAmount(expense))
+        : 0;
+    return total + paidBefore + unreceiptedOneOff;
+  }, 0);
+
+  const piggyNet = piggyMovements.reduce((total, movement) => {
+    if (!isPastMonth(monthFromDateOnly(movement.date, now))) return total;
+    const amount = cashAmount(movement.amount);
+    return total + (movement.type === 'withdraw' ? amount : -amount);
+  }, 0);
+
+  const assetNet = assetTransactions.reduce((total, transaction) => {
+    if (!isPastMonth(monthFromDateOnly(transaction.date, now))) return total;
+    if (transaction.type === 'BUY' && transaction.expenseId) {
+      return total - cashAmount(transaction.cashAmountBrl);
+    }
+    if (transaction.type === 'SELL' && transaction.entryId) {
+      return total + cashAmount(transaction.cashAmountBrl);
+    }
+    return total;
+  }, 0);
+
+  return received - spent + piggyNet + assetNet;
+}
+
 export function buildMonthlyHistory(
   expenses: RecurringExpense[],
   incomes: Income[],
