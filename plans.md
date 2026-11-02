@@ -1,5 +1,12 @@
 # plans.md — Roadmap deManage
 
+## Correção de valores e exclusões contábeis — 02/11/2026
+
+- [x] Permitir corrigir valor e/ou data de uma despesa PIX avulsa com recibo automático único, atualizando o mesmo recibo atomicamente, sem duplicação ou alteração do cartão.
+- [x] Distinguir despesa apagada/invalidada (`voidedAt`) de despesa apenas arquivada; preservar recibos auditáveis e retirar os lançamentos anulados do saldo e patrimônio.
+- [x] Criar migration aditiva e testes PostgreSQL para edição, exclusão, histórico antigo e fluxo patrimonial.
+- [ ] Validar todos os gates, promover e fazer deploy protegido com backup; após migration, anular somente as duas despesas já excluídas e verificadas de R$ 85,00 e R$ 95,00, sem alterar recibos ou outras contas.
+
 ## Incidente de 02/11/2026 — login bloqueado, edição de data e latência
 
 - [x] Isolar o rate limit de navegação da cota de operações de escrita, manter proteção independente para autenticação; permitir health e restauração de sessão mesmo com cota esgotada.

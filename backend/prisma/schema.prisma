@@ -250,6 +250,9 @@ model Expense {
   billingPeriodStart DateTime?
   billingPeriodEnd   DateTime?
   archivedAt         DateTime?
+  // Explicit user deletion voids this ledger's cash effect. Older archives
+  // remain valid historical cash records and must not be silently rewritten.
+  voidedAt           DateTime?
   systemOrigin       LedgerOrigin      @default(manual)
   createdAt          DateTime          @default(now())
   updatedAt          DateTime          @updatedAt

@@ -5,8 +5,8 @@ import { entryInclude } from './entries';
 import { expenseInclude } from './expenses';
 
 /**
- * Read-only source for historical ledgers. Archived manual parents retain their
- * recorded payments/receipts; the normal CRUD lists remain active-only.
+ * Read-only source for historical ledgers. Older archived manual parents
+ * retain their recorded payments; explicitly voided expenses are excluded.
  * Internal asset/piggy rows have separate cash sources and must not be counted twice.
  */
 export async function listFinancialHistory(
@@ -15,7 +15,7 @@ export async function listFinancialHistory(
 ) {
   const [expenses, incomes] = await Promise.all([
     db.expense.findMany({
-      where: { userId, systemOrigin: 'manual' },
+      where: { userId, systemOrigin: 'manual', voidedAt: null },
       include: expenseInclude,
       orderBy: { createdAt: 'desc' },
     } satisfies Prisma.ExpenseFindManyArgs),
