@@ -4,9 +4,12 @@ import './register-aliases';
 import { createServer } from 'http';
 
 import { createApp } from './app';
+import { prisma } from './lib/prisma';
+import { installGracefulShutdown } from './server-shutdown';
 import { API_PORT, NODE_ENV } from './utils/var';
 
 const httpServer = createServer(createApp());
+installGracefulShutdown(httpServer, () => prisma.$disconnect());
 
 function onListen() {
   console.log(`deManage API running on ${API_PORT}`);

@@ -44,7 +44,8 @@ services:
       HOME: /tmp
       API_PORT: 8888
       APP_URL: ${APP_URL:-https://demanage.biel.dev.br}
-      DATABASE_URL: postgresql://demanage:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/demanage?schema=public
+      # The backend entrypoint URL-encodes reserved password characters before Prisma starts.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
     depends_on:
