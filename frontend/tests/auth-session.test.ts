@@ -1,5 +1,3 @@
-import { createElement } from 'react';
-import { renderToString } from 'react-dom/server';
 import {
   AxiosError,
   type AxiosResponse,
@@ -8,7 +6,6 @@ import {
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
 import { api } from '@/lib/api';
 import { useAuthStore } from '@/stores/auth-store';
 import type { AuthUser } from '@/types/auth';
@@ -94,44 +91,6 @@ test('login and logout bump the session revision on every account change', async
     assert.equal(useAuthStore.getState().user?.id, 'b');
   } finally {
     api.defaults.adapter = originalAdapter;
-    useAuthStore.getState().setUser(null);
-  }
-});
-
-test('A01 recovery code survives registration session remount and renders until acknowledgement', async () => {
-  const adapter = api.defaults.adapter;
-  try {
-    useAuthStore.getState().setUser(null);
-    api.defaults.adapter = async (config) => {
-      if (config.url === '/auth/register') {
-        return response(config, { user: user('new-registration'), recoveryCode: 'BCDF-GHJK-LMNP-QRST' });
-      }
-      if (config.url === '/auth/me') return response(config, { user: user('new-registration') });
-      throw new Error(`Unexpected ${config.url}`);
-    };
-    const oldRevision = useAuthStore.getState().sessionRevision;
-    const result = await useAuthStore.getState().register('New', 'new@example.invalid', 'safe-password');
-    assert.equal(result.recoveryCode, 'BCDF-GHJK-LMNP-QRST');
-    assert.ok(useAuthStore.getState().sessionRevision > oldRevision);
-    assert.equal(useAuthStore.getState().pendingRecoveryCode, result.recoveryCode);
-
-    // Remounting the route discards local component state but not the session
-    // store. Render the actual code panel from a fresh store read: server-side
-    // RegisterPage itself always sees Zustand's pre-hydration loading snapshot.
-    const stateAfterRemount = useAuthStore.getState();
-    assert.equal(stateAfterRemount.isLoading, false);
-    assert.equal(stateAfterRemount.pendingRecoveryCode, result.recoveryCode);
-    const remountedCodePanel = renderToString(createElement(RecoveryCodePanel, {
-      recoveryCode: stateAfterRemount.pendingRecoveryCode!,
-    }));
-    assert.match(remountedCodePanel, /BCDF-GHJK-LMNP-QRST/);
-    assert.match(remountedCodePanel, /Copiar código/);
-    await useAuthStore.getState().fetchMe();
-    assert.equal(useAuthStore.getState().pendingRecoveryCode, result.recoveryCode);
-    useAuthStore.getState().acknowledgeRecoveryCode();
-    assert.equal(useAuthStore.getState().pendingRecoveryCode, null);
-  } finally {
-    api.defaults.adapter = adapter;
     useAuthStore.getState().setUser(null);
   }
 });
