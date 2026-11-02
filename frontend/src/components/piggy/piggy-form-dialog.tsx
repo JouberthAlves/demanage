@@ -91,11 +91,12 @@ function PiggyForm({
       bank?.balance ?? 0,
       now,
       form.autoDebit ? Number(form.autoDebitDay) || 1 : undefined,
+      bank?.autoDebitPaidThisMonth ?? false,
     );
-  }, [form.goalAmount, form.targetDate, form.autoDebit, form.autoDebitDay, bank?.balance, now]);
+  }, [form.goalAmount, form.targetDate, form.autoDebit, form.autoDebitDay, bank?.balance, bank?.autoDebitPaidThisMonth, now]);
 
   const previewMonths = form.targetDate
-    ? monthsUntilTarget(form.targetDate, now, form.autoDebit ? Number(form.autoDebitDay) || 1 : undefined)
+    ? monthsUntilTarget(form.targetDate, now, form.autoDebit ? Number(form.autoDebitDay) || 1 : undefined, bank?.autoDebitPaidThisMonth ?? false)
     : 0;
 
   async function handleSubmit(event: React.FormEvent) {

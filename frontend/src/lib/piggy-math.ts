@@ -1,5 +1,10 @@
 /** Meses de calendário até a data alvo (mínimo 1). */
-export function monthsUntilTarget(targetDate: string, from = new Date(), autoDebitDay?: number) {
+export function monthsUntilTarget(
+  targetDate: string,
+  from = new Date(),
+  autoDebitDay?: number,
+  currentMonthPaid = false,
+) {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(targetDate);
   if (!match) return 1;
 
@@ -13,7 +18,7 @@ export function monthsUntilTarget(targetDate: string, from = new Date(), autoDeb
     autoDebitDay,
     new Date(year, month + 1, 0).getDate(),
   );
-  const missedCurrent = from.getDate() > dueDay(from.getFullYear(), from.getMonth()) ? 1 : 0;
+  const missedCurrent = currentMonthPaid || from.getDate() > dueDay(from.getFullYear(), from.getMonth()) ? 1 : 0;
   const beyondTarget = Number(match[3]) < dueDay(toYear, toMonth) ? 1 : 0;
   return Math.max(1, months - missedCurrent - beyondTarget);
 }
@@ -30,12 +35,13 @@ export function computeMonthlyGoal(
   balance = 0,
   from = new Date(),
   autoDebitDay?: number,
+  currentMonthPaid = false,
 ) {
   if (!Number.isFinite(goalAmount) || goalAmount <= 0 || !targetDate) {
     return 0;
   }
   const remainingCents = Math.max(0, Math.round(goalAmount * 100) - Math.round(balance * 100));
   if (!remainingCents) return 0;
-  const months = monthsUntilTarget(targetDate, from, autoDebitDay);
+  const months = monthsUntilTarget(targetDate, from, autoDebitDay, currentMonthPaid);
   return Math.round(remainingCents / months) / 100;
 }

@@ -7,7 +7,7 @@ import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 
 import { autoDebitEnabledAtAfterGoalReopened } from './activation';
 import { balanceDecimalFromTransactions } from './ledger';
-import { computeMonthlyGoal } from './model';
+import { computeMonthlyGoal, hasAutoDebitInCurrentMonth } from './model';
 
 export type DepositParams = {
   userId: string;
@@ -124,6 +124,7 @@ export async function depositToPiggyBankInTransaction(
               new Date(),
               nextBalance,
               bank.autoDebit ? bank.autoDebitDay : undefined,
+              hasAutoDebitInCurrentMonth([...bank.transactions, piggyTx]),
             ),
           }
         : {}),
@@ -311,6 +312,7 @@ export async function withdrawFromPiggyBank({
                 new Date(),
                 nextBalance,
                 bank.autoDebit ? bank.autoDebitDay : undefined,
+                hasAutoDebitInCurrentMonth(bank.transactions),
               ),
             }
           : {}),

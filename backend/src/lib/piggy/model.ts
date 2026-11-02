@@ -3,6 +3,7 @@ import {
   dayKeyOfDate,
   parseCivilDate,
   todayInSaoPaulo,
+  todayKeyInSaoPaulo,
 } from '@/lib/civil-date';
 import { decimal, type DecimalLike } from '@/lib/decimal';
 import { PiggyError } from '@/lib/errors';
@@ -10,7 +11,24 @@ import { toMoney } from '@/lib/money';
 
 import { balanceFromTransactions } from './ledger';
 
-export function monthsUntilTarget(from: Date, targetDate: Date, autoDebitDay?: number) {
+export function hasAutoDebitInCurrentMonth(
+  transactions: Array<Pick<PiggyTransaction, 'type' | 'source' | 'date'>>,
+  from = new Date(),
+) {
+  const currentMonth = todayKeyInSaoPaulo(from).slice(0, 7);
+  return transactions.some((transaction) =>
+    transaction.type === 'deposit' &&
+    transaction.source === 'auto_debit' &&
+    dayKeyOfDate(transaction.date).slice(0, 7) === currentMonth,
+  );
+}
+
+export function monthsUntilTarget(
+  from: Date,
+  targetDate: Date,
+  autoDebitDay?: number,
+  currentMonthPaid = false,
+) {
   const months =
     (targetDate.getUTCFullYear() - from.getUTCFullYear()) * 12 +
     (targetDate.getUTCMonth() - from.getUTCMonth()) + 1;
@@ -22,7 +40,7 @@ export function monthsUntilTarget(from: Date, targetDate: Date, autoDebitDay?: n
     autoDebitDay,
     new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate(),
   );
-  const missedCurrent = from.getUTCDate() > dueDay(from) ? 1 : 0;
+  const missedCurrent = currentMonthPaid || from.getUTCDate() > dueDay(from) ? 1 : 0;
   const beyondTarget = targetDate.getUTCDate() < dueDay(targetDate) ? 1 : 0;
   return Math.max(1, months - missedCurrent - beyondTarget);
 }
@@ -41,6 +59,7 @@ export function computeMonthlyGoal(
   from = new Date(),
   balance: DecimalLike = 0,
   autoDebitDay?: number,
+  currentMonthPaid = false,
 ) {
   if (goalAmount == null || !targetDate) return 0;
   const remaining = decimal(goalAmount).minus(decimal(balance));
@@ -50,6 +69,7 @@ export function computeMonthlyGoal(
     today,
     targetDate,
     autoDebitDay,
+    currentMonthPaid,
   );
   return toMoney(remaining.div(months)).toNumber();
 }
@@ -93,6 +113,7 @@ export function serializePiggyBank(
     goalAmount,
     targetDate: bank.targetDate ? dayKeyOfDate(bank.targetDate) : null,
     monthlyGoal,
+    autoDebitPaidThisMonth: hasAutoDebitInCurrentMonth(transactions),
     autoDebit: bank.autoDebit,
     autoDebitDay: bank.autoDebitDay,
     isEmergency: bank.isEmergency,
