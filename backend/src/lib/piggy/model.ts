@@ -1,22 +1,30 @@
 import type { PiggyBank, PiggyTransaction } from '@/generated/prisma/client';
 import {
   dayKeyOfDate,
-  dayKeyToDate,
-  formatDayKey,
   parseCivilDate,
   todayInSaoPaulo,
 } from '@/lib/civil-date';
-import { decimal } from '@/lib/decimal';
+import { decimal, type DecimalLike } from '@/lib/decimal';
 import { PiggyError } from '@/lib/errors';
 import { toMoney } from '@/lib/money';
 
 import { balanceFromTransactions } from './ledger';
 
-export function monthsUntilTarget(from: Date, targetDate: Date) {
+export function monthsUntilTarget(from: Date, targetDate: Date, autoDebitDay?: number) {
   const months =
     (targetDate.getUTCFullYear() - from.getUTCFullYear()) * 12 +
-    (targetDate.getUTCMonth() - from.getUTCMonth());
-  return Math.max(1, months);
+    (targetDate.getUTCMonth() - from.getUTCMonth()) + 1;
+  if (autoDebitDay == null || months <= 0) return Math.max(1, months);
+
+  // Count only future scheduled payments, including the target month when its
+  // payment day fits before the target date (31 clamps on short months).
+  const dueDay = (date: Date) => Math.min(
+    autoDebitDay,
+    new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate(),
+  );
+  const missedCurrent = from.getUTCDate() > dueDay(from) ? 1 : 0;
+  const beyondTarget = targetDate.getUTCDate() < dueDay(targetDate) ? 1 : 0;
+  return Math.max(1, months - missedCurrent - beyondTarget);
 }
 
 export function piggyGoalAmount(value: unknown): number | null {
@@ -26,19 +34,24 @@ export function piggyGoalAmount(value: unknown): number | null {
   return amount;
 }
 
-/** goal / months, rounded HALF_UP to cents (R$ 0,29 / 2 = 0,15). */
+/** Remaining goal / effective months, rounded HALF_UP to cents. */
 export function computeMonthlyGoal(
-  goalAmount: number | null,
+  goalAmount: DecimalLike | null,
   targetDate: Date | null,
   from = new Date(),
+  balance: DecimalLike = 0,
+  autoDebitDay?: number,
 ) {
-  if (!goalAmount || goalAmount <= 0 || !targetDate) return 0;
+  if (goalAmount == null || !targetDate) return 0;
+  const remaining = decimal(goalAmount).minus(decimal(balance));
+  if (remaining.lte(0)) return 0;
   const today = todayInSaoPaulo(from);
   const months = monthsUntilTarget(
-    dayKeyToDate(formatDayKey(today.getUTCFullYear(), today.getUTCMonth(), 1)),
+    today,
     targetDate,
+    autoDebitDay,
   );
-  return toMoney(decimal(goalAmount).div(months)).toNumber();
+  return toMoney(remaining.div(months)).toNumber();
 }
 
 export function parseAutoDebitDay(value: unknown): number | null {
