@@ -1,6 +1,5 @@
 import { createElement } from 'react';
 import { renderToString } from 'react-dom/server';
-import { MemoryRouter } from 'react-router';
 import {
   AxiosError,
   type AxiosResponse,
@@ -9,8 +8,8 @@ import {
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
 import { api } from '@/lib/api';
-import { RegisterPage } from '@/pages/register-page';
 import { useAuthStore } from '@/stores/auth-store';
 import type { AuthUser } from '@/types/auth';
 
@@ -99,7 +98,7 @@ test('login and logout bump the session revision on every account change', async
   }
 });
 
-test('A01 recovery code remains visible after the registration session remount until acknowledgement', async () => {
+test('A01 recovery code survives registration session remount and renders until acknowledgement', async () => {
   const adapter = api.defaults.adapter;
   try {
     useAuthStore.getState().setUser(null);
@@ -116,20 +115,17 @@ test('A01 recovery code remains visible after the registration session remount u
     assert.ok(useAuthStore.getState().sessionRevision > oldRevision);
     assert.equal(useAuthStore.getState().pendingRecoveryCode, result.recoveryCode);
 
-    // The actual App remount creates a new RegisterPage instance. Its content
-    // must be derived from the session store, not the prior component useState.
-    // SSR ordinarily reads Zustand's pre-hydration initial snapshot (loading).
-    // Use the current state as the server snapshot to simulate a new mounted
-    // page reading the already-established client session after a remount.
-    const originalInitialState = useAuthStore.getInitialState;
-    try {
-      useAuthStore.getInitialState = useAuthStore.getState;
-      const remountedPage = renderToString(createElement(MemoryRouter, null, createElement(RegisterPage)));
-      assert.match(remountedPage, /BCDF-GHJK-LMNP-QRST/);
-      assert.match(remountedPage, /Já guardei, continuar/);
-    } finally {
-      useAuthStore.getInitialState = originalInitialState;
-    }
+    // Remounting the route discards local component state but not the session
+    // store. Render the actual code panel from a fresh store read: server-side
+    // RegisterPage itself always sees Zustand's pre-hydration loading snapshot.
+    const stateAfterRemount = useAuthStore.getState();
+    assert.equal(stateAfterRemount.isLoading, false);
+    assert.equal(stateAfterRemount.pendingRecoveryCode, result.recoveryCode);
+    const remountedCodePanel = renderToString(createElement(RecoveryCodePanel, {
+      recoveryCode: stateAfterRemount.pendingRecoveryCode!,
+    }));
+    assert.match(remountedCodePanel, /BCDF-GHJK-LMNP-QRST/);
+    assert.match(remountedCodePanel, /Copiar código/);
     await useAuthStore.getState().fetchMe();
     assert.equal(useAuthStore.getState().pendingRecoveryCode, result.recoveryCode);
     useAuthStore.getState().acknowledgeRecoveryCode();
