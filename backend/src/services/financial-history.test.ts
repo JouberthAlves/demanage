@@ -40,8 +40,12 @@ test('historical financial queries keep archived manual parents and payment/rece
     incomes: [archivedEntry],
   });
   assert.equal(calls.length, 2);
-  for (const { args } of calls) {
-    assert.deepEqual(args.where, { userId: 'owner-1', systemOrigin: 'manual' });
+  for (const { domain, args } of calls) {
+    assert.deepEqual(args.where,
+      domain === 'expense'
+        ? { userId: 'owner-1', systemOrigin: 'manual', voidedAt: null }
+        : { userId: 'owner-1', systemOrigin: 'manual' },
+    );
     assert.ok(args.include && typeof args.include === 'object');
     assert.equal('archivedAt' in (args.where as object), false);
   }
