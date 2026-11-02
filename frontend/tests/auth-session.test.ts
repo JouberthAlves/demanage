@@ -56,6 +56,14 @@ function failure(config: InternalAxiosRequestConfig, status?: number) {
   );
 }
 
+async function waitForAdapterStart(started: () => boolean) {
+  for (let attempt = 0; attempt < 20 && !started(); attempt++) {
+    // Axios request interceptors run asynchronously before reaching the test adapter.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.ok(started(), 'expected the request to reach the test adapter');
+}
+
 test('login and logout bump the session revision on every account change', async () => {
   const originalAdapter = api.defaults.adapter;
 
@@ -110,9 +118,18 @@ test('A01 recovery code remains visible after the registration session remount u
 
     // The actual App remount creates a new RegisterPage instance. Its content
     // must be derived from the session store, not the prior component useState.
-    const remountedPage = renderToString(createElement(MemoryRouter, null, createElement(RegisterPage)));
-    assert.match(remountedPage, /BCDF-GHJK-LMNP-QRST/);
-    assert.match(remountedPage, /Já guardei, continuar/);
+    // SSR ordinarily reads Zustand's pre-hydration initial snapshot (loading).
+    // Use the current state as the server snapshot to simulate a new mounted
+    // page reading the already-established client session after a remount.
+    const originalInitialState = useAuthStore.getInitialState;
+    try {
+      useAuthStore.getInitialState = useAuthStore.getState;
+      const remountedPage = renderToString(createElement(MemoryRouter, null, createElement(RegisterPage)));
+      assert.match(remountedPage, /BCDF-GHJK-LMNP-QRST/);
+      assert.match(remountedPage, /Já guardei, continuar/);
+    } finally {
+      useAuthStore.getInitialState = originalInitialState;
+    }
     await useAuthStore.getState().fetchMe();
     assert.equal(useAuthStore.getState().pendingRecoveryCode, result.recoveryCode);
     useAuthStore.getState().acknowledgeRecoveryCode();
@@ -148,7 +165,7 @@ test('A02 failed offline/5xx logout clears UI immediately and refuses stale cook
       assert.equal(useAuthStore.getState().user, null, 'financial data must disappear before HTTP settles');
       assert.equal(useAuthStore.getState().isAuthenticated, false);
       assert.ok(useAuthStore.getState().sessionRevision > revision);
-      assert.ok(rejectLogout);
+      await waitForAdapterStart(() => Boolean(rejectLogout));
       rejectLogout!(failure({ url: '/auth/logout', headers: {} } as InternalAxiosRequestConfig, status));
       await assert.rejects(pendingLogout);
       assert.equal(await useAuthStore.getState().fetchMe(), null);
@@ -181,6 +198,7 @@ test('late auth/me from the previous user cannot overwrite a new login', async (
     };
 
     const pendingMe = useAuthStore.getState().fetchMe();
+    await waitForAdapterStart(() => Boolean(resolvePreviousMe));
     await useAuthStore.getState().login('b@example.com', 'password');
     const revision = useAuthStore.getState().sessionRevision;
     assert.ok(resolvePreviousMe);
