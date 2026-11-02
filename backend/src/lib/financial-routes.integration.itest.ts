@@ -411,6 +411,7 @@ test('archiving a former card settles historical obligations once after moving i
     const expense = await createExpense(user.id, parseCreateExpense({
       name: 'Card assignment changes', category: 'outro', frequency: 'mensal',
       amount: 100, dueDay: 1, startsAt: firstMonth.toISOString().slice(0, 10),
+      endsAt: today.toISOString().slice(0, 10),
       splits: [
         { kind: 'card', cardId: oldCard.id, percent: 60 },
         { kind: 'pix', percent: 40 },
