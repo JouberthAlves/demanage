@@ -45,7 +45,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@eslint/js": "^9.39.5",
+    "@eslint/js": "^10.0.1",
     "@types/cookie-parser": "^1.4.10",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
@@ -56,8 +56,7 @@
     "@types/pg": "^8.23.1",
     "@typescript-eslint/eslint-plugin": "^8.71.2",
     "@typescript-eslint/parser": "^8.71.2",
-    "eslint": "^9.38.0",
-    "eslint-plugin-import": "^2.32.0",
+    "eslint": "^10.12.0",
     "eslint-plugin-simple-import-sort": "^14.0.0",
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
@@ -69,6 +68,7 @@
   "pnpm": {
     "overrides": {
       "@humanfs/node": "0.16.8",
+      "@hono/node-server": "2.1.5",
       "@prisma/config>deepmerge-ts": "8.0.2",
       "ajv@6": "6.14.0",
       "brace-expansion@1": "1.1.21",
@@ -77,8 +77,9 @@
       "flatted": "3.4.2",
       "ip-address": "10.7.4",
       "js-yaml": "4.3.2",
-      "minimatch@3": "3.1.4",
-      "mysql2": "3.23.1"
+      "minimatch@10": "11.0.1",
+      "mysql2": "3.23.1",
+      "qs": "6.16.1"
     }
   }
 }
