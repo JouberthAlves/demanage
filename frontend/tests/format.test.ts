@@ -45,6 +45,16 @@ test('maskBrlInput caps the value at 12 digits (R$ 9.999.999.999,99)', () => {
   assert.equal(maskBrlInput('9999999999999'), '9.999.999.999,99');
 });
 
+test('maskBrlInput lets Backspace empty a zero amount one character at a time', () => {
+  let value = '0,00';
+  for (const expected of ['0,0', '0,', '0', '']) {
+    value = maskBrlInput(value.slice(0, -1));
+    assert.equal(value, expected);
+  }
+  assert.equal(maskBrlInput('150'), '1,50');
+  assert.equal(maskBrlInput('0,05'), '0,05');
+});
+
 test('parseCurrencyInput reads the masked value back as a number', () => {
   assert.equal(parseCurrencyInput(''), 0);
   assert.equal(parseCurrencyInput('0,05'), 0.05);
