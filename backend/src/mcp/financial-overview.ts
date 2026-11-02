@@ -1,4 +1,5 @@
 import { Prisma } from '@/generated/prisma/client';
+import { countWeeklyOccurrences } from '@/lib/billing/charges';
 import { dayKeyInSaoPaulo, dayKeyOfDate, todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { getPatrimonyHistory } from '@/lib/patrimony';
 import { prisma } from '@/lib/prisma';
@@ -10,6 +11,7 @@ type IncomeRow = {
   frequency: string;
   type: string;
   receiveDay?: number | null;
+  createdAt?: Day;
   startsAt?: Day;
   endsAt?: Day;
   date?: Day;
@@ -22,6 +24,7 @@ type ExpenseRow = {
   amount: Prisma.Decimal | number;
   frequency: string;
   dueDay?: number | null;
+  createdAt?: Day;
   startsAt?: Day;
   endsAt?: Day;
   occurredAt?: Day;
@@ -68,8 +71,14 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
   const active = (day: string, row: { startsAt?: Day; endsAt?: Day }) =>
     (!key(row.startsAt) || day >= key(row.startsAt)!) &&
     (!key(row.endsAt) || day <= key(row.endsAt)!);
-  const frequencyAmount = (value: Prisma.Decimal | number, frequency: string) =>
-    new Prisma.Decimal(value).mul(frequency === 'semanal' ? 4 : 1);
+  const weeklyAmount = (value: Prisma.Decimal | number, day: number | null | undefined, row: { startsAt?: Day; createdAt?: Day; endsAt?: Day }) => {
+    // The first scheduled day fixes the weekday. Date-only schedule fields are
+    // civil dates; receipt/payment timestamps are resolved separately below.
+    const anchor = key(row.startsAt) ?? timestampKey(row.createdAt) ?? scheduled(day);
+    const endKey = key(row.endsAt);
+    const through = endKey && endKey < today ? endKey : today;
+    return new Prisma.Decimal(value).mul(countWeeklyOccurrences(anchor, `${month}-01`, through));
+  };
 
   let income = new Prisma.Decimal(0);
   let outflow = new Prisma.Decimal(0);
@@ -88,18 +97,24 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
       // A due date alone is never evidence of realized cash.
       continue;
     }
+    // A recorded receipt settles its own competence, possibly in another month.
+    // Its immutable cash event has already been added above.
+    if (entry.receipts?.some((receipt) => receipt.month === month)) continue;
+    if (entry.frequency === 'semanal') {
+      income = income.plus(weeklyAmount(entry.amount, entry.receiveDay, entry));
+      continue;
+    }
     const day = scheduled(entry.receiveDay);
     const salary = entry.type === 'salario' && entry.frequency === 'mensal';
-    if (salary && entry.receipts?.some((receipt) => receipt.month === month)) continue;
     if (salary && entry.receivedForMonth === month) {
-      income = income.plus(frequencyAmount(entry.amount, entry.frequency));
+      income = income.plus(entry.amount);
       continue;
     }
     if (!active(day, entry)) continue;
     if (salary && entry.receiptHoldForMonth === month) {
       continue;
     } else if (day <= today) {
-      income = income.plus(frequencyAmount(entry.amount, entry.frequency));
+      income = income.plus(entry.amount);
     }
   }
   for (const expense of expenses) {
@@ -118,9 +133,13 @@ export function calculateMonthlyCash({ today, entries, expenses, movements }: {
     }
     // A cycle paid early belongs to its paidAt month, never to its due month.
     if (expense.payments?.some((payment) => payment.month === month)) continue;
+    if (expense.frequency === 'semanal') {
+      outflow = outflow.plus(weeklyAmount(cash(expense), expense.dueDay, expense));
+      continue;
+    }
     const day = scheduled(expense.dueDay);
     if (active(day, expense) && (day <= today || expense.paidForMonth === month)) {
-      outflow = outflow.plus(frequencyAmount(cash(expense), expense.frequency));
+      outflow = outflow.plus(cash(expense));
     }
   }
   for (const movement of movements) {
@@ -143,7 +162,7 @@ export async function getFinancialOverview(userId: string, now = new Date()) {
     prisma.entry.findMany({
       where: { userId, systemOrigin: 'manual' },
       select: {
-        amount: true, frequency: true, type: true, receiveDay: true,
+        amount: true, frequency: true, type: true, receiveDay: true, createdAt: true,
         startsAt: true, endsAt: true, date: true, archivedAt: true,
         receiptHoldForMonth: true, receivedForMonth: true,
         receipts: { select: { month: true, amount: true, receivedAt: true } },
@@ -152,7 +171,7 @@ export async function getFinancialOverview(userId: string, now = new Date()) {
     prisma.expense.findMany({
       where: { userId, systemOrigin: 'manual' },
       select: {
-        amount: true, frequency: true, dueDay: true, startsAt: true,
+        amount: true, frequency: true, dueDay: true, createdAt: true, startsAt: true,
         endsAt: true, occurredAt: true, paidForMonth: true, cardId: true,
         isInvoice: true, archivedAt: true,
         splits: { select: { kind: true, amount: true } },
