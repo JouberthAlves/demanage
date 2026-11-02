@@ -6,8 +6,8 @@ import test from 'node:test';
 
 import { createApp } from '@/app';
 import { AUTH_COOKIE_NAME, signAuthToken } from '@/lib/auth';
-import { processPiggyAutoDebits } from '@/lib/piggy';
 import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo, weekdayOfKey } from '@/lib/civil-date';
+import { processPiggyAutoDebits } from '@/lib/piggy';
 import { computeMonthlyGoal, serializePiggyBank } from '@/lib/piggy/model';
 import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { prisma } from '@/lib/prisma';
