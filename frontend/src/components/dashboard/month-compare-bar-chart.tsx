@@ -80,6 +80,7 @@ export function MonthCompareBarChart({
             }
           />
           <Tooltip
+            cursor={false}
             contentStyle={{
               background: '#111',
               border: '1px solid rgba(255,255,255,0.08)',
