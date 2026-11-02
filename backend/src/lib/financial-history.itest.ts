@@ -67,6 +67,22 @@ test('historical endpoint keeps archived cash but isolates users and ordinary CR
     }
 
     // Internal cash rows belong to the asset/piggy sources, not this endpoint.
+    const voided = await prisma.expense.create({
+      data: {
+        userId: owner,
+        name: 'Voided mistaken purchase',
+        amount: 85,
+        category: 'outro',
+        frequency: 'unica',
+        occurredAt: old,
+        archivedAt: old,
+        voidedAt: old,
+      },
+    });
+    await prisma.expensePayment.create({
+      data: { expenseId: voided.id, month: '2026-10', amount: 85, paidAt: old },
+    });
+
     await prisma.expense.create({
       data: {
         userId: owner,
