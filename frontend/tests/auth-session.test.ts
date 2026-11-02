@@ -1,3 +1,6 @@
+import { createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import {
   AxiosError,
   type AxiosResponse,
@@ -7,6 +10,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { api } from '@/lib/api';
+import { RegisterPage } from '@/pages/register-page';
 import { useAuthStore } from '@/stores/auth-store';
 import type { AuthUser } from '@/types/auth';
 
@@ -84,6 +88,77 @@ test('login and logout bump the session revision on every account change', async
   } finally {
     api.defaults.adapter = originalAdapter;
     useAuthStore.getState().setUser(null);
+  }
+});
+
+test('A01 recovery code remains visible after the registration session remount until acknowledgement', async () => {
+  const adapter = api.defaults.adapter;
+  try {
+    useAuthStore.getState().setUser(null);
+    api.defaults.adapter = async (config) => {
+      if (config.url === '/auth/register') {
+        return response(config, { user: user('new-registration'), recoveryCode: 'BCDF-GHJK-LMNP-QRST' });
+      }
+      if (config.url === '/auth/me') return response(config, { user: user('new-registration') });
+      throw new Error(`Unexpected ${config.url}`);
+    };
+    const oldRevision = useAuthStore.getState().sessionRevision;
+    const result = await useAuthStore.getState().register('New', 'new@example.invalid', 'safe-password');
+    assert.equal(result.recoveryCode, 'BCDF-GHJK-LMNP-QRST');
+    assert.ok(useAuthStore.getState().sessionRevision > oldRevision);
+    assert.equal(useAuthStore.getState().pendingRecoveryCode, result.recoveryCode);
+
+    // The actual App remount creates a new RegisterPage instance. Its content
+    // must be derived from the session store, not the prior component useState.
+    const remountedPage = renderToString(createElement(MemoryRouter, null, createElement(RegisterPage)));
+    assert.match(remountedPage, /BCDF-GHJK-LMNP-QRST/);
+    assert.match(remountedPage, /Já guardei, continuar/);
+    await useAuthStore.getState().fetchMe();
+    assert.equal(useAuthStore.getState().pendingRecoveryCode, result.recoveryCode);
+    useAuthStore.getState().acknowledgeRecoveryCode();
+    assert.equal(useAuthStore.getState().pendingRecoveryCode, null);
+  } finally {
+    api.defaults.adapter = adapter;
+    useAuthStore.getState().setUser(null);
+  }
+});
+
+test('A02 failed offline/5xx logout clears UI immediately and refuses stale cookie reauthentication', async () => {
+  const adapter = api.defaults.adapter;
+  for (const status of [undefined, 500]) {
+    try {
+      useAuthStore.getState().setUser(user('account-a'));
+      const revision = useAuthStore.getState().sessionRevision;
+      let rejectLogout: ((error: unknown) => void) | undefined;
+      let meRequests = 0;
+      api.defaults.adapter = async (config) => {
+        if (config.url === '/auth/logout') {
+          return new Promise<AxiosResponse>((_resolve, reject) => {
+            rejectLogout = reject;
+          });
+        }
+        if (config.url === '/auth/me') {
+          meRequests++;
+          return response(config, { user: user('account-a') });
+        }
+        if (config.url === '/auth/login') return response(config, { user: user('account-b') });
+        throw new Error(`Unexpected ${config.url}`);
+      };
+      const pendingLogout = useAuthStore.getState().logout();
+      assert.equal(useAuthStore.getState().user, null, 'financial data must disappear before HTTP settles');
+      assert.equal(useAuthStore.getState().isAuthenticated, false);
+      assert.ok(useAuthStore.getState().sessionRevision > revision);
+      assert.ok(rejectLogout);
+      rejectLogout!(failure({ url: '/auth/logout', headers: {} } as InternalAxiosRequestConfig, status));
+      await assert.rejects(pendingLogout);
+      assert.equal(await useAuthStore.getState().fetchMe(), null);
+      assert.equal(meRequests, 0, 'still-live server cookie must not reopen the local financial UI');
+      await useAuthStore.getState().login('b@example.invalid', 'secret');
+      assert.equal(useAuthStore.getState().user?.id, 'account-b');
+    } finally {
+      api.defaults.adapter = adapter;
+      useAuthStore.getState().setUser(null);
+    }
   }
 });
 
