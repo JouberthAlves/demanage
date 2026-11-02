@@ -96,6 +96,29 @@ export function assertOneOffMutationSafe(args: {
   return args.newCashAmount > 0;
 }
 
+/** One-off PIX entries create their own immutable payment automatically. A
+ * clerical date correction can relocate that exact receipt, atomically, but
+ * may not reprice it, alter its payment method, or rewrite card invoices. */
+export function isSafeOneOffDateCorrection(args: {
+  oldDate: Date | null;
+  newDate: Date | null;
+  oldAmount: number;
+  newAmount: number;
+  cashAmount: number;
+  splitsUnchanged: boolean;
+  hasCardComponent: boolean;
+  payments: Array<{ month: string; amount: number; paidAt: Date }>;
+}) {
+  const { oldDate, newDate, payments } = args;
+  if (!oldDate || !newDate || dateKey(oldDate) === dateKey(newDate)) return false;
+  if (args.oldAmount !== args.newAmount || !args.splitsUnchanged ||
+      args.hasCardComponent || args.cashAmount <= 0 || payments.length !== 1) return false;
+  const payment = payments[0];
+  return payment.month === dateKey(oldDate).slice(0, 7) &&
+    dateKey(payment.paidAt) === dateKey(oldDate) &&
+    Math.round(payment.amount * 100) === Math.round(args.cashAmount * 100);
+}
+
 /** A one-off cannot restart an old recurring obligation's immutable price chain. */
 export function assertExpenseFrequencyTransitionSafe(
   currentFrequency: string,
@@ -400,19 +423,6 @@ export async function updateExpense(
 
     const nextOccurredAt =
       nextFrequency === 'unica' ? (schedule.date ?? existing.occurredAt) : null;
-    if (
-      existing.frequency === 'unica' &&
-      existing.payments.length > 0 &&
-      input.schedule.date !== undefined &&
-      nextFrequency === 'unica' &&
-      (!nextOccurredAt ||
-        !existing.occurredAt ||
-        dateKey(nextOccurredAt) !== dateKey(existing.occurredAt))
-    ) {
-      throw badRequest(
-        'A data de uma despesa já registrada não pode ser alterada',
-      );
-    }
     assertUniqueDateNotFuture(nextOccurredAt);
 
     const nextSplits = await resolveNextSplits({
@@ -434,6 +444,30 @@ export async function updateExpense(
     }));
     const oldAmount = Number(existing.amount);
     const revisedSplits = nextSplits ?? oldSplits;
+    const oneOffDateChanged = existing.frequency === 'unica' &&
+      nextFrequency === 'unica' &&
+      input.schedule.date !== undefined &&
+      (nextOccurredAt ? dateKey(nextOccurredAt) : null) !==
+        (existing.occurredAt ? dateKey(existing.occurredAt) : null);
+    const safeCashDateCorrection = oneOffDateChanged && isSafeOneOffDateCorrection({
+      oldDate: existing.occurredAt,
+      newDate: nextOccurredAt,
+      oldAmount,
+      newAmount: nextAmount,
+      cashAmount: cashOfPersistedExpense(existing),
+      splitsUnchanged: comparableSplits(revisedSplits, existing.cardId, nextAmount) ===
+        comparableSplits(oldSplits, existing.cardId, oldAmount),
+      hasCardComponent: Boolean(existing.cardId) ||
+        existing.splits.some((split) => split.kind === 'card'),
+      payments: existing.payments.map((payment) => ({
+        month: payment.month,
+        amount: Number(payment.amount),
+        paidAt: payment.paidAt,
+      })),
+    });
+    if (oneOffDateChanged && existing.payments.length > 0 && !safeCashDateCorrection) {
+      throw conflict('Esta data pertence a um pagamento ou cartão já consolidado; apenas a data de uma despesa PIX avulsa sem outras alterações pode ser corrigida');
+    }
     const financialChange = nextAmount !== oldAmount ||
       (nextSplits !== null && comparableSplits(revisedSplits, existing.cardId, nextAmount) !==
         comparableSplits(oldSplits, existing.cardId, oldAmount));
@@ -606,7 +640,7 @@ export async function updateExpense(
           comparableSplits(nextSplits, null, nextAmount) !==
             comparableSplits(oldSplits, existing.cardId, oldAmount));
 
-      if (financialChange) {
+      if (financialChange && !safeCashDateCorrection) {
         const affectedCardIds = [
           ...new Set(
             [
@@ -685,6 +719,23 @@ export async function updateExpense(
       },
     });
     if (count === 0) throw conflict(CONFLICT_MESSAGE);
+
+    if (safeCashDateCorrection && nextOccurredAt) {
+      const original = existing.payments[0];
+      const result = await tx.expensePayment.updateMany({
+        where: {
+          id: original.id,
+          expenseId: id,
+          month: original.month,
+          paidAt: original.paidAt,
+        },
+        data: {
+          month: dateKey(nextOccurredAt).slice(0, 7),
+          paidAt: nextOccurredAt,
+        },
+      });
+      if (result.count !== 1) throw conflict(CONFLICT_MESSAGE);
+    }
 
     if (nextSplits) {
       await replaceExpenseSplits({ tx, expenseId: id, resolved: nextSplits });

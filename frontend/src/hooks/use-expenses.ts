@@ -33,14 +33,23 @@ function useExpenseMutation<TVariables, TResult>(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSuccess: () => invalidateDomain(queryClient, 'expenses'),
+    // Cache refresh is not part of the save transaction. Awaiting every
+    // dependent refetch delays the modal by seconds on slower connections.
+    onSuccess: () => { void invalidateDomain(queryClient, 'expenses'); },
   });
 }
 
 export function useCreateExpense() {
-  return useExpenseMutation((payload: ExpensePayload) =>
-    createExpense(payload),
-  );
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: ExpensePayload) => createExpense(payload),
+    onSuccess: (created) => {
+      queryClient.setQueryData<RecurringExpense[]>(queryKeys.expenses, (old) =>
+        old ? [created, ...old.filter((entry) => entry.id !== created.id)] : old,
+      );
+      void invalidateDomain(queryClient, 'expenses');
+    },
+  });
 }
 
 export function useUpdateExpense() {
