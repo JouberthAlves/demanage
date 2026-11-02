@@ -17,6 +17,7 @@ import {
   piggyGoalAmount,
   withdrawFromPiggyBank,
 } from '@/lib/piggy';
+import { hasAutoDebitInCurrentMonth } from '@/lib/piggy/model';
 import {
   interestAccruedThroughOnActivation,
   nextAutoDebitEnabledAt,
@@ -233,6 +234,7 @@ function resolveMonthlyGoal(args: {
   autoDebit: boolean;
   autoDebitDay: number;
   balance?: number;
+  currentMonthPaid?: boolean;
   fallback: unknown;
 }) {
   const computed = computeMonthlyGoal(
@@ -241,6 +243,7 @@ function resolveMonthlyGoal(args: {
     new Date(),
     args.balance ?? 0,
     args.autoDebit ? args.autoDebitDay : undefined,
+    args.currentMonthPaid ?? false,
   );
   if (!args.autoDebit || (args.goalAmount != null && args.targetDate)) return computed;
 
@@ -327,6 +330,7 @@ export async function updatePiggyBank(
         autoDebit,
         autoDebitDay,
         balance: balanceFromTransactions(existing.transactions),
+        currentMonthPaid: hasAutoDebitInCurrentMonth(existing.transactions),
         // `monthlyGoal` persistido é Prisma.Decimal: converter para string.
         fallback:
           input.monthlyGoal !== undefined

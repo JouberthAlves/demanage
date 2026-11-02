@@ -11,6 +11,7 @@ import {
 import { balanceFromTransactions } from '@/lib/piggy/ledger';
 import {
   computeMonthlyGoal,
+  hasAutoDebitInCurrentMonth,
   parseOptionalTargetDate,
   serializePiggyTransaction,
 } from '@/lib/piggy/model';
@@ -58,6 +59,32 @@ test('B01: monthly plan covers January through December and uses only remaining 
     ),
     120,
   );
+  // November 2 is the due day: once November posts, only December remains.
+  assert.equal(
+    computeMonthlyGoal(
+      300.03,
+      new Date('2026-12-31T12:00:00.000Z'),
+      new Date('2026-11-02T15:00:00.000Z'),
+      150.02,
+      2,
+      true,
+    ),
+    150.01,
+  );
+});
+
+test('B01 P2: only a posted auto-debit for the current calendar month consumes the installment', () => {
+  const paidInNovember = [{
+    type: 'deposit' as const,
+    source: 'auto_debit' as const,
+    date: new Date('2026-11-02T12:00:00.000Z'),
+  }];
+  assert.equal(hasAutoDebitInCurrentMonth(paidInNovember, new Date('2026-11-02T15:00:00.000Z')), true);
+  assert.equal(hasAutoDebitInCurrentMonth(paidInNovember, new Date('2026-12-02T15:00:00.000Z')), false);
+  assert.equal(hasAutoDebitInCurrentMonth([
+    { type: 'deposit', source: 'manual', date: new Date('2026-11-02T12:00:00.000Z') },
+    { type: 'interest', source: 'yield', date: new Date('2026-11-02T12:00:00.000Z') },
+  ], new Date('2026-11-02T15:00:00.000Z')), false);
 });
 
 test('auto-debit catches up an overdue day once and records the due date', () => {

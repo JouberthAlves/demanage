@@ -7,13 +7,16 @@ import test from 'node:test';
 import { createApp } from '@/app';
 import { AUTH_COOKIE_NAME, signAuthToken } from '@/lib/auth';
 import { processPiggyAutoDebits } from '@/lib/piggy';
-import { computeMonthlyGoal } from '@/lib/piggy/model';
+import { addDaysToKey, dayKeyToDate, todayKeyInSaoPaulo, weekdayOfKey } from '@/lib/civil-date';
+import { computeMonthlyGoal, serializePiggyBank } from '@/lib/piggy/model';
 import { catchUpPiggyInterest } from '@/lib/piggy-interest';
 import { prisma } from '@/lib/prisma';
 import {
   createPiggyBank,
   depositToBank,
+  listPiggyBanks,
   listPiggyCashMovements,
+  updatePiggyBank,
   withdrawFromBank,
 } from '@/services/piggy-banks';
 
@@ -145,5 +148,73 @@ test('B01: persisted monthly amount tracks deposits and withdrawals without losi
     const afterWithdrawal = Number((await prisma.piggyBank.findUniqueOrThrow({ where: { id: bank.id } })).monthlyGoal);
     assert.equal(afterWithdrawal, computeMonthlyGoal(1200, targetDate, new Date(), 199.99));
     assert.ok(afterWithdrawal > afterDeposit);
+  });
+});
+
+test('B01 P2: auto-debit paid on due day leaves only unpaid calendar installments', async () => {
+  await withUser(async (userId) => {
+    const dayKey = todayKeyInSaoPaulo();
+    const year = Number(dayKey.slice(0, 4));
+    const month = Number(dayKey.slice(5, 7)) - 1;
+    const day = Number(dayKey.slice(8, 10));
+    const targetDate = new Date(Date.UTC(year, month + 2, 0, 12));
+    const start = new Date(Date.UTC(year, month, 1, 12));
+    const now = new Date(Date.UTC(year, month, day, 18));
+    const initial = computeMonthlyGoal('300.03', targetDate, now, 0, day);
+    const bank = await prisma.piggyBank.create({
+      data: {
+        userId,
+        name: 'Paid installment',
+        goalAmount: '300.03',
+        targetDate,
+        monthlyGoal: initial,
+        autoDebit: true,
+        autoDebitDay: day,
+        autoDebitEnabledAt: start,
+        createdAt: start,
+      },
+    });
+    assert.equal((await processPiggyAutoDebits(userId, now)).createdCount, 1);
+    const paid = await prisma.piggyBank.findUniqueOrThrow({ where: { id: bank.id } });
+    const remaining = paid.goalAmount!.minus(initial);
+    assert.equal(paid.monthlyGoal.toString(), remaining.toDecimalPlaces(2).toString());
+    assert.equal(serializePiggyBank((await listPiggyBanks(userId, false))[0]).autoDebitPaidThisMonth, true);
+    assert.equal((await processPiggyAutoDebits(userId, now)).createdCount, 0);
+
+    const edited = await updatePiggyBank(userId, bank.id, { name: 'Paid installment edit' });
+    assert.equal(edited.monthlyGoal.toString(), remaining.toDecimalPlaces(2).toString());
+    const afterWithdraw = await withdrawFromBank(userId, bank.id, { amount: 0.01, note: null });
+    assert.equal(afterWithdraw.bank.monthlyGoal.toString(), remaining.plus('0.01').toString());
+
+    let interestDay = addDaysToKey(dayKey, 1);
+    while ([0, 6].includes(weekdayOfKey(interestDay))) {
+      interestDay = addDaysToKey(interestDay, 1);
+    }
+    if (interestDay.slice(0, 7) === dayKey.slice(0, 7)) {
+      await prisma.piggyBank.update({
+        where: { id: bank.id },
+        data: {
+          yieldEnabled: true,
+          cdiPercent: 100,
+          interestAccruedThrough: dayKeyToDate(dayKey),
+        },
+      });
+      const interest = await catchUpPiggyInterest(userId, {
+        now: dayKeyToDate(addDaysToKey(interestDay, 1)),
+        fetchHistory: async () => ({
+          provider: 'test',
+          stale: false,
+          points: [{ date: interestDay, value: '0.1' }],
+        }),
+      });
+      assert.equal(interest.createdCount, 1);
+      const transactions = await prisma.piggyTransaction.findMany({ where: { piggyBankId: bank.id } });
+      const newBalance = transactions.reduce((balance, tx) =>
+        tx.type === 'withdraw' ? balance.minus(tx.amount) : balance.plus(tx.amount),
+      paid.goalAmount!.minus('300.03'));
+      const afterInterest = await prisma.piggyBank.findUniqueOrThrow({ where: { id: bank.id } });
+      assert.equal(afterInterest.monthlyGoal.toString(), paid.goalAmount!.minus(newBalance).toDecimalPlaces(2).toString());
+    }
+    assert.equal(await prisma.piggyTransaction.count({ where: { piggyBankId: bank.id, source: 'auto_debit' } }), 1);
   });
 });

@@ -122,4 +122,7 @@ test('B01: preview includes 12 installments from January through December and sa
   assert.equal(computeMonthlyGoal(1200, '2026-12-31', 1200, january), 0);
   assert.equal(computeMonthlyGoal(0.29, '2026-02-28', 0, january), 0.15);
   assert.equal(monthsUntilTarget('2026-12-15', new Date('2026-01-21T15:00:00.000Z'), 20), 10);
+  const november = new Date('2026-11-02T15:00:00.000Z');
+  assert.equal(monthsUntilTarget('2026-12-31', november, 2, true), 1);
+  assert.equal(computeMonthlyGoal(300.03, '2026-12-31', 150.02, november, 2, true), 150.01);
 });

@@ -18,7 +18,7 @@ import {
   splitCdiHistoryRange,
 } from './interest';
 import { balanceDecimalFromTransactions } from './ledger';
-import { computeMonthlyGoal } from './model';
+import { computeMonthlyGoal, hasAutoDebitInCurrentMonth } from './model';
 
 type FetchHistory = typeof getCdiHistory;
 
@@ -207,6 +207,7 @@ async function accruePiggyInterest(
             now,
             runningBalance,
             bank.autoDebit ? bank.autoDebitDay : undefined,
+            hasAutoDebitInCurrentMonth(bank.transactions, now),
           );
         }
         if (Object.keys(data).length > 0) {
