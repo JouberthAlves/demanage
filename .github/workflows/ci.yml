@@ -210,7 +210,9 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.14.4'
+          # The runner image may not have a specific future patch installed.
+          # setup-python resolves the newest available supported 3.14 patch.
+          python-version: '3.14'
       - name: Install pinned PostgreSQL SQL parser for approval gate
         run: python -m pip install -r ops/cd/requirements-approval.txt
       - name: Compile deploy agent

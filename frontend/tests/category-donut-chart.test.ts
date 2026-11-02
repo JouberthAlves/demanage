@@ -9,6 +9,7 @@ import {
   useMonthlyExpenses,
   useMonthlyIncome,
 } from '@/hooks/use-monthly-history';
+import { addDays, addMonths, instantForDayKey } from '@/lib/dates';
 import { formatCurrencyCompact } from '@/lib/format';
 import { queryKeys } from '@/lib/query-keys';
 import { useCalendarStore } from '@/stores/calendar-store';
@@ -25,7 +26,7 @@ function trade(overrides: Partial<AssetTransaction>): AssetTransaction {
     feeAmountBrl: '0',
     feePercent: null,
     costBasisKnown: true,
-    date: '2026-10-18',
+    date: useCalendarStore.getInitialState().dayKey,
     note: null,
     expenseId: 'internal-expense',
     entryId: null,
@@ -36,7 +37,11 @@ function trade(overrides: Partial<AssetTransaction>): AssetTransaction {
 
 test('donut cash categories reconcile BTC/USD purchases with monthly expense KPI, excluding sales and adjustments', () => {
   const originalDayKey = useCalendarStore.getState().dayKey;
-  useCalendarStore.setState({ dayKey: '2026-10-20' });
+  // React SSR reads Zustand's initial snapshot rather than setState updates.
+  // Use that financial day in the test data so the test survives month rollover.
+  const financialDay = useCalendarStore.getInitialState().dayKey;
+  const previousMonthDay = `${addMonths(financialDay.slice(0, 7), -1)}-01`;
+  useCalendarStore.setState({ dayKey: financialDay });
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnMount: false } },
   });
@@ -47,16 +52,16 @@ test('donut cash categories reconcile BTC/USD purchases with monthly expense KPI
     amount: 75,
     category: 'investimento',
     frequency: 'unica',
-    occurredAt: '2026-10-18T12:00:00.000Z',
-    registeredAt: '2026-10-18',
-    createdAt: '2026-10-18T12:00:00.000Z',
+    occurredAt: instantForDayKey(financialDay).toISOString(),
+    registeredAt: financialDay,
+    createdAt: instantForDayKey(financialDay).toISOString(),
   };
   client.setQueryData(queryKeys.financialHistory, {
     expenses: [manualInvestment],
     incomes: [],
   });
   client.setQueryData(queryKeys.piggyBanks.cashMovements, [
-    { type: 'deposit', date: '2026-10-17', amount: 200 },
+    { type: 'deposit', date: financialDay, amount: 200 },
   ]);
   client.setQueryData(queryKeys.assets.transactions('BTC'), [
     trade({}),
@@ -74,8 +79,8 @@ test('donut cash categories reconcile BTC/USD purchases with monthly expense KPI
       cashAmountBrl: '7777',
     }),
     trade({ id: 'unlinked-buy', expenseId: null, cashAmountBrl: '9000' }),
-    trade({ id: 'future-buy', date: '2026-10-25', cashAmountBrl: '5000' }),
-    trade({ id: 'prior-buy', date: '2026-09-12', cashAmountBrl: '6000' }),
+    trade({ id: 'future-buy', date: addDays(financialDay, 5), cashAmountBrl: '5000' }),
+    trade({ id: 'prior-buy', date: previousMonthDay, cashAmountBrl: '6000' }),
   ]);
   client.setQueryData(queryKeys.assets.transactions('USD'), [
     trade({ id: 'usd-buy', asset: 'USD', cashAmountBrl: '400' }),
