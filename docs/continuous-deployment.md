@@ -51,6 +51,30 @@ deploy`. Por isso qualquer mudança nas migrations, schema, entrypoint ou Compos
 é **bloqueada** pela promoção e exige um plano/manual de migração separado.
 Rollback de código não é rollback de schema. Não permitir mudanças DB silenciosas.
 
+### Exceção única revisada do PR #105 (02/11/2026)
+
+A migration aditiva `20261102192000_expense_voided_at` foi executada **fora do
+workflow de promoção**, somente após um dump do banco de produção com SHA-256
+`4f7da3b0904e60b08325988bcb5d2a35b2992ffa62c7b3e717ddd109a86e4126`,
+restauração integral em PostgreSQL 18 isolado e ensaio com a imagem imutável
+do novo backend. O ensaio conferiu 104 despesas e 79 pagamentos inalterados
+e produziu a prova com hash
+`3eb7cde251046cb54cae0b1eace5b7d34e841f4983974cf5cb3023f855c34bfa`.
+A execução manual do Prisma no banco real manteve as mesmas contagens, sem
+substituir os containers, e produziu a prova com hash
+`0e15e76f78b84e170f3578ce43a0a0eff8b9f08c89fcaa2fd9b5a1f63bcfc488`.
+
+Somente o par exato de commits (`4bda79d` → `faa174f`) pode utilizar esses
+três hashes, **por até 48 horas** a partir do ensaio, e apenas com os mesmos
+blobs de schema/migration e digests de backend/frontend que foram revisados.
+`ops/cd/issue105_release_gate.py` executa esses checks novamente depois de
+resolver os digests GHCR e antes de publicar o manifesto, sem dispensar a
+aprovação exigida do ambiente `production`. Qualquer outra migration segue
+bloqueada, inclusive releases posteriores ou imagens recompiladas com digest
+diferente. Nenhuma correção de saldo é embutida na migration; a reparação
+pontual dos dois IDs de R$ 85,00 e R$ 95,00 exige uma transação separada
+com condições estritas e backup verificado.
+
 ## 1. Configuração obrigatória no GitHub (uma vez)
 
 No repositório `bielxdh3/demanage`:
