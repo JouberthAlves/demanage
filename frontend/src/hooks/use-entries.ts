@@ -34,12 +34,21 @@ function useEntryMutation<TVariables, TResult>(
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn,
-    onSuccess: () => invalidateDomain(queryClient, 'entries'),
+    onSuccess: () => { void invalidateDomain(queryClient, 'entries'); },
   });
 }
 
 export function useCreateEntry() {
-  return useEntryMutation((payload: EntryPayload) => createEntry(payload));
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: EntryPayload) => createEntry(payload),
+    onSuccess: (created) => {
+      queryClient.setQueryData<Income[]>(queryKeys.entries, (old) =>
+        old ? [created, ...old.filter((entry) => entry.id !== created.id)] : old,
+      );
+      void invalidateDomain(queryClient, 'entries');
+    },
+  });
 }
 
 export function useUpdateEntry() {

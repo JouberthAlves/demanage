@@ -1,5 +1,12 @@
 # plans.md — Roadmap deManage
 
+## Incidente de 02/11/2026 — login bloqueado, edição de data e latência
+
+- [x] Isolar o rate limit de navegação da cota de operações de escrita, manter proteção independente para autenticação; permitir health e restauração de sessão mesmo com cota esgotada.
+- [x] Liberar correção atômica da data de despesa avulsa PIX com recibo automático único e sem alterações de valor ou forma de pagamento; preservar faturas consolidadas.
+- [x] Desacoplar o tempo de confirmação do cadastro do refetch de múltiplos painéis; atualizar a lista localmente após resposta de criação e revalidar em segundo plano.
+- [ ] Validar via CI (incluindo testes integrados e segurança) e medir impacto real no navegador; o erro visual exato após criar entrada ainda precisa ser reproduzido caso persista após corrigir o 429.
+
 Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a etapa que o usuário pedir.
 
 ## Como usar (agents)
