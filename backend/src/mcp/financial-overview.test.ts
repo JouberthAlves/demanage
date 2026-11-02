@@ -164,3 +164,59 @@ test('a next-month recurring cycle paid at the São Paulo month boundary stays i
   assert.equal(october.expensesBrl, '60.00');
   assert.equal(november.expensesBrl, '0.00');
 });
+
+test('B04: weekly cash has five October occurrences and four November occurrences', () => {
+  const entries = [{ amount: 10, frequency: 'semanal', type: 'outro', receiveDay: 1, startsAt: '2026-10-01' }];
+  const expenses = [{ amount: 7, frequency: 'semanal', dueDay: 1, startsAt: '2026-10-01' }];
+  const october = calculateMonthlyCash({ today: '2026-10-31', entries, expenses, movements: [] });
+  const november = calculateMonthlyCash({ today: '2026-11-30', entries, expenses, movements: [] });
+  assert.equal(october.incomeBrl, '50.00');
+  assert.equal(october.expensesBrl, '35.00');
+  assert.equal(november.incomeBrl, '40.00');
+  assert.equal(november.expensesBrl, '28.00');
+});
+
+test('B04: weekly cash counts elapsed weekdays between start, end and today', () => {
+  const entries = [{ amount: 10, frequency: 'semanal', type: 'outro', receiveDay: 8, startsAt: '2026-10-08', endsAt: '2026-10-22' }];
+  const expenses = [{ amount: 7, frequency: 'semanal', dueDay: 8, startsAt: '2026-10-08', endsAt: '2026-10-22' }];
+  const before = calculateMonthlyCash({ today: '2026-10-14', entries, expenses, movements: [] });
+  const middle = calculateMonthlyCash({ today: '2026-10-20', entries, expenses, movements: [] });
+  const after = calculateMonthlyCash({ today: '2026-10-31', entries, expenses, movements: [] });
+  assert.deepEqual([before.incomeBrl, middle.incomeBrl, after.incomeBrl], ['10.00', '20.00', '30.00']);
+  assert.deepEqual([before.expensesBrl, middle.expensesBrl, after.expensesBrl], ['7.00', '14.00', '21.00']);
+});
+
+test('B04: legacy weekly rows without startsAt retain the São Paulo creation weekday', () => {
+  const createdAt = new Date('2026-05-01T01:30:00.000Z'); // Thursday 30 April in São Paulo
+  const result = calculateMonthlyCash({
+    today: '2026-05-08',
+    entries: [{ amount: 10, frequency: 'semanal', type: 'outro', receiveDay: 30, createdAt }],
+    expenses: [{ amount: 7, frequency: 'semanal', dueDay: 30, createdAt }],
+    movements: [],
+  });
+  assert.equal(result.incomeBrl, '10.00');
+  assert.equal(result.expensesBrl, '7.00');
+});
+
+test('B04: actual receipt and payment for a weekly competence replace its schedule', () => {
+  const result = calculateMonthlyCash({
+    today: '2026-10-31',
+    entries: [{
+      amount: 10, frequency: 'semanal', type: 'outro', startsAt: '2026-10-01', receiveDay: 1,
+      receipts: [
+        { month: '2026-10', amount: 44, receivedAt: new Date('2026-10-16T15:00:00.000Z') },
+        { month: '2026-09', amount: 9, receivedAt: new Date('2026-10-17T15:00:00.000Z') },
+      ],
+    }],
+    expenses: [{
+      amount: 7, frequency: 'semanal', startsAt: '2026-10-01', dueDay: 1,
+      payments: [
+        { month: '2026-10', amount: 22, paidAt: new Date('2026-10-19T15:00:00.000Z') },
+        { month: '2026-09', amount: 4, paidAt: new Date('2026-10-20T15:00:00.000Z') },
+      ],
+    }],
+    movements: [],
+  });
+  assert.equal(result.incomeBrl, '53.00');
+  assert.equal(result.expensesBrl, '26.00');
+});
