@@ -29,6 +29,8 @@ export function DashboardPage() {
     history,
     income,
     expenses,
+    balance,
+    carryover,
     averageExpense,
     recurringShare,
     historyQuery,
@@ -36,7 +38,6 @@ export function DashboardPage() {
   const piggyTotalQuery = usePiggyTotal();
   const piggyCashQuery = usePiggyCashMovements();
   const assetCashQuery = useAssetCashTransactions();
-  const balance = income - expenses;
   const hasHistory = history.slice(0, -1).some((month) => month.hasActivity);
   const balanceLabel = formatCurrencyCompact(balance);
   const piggyLabel = formatCurrencyCompact(piggyTotalQuery.total ?? 0);
@@ -100,7 +101,7 @@ export function DashboardPage() {
       <title>Dashboard | deManage</title>
       <PageHeader
         title={`Olá, ${getFirstName(userName)}`}
-        description='Valores já no saldo até hoje (após o dia de recebimento/desconto).'
+        description='Saldo acumulado de meses anteriores e movimentações já efetivadas neste mês.'
       />
 
       <PageHero
@@ -108,13 +109,13 @@ export function DashboardPage() {
         title={balance >= 0 ? 'Saldo positivo' : 'Saldo negativo'}
         description={
           balance >= 0
-            ? 'Entradas já creditadas cobrem as saídas já no saldo. Despesas no cartão entram só como fatura.'
-            : 'As saídas já no saldo estão acima das entradas. Vale revisar cartões e recorrências.'
+            ? 'Saldo acumulado com as movimentações registradas de meses anteriores e as já creditadas ou debitadas neste mês.'
+            : 'As saídas acumuladas superam as entradas. Vale revisar cartões e recorrências.'
         }
       >
         <div className='grid min-w-0 gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'>
           <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
-            <p className='text-xs text-muted-foreground'>Saldo até hoje</p>
+            <p className='text-xs text-muted-foreground'>Saldo acumulado até hoje</p>
             <p
               title={balanceLabel}
               className={
@@ -124,6 +125,9 @@ export function DashboardPage() {
               }
             >
               {balanceLabel}
+            </p>
+            <p className='mt-1 text-xs text-muted-foreground'>
+              Saldo anterior: {formatCurrencyCompact(carryover)}
             </p>
           </div>
           <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4'>
@@ -137,7 +141,7 @@ export function DashboardPage() {
           </div>
           <div className='min-w-0 rounded-xl border border-border bg-black/25 p-4 sm:col-span-2 lg:col-span-1'>
             <p className='text-xs text-muted-foreground'>
-              Saídas / entradas (já no saldo)
+              Saídas / entradas deste mês
             </p>
             <p
               title={shareLabel}
@@ -156,14 +160,14 @@ export function DashboardPage() {
 
       <div className='grid gap-4 sm:grid-cols-2 lg:grid-cols-3'>
         <KpiCard
-          label='Entradas já no saldo'
+          label='Entradas deste mês'
           value={formatCurrencyCompact(income)}
           hint='Após o dia de recebimento'
           tone='positive'
           icon={<ArrowUpRight className='size-4 text-neon-green' />}
         />
         <KpiCard
-          label='Saídas já no saldo'
+          label='Saídas deste mês'
           value={formatCurrencyCompact(expenses)}
           hint='Após o dia de desconto (sem cartão aberto)'
           tone='amber'
