@@ -14,6 +14,21 @@ export function incomeMonthKey(now: Date = new Date()) {
   return currentMonthKey(now);
 }
 
+/** The most recent salary rate at a particular civil month, not today's profile amount. */
+export function salaryRateInMonth(income: Income, now: Date = new Date()) {
+  const versions = income.salaryVersions;
+  if (!versions?.length) {
+    return { amount: income.amount, receiveDay: income.receiveDay ?? 1 };
+  }
+  const month = incomeMonthKey(now);
+  const rate = [...versions]
+    .filter((item) => item.month <= month)
+    .sort((a, b) => b.month.localeCompare(a.month))[0];
+  return rate
+    ? { amount: rate.amount, receiveDay: rate.receiveDay }
+    : { amount: 0, receiveDay: income.receiveDay ?? 1 };
+}
+
 export function isSalaryWaitingForConfirmation(
   income: Income,
   now: Date = new Date(),
@@ -21,7 +36,9 @@ export function isSalaryWaitingForConfirmation(
   return (
     income.type === 'salario' &&
     income.frequency === 'mensal' &&
-    income.receiptHoldForMonth === incomeMonthKey(now)
+    (income.salaryHolds
+      ? income.salaryHolds.some((hold) => hold.month === incomeMonthKey(now))
+      : income.receiptHoldForMonth === incomeMonthKey(now))
   );
 }
 
@@ -32,7 +49,8 @@ export function isSalaryManuallyReceived(
   return (
     income.type === 'salario' &&
     income.frequency === 'mensal' &&
-    income.receivedForMonth === incomeMonthKey(now)
+    ((income.receipts?.some((receipt) => receipt.month === incomeMonthKey(now))) ??
+      income.receivedForMonth === incomeMonthKey(now))
   );
 }
 
@@ -48,7 +66,11 @@ export function isIncomeAutoReceivedThisMonth(
     return isSameMonth(date, now) && today >= date;
   }
 
-  const receiveDay = scheduledDayThisMonth(income.receiveDay ?? 1, now);
+  const rate = income.type === 'salario' && income.frequency === 'mensal'
+    ? salaryRateInMonth(income, now)
+    : { amount: income.amount, receiveDay: income.receiveDay ?? 1 };
+  if (income.type === 'salario' && income.frequency === 'mensal' && rate.amount <= 0) return false;
+  const receiveDay = scheduledDayThisMonth(rate.receiveDay, now);
   if (today < receiveDay) return false;
   return isWithinSchedule(receiveDay, income);
 }
@@ -96,9 +118,12 @@ export function incomeForecastContributionThisMonth(
     const date = income.date?.slice(0, 10);
     return date && isSameMonth(date, now) ? income.amount : 0;
   }
-  const receiveDay = scheduledDayThisMonth(income.receiveDay ?? 1, now);
+  const rate = income.type === 'salario' && income.frequency === 'mensal'
+    ? salaryRateInMonth(income, now)
+    : { amount: income.amount, receiveDay: income.receiveDay ?? 1 };
+  const receiveDay = scheduledDayThisMonth(rate.receiveDay, now);
   if (!isWithinSchedule(receiveDay, income)) return 0;
-  return monthlyAmount(income.amount, income.frequency);
+  return monthlyAmount(rate.amount, income.frequency);
 }
 
 /** Current balance: one-off incomes require receipts; recurring incomes keep their schedule rules. */
@@ -120,7 +145,7 @@ export function incomeContributionThisMonth(
     );
     const scheduledCash =
       !currentCycleHasReceipt && isIncomeReceivedThisMonth(income, now)
-        ? monthlyAmount(income.amount, income.frequency)
+        ? monthlyAmount(salaryRateInMonth(income, now).amount, income.frequency)
         : 0;
     return receivedCash + scheduledCash;
   }

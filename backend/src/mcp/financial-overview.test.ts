@@ -50,6 +50,25 @@ test('dashboard balance excludes future/held salaries, card-only payments and ou
   assert.equal(result.balanceBrl, '0.00');
 });
 
+test('B02: settling an older salary month cannot release this month on the MCP balance', () => {
+  const result = calculateMonthlyCash({
+    today: '2026-10-18',
+    entries: [{
+      amount: 3000,
+      frequency: 'mensal',
+      type: 'salario',
+      receiveDay: 5,
+      receivedForMonth: '2026-09',
+      receiptHoldForMonth: null,
+      salaryHolds: [{ month: '2026-10' }],
+      receipts: [{ month: '2026-09', amount: 3000, receivedAt: new Date('2026-10-17T12:00:00Z') }],
+    }],
+    expenses: [],
+    movements: [],
+  });
+  assert.equal(result.incomeBrl, '3000.00');
+});
+
 test('dashboard counts salary already confirmed and invoice payments by São Paulo local date', () => {
   const result = calculateMonthlyCash({
     today: '2026-10-31',
