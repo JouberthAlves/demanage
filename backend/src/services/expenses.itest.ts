@@ -162,12 +162,22 @@ test('correcting a one-off PIX date atomically moves its payment and monthly cas
 
     await updateExpense(user.id, expense.id, parseUpdateExpense({ date: correctedKey }));
     assert.equal(await prisma.expensePayment.count({ where: { expenseId: expense.id } }), 1);
-    await assert.rejects(
-      () => updateExpense(user.id, expense.id, parseUpdateExpense({
-        date: day, amount: 200,
-      })),
-      /pagamento|consolidado|data/i,
-    );
+    // Correcting both fields together reuses the same payment and never
+    // produces two deductions, even across a calendar month boundary.
+    await updateExpense(user.id, expense.id, parseUpdateExpense({
+      date: day, amount: 200,
+    }));
+    const after = await prisma.expense.findUniqueOrThrow({ where: { id: expense.id } });
+    const finalPayments = await prisma.expensePayment.findMany({
+      where: { expenseId: expense.id },
+    });
+    assert.equal(after.occurredAt?.toISOString().slice(0, 10), day);
+    assert.equal(Number(after.amount), 200);
+    assert.equal(finalPayments.length, 1);
+    assert.equal(finalPayments[0].id, before[0].id);
+    assert.equal(finalPayments[0].paidAt.toISOString().slice(0, 10), day);
+    assert.equal(finalPayments[0].month, day.slice(0, 7));
+    assert.equal(Number(finalPayments[0].amount), 200);
   } finally {
     await cleanup(user.id);
   }
