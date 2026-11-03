@@ -1,0 +1,11 @@
+# Issue #97 / C05 only: the live Cloudflare Tunnel reaches frontend:80.
+# Harden the actual server Compose without changing its port, routing or image.
+# Stage this override in the Debian CD compose_files list; only the protected
+# GitHub Actions-approved CD agent is authorized to recreate containers.
+services:
+  frontend:
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
