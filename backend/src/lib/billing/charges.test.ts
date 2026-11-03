@@ -7,8 +7,10 @@ import {
   chargeOccurrences,
   countMonthlyOccurrences,
   countWeeklyOccurrences,
+  hasFutureRecurringCardCharge,
   lateOneOffsTotalForClosing,
   maxChargesForWindow,
+  preCreationOneOffsTotalForClosing,
   splitShareFor,
   worstCaseChargesInWindow,
 } from '@/lib/billing/charges';
@@ -108,6 +110,38 @@ test('a one-off entered after the prior close is billed once as a late adjustmen
     ),
     0,
   );
+});
+
+test('A04: pre-creation one-offs count exact card shares, never invoices or regular cycle purchases', () => {
+  const cardCreated = at('2026-03-15');
+  assert.equal(preCreationOneOffsTotalForClosing([
+    expense({ occurredAt: at('2026-03-05'), createdAt: at('2026-03-16'), amount: '37.25' }),
+    expense({ occurredAt: at('2026-03-05'), createdAt: at('2026-03-16'), cardId: null,
+      splits: [{ kind: 'card', cardId: 'card-1', amount: '12.33' }, { kind: 'pix', cardId: null, amount: '7.67' }] }),
+    expense({ occurredAt: at('2026-03-16') }),
+    expense({ occurredAt: at('2026-03-05'), isInvoice: true }),
+  ], 'card-1', cardCreated), 49.58);
+});
+
+test('A05: future card recurrence checks actual scheduled dates and historical allocation versions', () => {
+  const future = '2026-11-03';
+  const subscription = expense({
+    frequency: 'mensal', startsAt: at('2026-09-01'), dueDay: 15, occurredAt: null,
+  });
+  assert.equal(hasFutureRecurringCardCharge(subscription, 'card-1', future), true);
+  assert.equal(hasFutureRecurringCardCharge({ ...subscription, endsAt: at('2026-11-10') }, 'card-1', future), false);
+  assert.equal(hasFutureRecurringCardCharge({ ...subscription, endsAt: at('2026-11-15') }, 'card-1', future), true);
+  assert.equal(hasFutureRecurringCardCharge({ ...subscription, archivedAt: at('2026-11-01') }, 'card-1', future), false);
+  const versions = [
+    { sequence: 1, effectiveMonth: '2026-09', amount: '25', cardId: 'card-1', splits: [] },
+    { sequence: 2, effectiveMonth: '2026-11', amount: '25', cardId: 'card-2', splits: [] },
+  ];
+  assert.equal(hasFutureRecurringCardCharge({ ...subscription, cardId: 'card-2', obligationVersions: versions }, 'card-1', future), false,
+    'an obsolete original card does not block archive');
+  assert.equal(hasFutureRecurringCardCharge({ ...subscription, cardId: 'card-2', obligationVersions: versions }, 'card-2', future), true);
+  assert.equal(hasFutureRecurringCardCharge({ ...subscription, cardId: 'card-2', obligationVersions: [
+    ...versions, { sequence: 3, effectiveMonth: '2027-02', amount: '25', cardId: 'card-1', splits: [] },
+  ] }, 'card-1', future), true, 'a future return to the card still blocks archive');
 });
 
 test('weekly charges count the real weekday occurrences: 5 Mondays bill 5x', () => {

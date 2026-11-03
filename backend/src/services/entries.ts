@@ -38,6 +38,8 @@ const CONFLICT_MESSAGE =
 
 export const entryInclude = {
   customTag: { select: customTagSelect },
+  salaryHolds: { orderBy: { month: 'asc' as const } },
+  salaryVersions: { orderBy: { month: 'asc' as const } },
   receipts: {
     orderBy: [{ receivedAt: 'asc' as const }, { createdAt: 'asc' as const }],
   },
@@ -46,6 +48,12 @@ export const entryInclude = {
 type EntryRow = Entry & {
   customTag?: Pick<CustomTag, 'id' | 'name' | 'color'> | null;
   receipts?: EntryReceipt[];
+  salaryHolds?: { month: string }[];
+  salaryVersions?: {
+    month: string;
+    amount: Prisma.Decimal;
+    receiveDay: number;
+  }[];
 };
 
 /** Resposta única de entradas: valores monetários sempre como número. */
@@ -53,6 +61,14 @@ export function serializeEntry(entry: EntryRow) {
   return {
     ...entry,
     amount: Number(entry.amount),
+    ...(entry.salaryVersions
+      ? {
+          salaryVersions: entry.salaryVersions.map((version) => ({
+            ...version,
+            amount: Number(version.amount),
+          })),
+        }
+      : {}),
     ...(entry.receipts
       ? {
           receipts: entry.receipts.map((receipt) => ({
@@ -468,6 +484,24 @@ export async function setReceiptState(
       }
     }
 
+    const salaryVersion = isMonthlySalary
+      ? await tx.salaryVersion.findFirst({
+          where: { entryId: id, month: { lte: month } },
+          orderBy: { month: 'desc' },
+        })
+      : null;
+    if (isMonthlySalary && !salaryVersion) {
+      throw badRequest('Não há salário registrado nessa competência');
+    }
+    if (
+      isMonthlySalary &&
+      salaryVersion &&
+      Number(salaryVersion.amount) === 0 &&
+      state === 'received'
+    ) {
+      throw badRequest('Não há salário previsto nessa competência');
+    }
+
     let receivedAt: Date | null = null;
     if (state === 'received') {
       const receipt = await tx.entryReceipt.upsert({
@@ -476,7 +510,10 @@ export async function setReceiptState(
         create: {
           entryId: id,
           month,
-          amount: existing.amount,
+          amount:
+            isMonthlySalary && salaryVersion
+              ? salaryVersion.amount
+              : existing.amount,
           receivedAt: isOneTimeIncome
             ? dayKeyToDate(options.receivedOn!, 'noon')
             : new Date(),
@@ -488,6 +525,15 @@ export async function setReceiptState(
     }
 
     if (isMonthlySalary) {
+      if (state === 'waiting') {
+        await tx.salaryHold.upsert({
+          where: { entryId_month: { entryId: id, month } },
+          update: {},
+          create: { entryId: id, month },
+        });
+      } else {
+        await tx.salaryHold.deleteMany({ where: { entryId: id, month } });
+      }
       await tx.entry.update({
         where: { id },
         data: salaryReceiptFields(state, month, receivedAt),

@@ -83,6 +83,9 @@ export function formatBrlInputValue(value: number) {
 
 /** Máscara BRL enquanto digita (centavos). */
 export function maskBrlInput(raw: string) {
+  // Preserve the short zero suffix while deleting: otherwise "0,0" immediately
+  // becomes "0,00" and Backspace cannot reach an empty field.
+  if (/^0(?:,0?)?$/.test(raw)) return raw;
   // Até 12 dígitos em centavos (= Decimal(12,2) / R$ 9.999.999.999,99)
   const digits = raw.replace(/\D/g, '').slice(0, 12);
   if (!digits) return '';

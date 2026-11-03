@@ -44,6 +44,14 @@ test('P1 Codex review: legacy baseline begins in first open-cycle obligation mon
   assert.equal(legacyBaselineMonth(null, at('2026-01-15')), '2026-01');
 });
 
+test('B06: a legacy creation timestamp uses its São Paulo month while startsAt is a civil date', () => {
+  const aprilAtNightInSaoPaulo = new Date('2026-05-01T01:30:00.000Z');
+  assert.equal(legacyBaselineMonth(null, aprilAtNightInSaoPaulo), '2026-04');
+  assert.equal(legacyBaselineMonth(new Date('2026-05-01T00:00:00.000Z'), aprilAtNightInSaoPaulo), '2026-05');
+  assert.equal(legacyBaselineMonth(null, new Date('2026-01-01T02:59:59.000Z')), '2025-12');
+  assert.equal(legacyBaselineMonth(null, new Date('2026-01-01T03:00:00.000Z')), '2026-01');
+});
+
 test('P2 Codex review: moving recurring startsAt earlier is a financial schedule backdate', () => {
   const at = (value: string) => new Date(`${value}T12:00:00.000Z`);
   assert.equal(scheduleMovesEarlier(at('2026-12-01'), at('2026-10-01')), true);

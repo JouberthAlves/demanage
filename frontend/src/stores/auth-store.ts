@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 import { api, onSessionExpired } from '@/lib/api';
-import { getApiErrorCode, getApiErrorStatus } from '@/lib/api-error';
+import { getApiErrorStatus } from '@/lib/api-error';
 import {
   publishAuthSessionChange,
   subscribeAuthSessionChanges,
@@ -22,6 +22,8 @@ type RegisterResult = {
 
 type AuthState = {
   user: AuthUser | null;
+  /** Volatile one-time code, cleared only by acknowledgement or session exit. */
+  pendingRecoveryCode: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   sessionRevision: number;
@@ -33,6 +35,7 @@ type AuthState = {
     email: string,
     password: string,
   ) => Promise<RegisterResult>;
+  acknowledgeRecoveryCode: () => void;
   updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
   generateRecoveryCode: (currentPassword: string) => Promise<string>;
   logout: () => Promise<void>;
@@ -43,12 +46,44 @@ type AuthState = {
 // after login, registration or logout has changed the cookie.
 let meRequestVersion = 0;
 
+// A failed /auth/logout can leave the HttpOnly cookie active. Keep a
+// per-browser local logout fence until explicit authentication succeeds.
+// This stores no user data, tokens, cookies or recovery secrets.
+const LOCAL_LOGOUT_KEY = 'demanage:local-logout-pending';
+let logoutPendingInMemory = false;
+
+function localLogoutPending() {
+  if (logoutPendingInMemory) return true;
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(LOCAL_LOGOUT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setLocalLogoutPending(pending: boolean) {
+  logoutPendingInMemory = pending;
+  if (typeof window === 'undefined') return;
+  try {
+    if (pending) window.localStorage.setItem(LOCAL_LOGOUT_KEY, '1');
+    else window.localStorage.removeItem(LOCAL_LOGOUT_KEY);
+  } catch {
+    // Storage disabled: the in-memory fence still protects this tab.
+  }
+}
+
 export const useAuthStore = create<AuthState>((set, get) => {
-  function setSessionUser(user: AuthUser | null, forceNewSession = false) {
+  function setSessionUser(
+    user: AuthUser | null,
+    forceNewSession = false,
+    newRecoveryCode?: string,
+  ) {
     const sessionChanged = forceNewSession || get().user?.id !== user?.id;
 
     set((state) => ({
       user,
+      pendingRecoveryCode: newRecoveryCode ?? (sessionChanged ? null : state.pendingRecoveryCode),
       isAuthenticated: Boolean(user),
       isLoading: false,
       sessionRevision: state.sessionRevision + (sessionChanged ? 1 : 0),
@@ -57,11 +92,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
   return {
     user: null,
+    pendingRecoveryCode: null,
     isAuthenticated: false,
     isLoading: true,
     sessionRevision: 0,
 
     setUser: (user) => {
+      if (user) setLocalLogoutPending(false);
       const previousUser = get().user;
       ++meRequestVersion;
       setSessionUser(user);
@@ -70,6 +107,10 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     fetchMe: async () => {
       const requestVersion = ++meRequestVersion;
+      if (localLogoutPending()) {
+        setSessionUser(null);
+        return null;
+      }
       try {
         const { data } = await api.get<{ user: AuthUser }>('/auth/me');
         if (requestVersion !== meRequestVersion) return get().user;
@@ -95,6 +136,7 @@ export const useAuthStore = create<AuthState>((set, get) => {
         password,
       });
       ++meRequestVersion;
+      setLocalLogoutPending(false);
       setSessionUser(data.user, true);
       publishAuthSessionChange();
       return data.user;
@@ -108,9 +150,13 @@ export const useAuthStore = create<AuthState>((set, get) => {
         password,
       });
       ++meRequestVersion;
-      setSessionUser(data.user, true);
+      setLocalLogoutPending(false);
+      setSessionUser(data.user, true, data.recoveryCode);
       publishAuthSessionChange();
       return data;
+    },
+    acknowledgeRecoveryCode: () => {
+      set({ pendingRecoveryCode: null });
     },
 
     updateProfile: async (input) => {
@@ -143,22 +189,12 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     logout: async () => {
       ++meRequestVersion;
-      let clearLocalSession = false;
-      try {
-        await api.post('/auth/logout');
-        clearLocalSession = true;
-      } catch (error) {
-        // The cookie is cleared server-side even when revocation fails.
-        clearLocalSession =
-          getApiErrorCode(error) === 'LOGOUT_REVOCATION_FAILED';
-        throw error;
-      } finally {
-        if (clearLocalSession) {
-          ++meRequestVersion;
-          setSessionUser(null, true);
-          publishAuthSessionChange();
-        }
-      }
+      // Remove financial UI / cache before any network request. Do not
+      // advertise remote revocation if the server could not be contacted.
+      setLocalLogoutPending(true);
+      setSessionUser(null, true);
+      publishAuthSessionChange();
+      await api.post('/auth/logout');
     },
     externalSessionChanged: () => {
       // Drop the previous account immediately; only /auth/me can establish

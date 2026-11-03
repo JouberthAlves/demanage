@@ -39,7 +39,8 @@ export function AppTopbar() {
         return;
       }
 
-      toast.error('Não foi possível confirmar a saída. Tente novamente.');
+      toast.error('Você saiu deste navegador, mas a revogação no servidor não foi confirmada.');
+      navigate('/login', { replace: true });
     }
   }
 

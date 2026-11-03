@@ -10,6 +10,7 @@ export {
   chargeAmountForClosing,
   chargesTotalForClosing,
   lateOneOffsTotalForClosing,
+  preCreationOneOffsTotalForClosing,
   splitShareFor,
 } from '@/lib/billing/charges';
 export { processUserCardBilling } from '@/lib/billing/run';

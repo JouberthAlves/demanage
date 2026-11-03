@@ -4,12 +4,15 @@ import {
   parseDayOfMonth,
   parseRequiredText,
 } from '@/http/parsers';
+import { hasFutureRecurringCardCharge } from '@/lib/billing/charges';
 import { loadBillableExpensesForCards } from '@/lib/billing/obligation-versions';
 import {
   chargesTotalForClosing,
   lateOneOffsTotalForClosing,
+  preCreationOneOffsTotalForClosing,
   todayInSaoPaulo,
 } from '@/lib/card-billing';
+import { addDaysToKey, dayKeyOfDate } from '@/lib/civil-date';
 import { dateOnlyUtc } from '@/lib/decimal';
 import { prisma } from '@/lib/prisma';
 import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
@@ -126,6 +129,10 @@ export function archiveCard(userId: string, id: string) {
     const expenses = await loadBillableExpensesForCards(tx, userId);
 
     const today = todayInSaoPaulo();
+    const firstFutureDay = addDaysToKey(dayKeyOfDate(today), 1);
+    if (expenses.some((expense) => hasFutureRecurringCardCharge(expense, card.id, firstFutureDay))) {
+      throw badRequest('Encerre ou migre as despesas recorrentes vinculadas ao cartão antes de arquivá-lo');
+    }
     const periodStart = card.lastInvoicedOn
       ? dateOnlyUtc(card.lastInvoicedOn)
       : todayInSaoPaulo(card.createdAt);
@@ -145,7 +152,10 @@ export function archiveCard(userId: string, id: string) {
             card.lastBillingProcessedAt,
           )
         : 0;
-    const amount = cycleAmount + lateAdjustmentAmount;
+    const firstCloseAdjustment = !card.lastInvoicedOn
+      ? preCreationOneOffsTotalForClosing(expenses, card.id, card.createdAt)
+      : 0;
+    const amount = cycleAmount + lateAdjustmentAmount + firstCloseAdjustment;
     if (amount > 0) {
       await tx.expense.create({
         data: {
@@ -162,7 +172,9 @@ export function archiveCard(userId: string, id: string) {
           notes:
             lateAdjustmentAmount > 0
               ? 'Fechamento final antes do arquivamento; inclui compras retroativas informadas após o fechamento anterior'
-              : 'Fechamento final antes do arquivamento do cartão',
+              : firstCloseAdjustment > 0
+                ? 'Fechamento final antes do arquivamento; inclui compras anteriores à criação do cartão'
+                : 'Fechamento final antes do arquivamento do cartão',
         },
       });
     }

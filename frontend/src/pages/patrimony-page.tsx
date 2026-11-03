@@ -175,9 +175,20 @@ export function PatrimonyPage() {
         </div>
       ) : historyQuery.isError || !data || !summary ? (
         <SectionPanel>
-          <p role='alert' className='text-sm text-destructive'>
-            Não foi possível reconstruir o patrimônio. Se uma cotação histórica ainda não estiver em cache, tente novamente quando o provedor estiver disponível.
-          </p>
+          <div role='alert' className='space-y-3'>
+            <p className='text-sm text-destructive'>
+              Não foi possível reconstruir o patrimônio. Se uma cotação histórica ainda não estiver em cache, tente novamente quando o provedor estiver disponível.
+            </p>
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={historyQuery.isFetching}
+              onClick={() => void historyQuery.refetch()}
+            >
+              {historyQuery.isFetching ? <Spinner data-icon='inline-start' /> : null}
+              {historyQuery.isFetching ? 'Tentando novamente…' : 'Tentar novamente'}
+            </Button>
+          </div>
         </SectionPanel>
       ) : (
         <>
