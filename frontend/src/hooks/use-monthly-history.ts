@@ -28,7 +28,7 @@ const NO_INCOMES: Income[] = [];
 export function useFinancialHistory() {
   return useQuery({
     queryKey: queryKeys.financialHistory,
-    queryFn: listFinancialHistory,
+    queryFn: ({ signal }) => listFinancialHistory(signal),
     staleTime: 60_000,
   });
 }
