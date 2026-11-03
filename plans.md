@@ -1,5 +1,19 @@
 # plans.md — Roadmap deManage
 
+## Correção de valores e exclusões contábeis — 02/11/2026
+
+- [x] Permitir corrigir valor e/ou data de uma despesa PIX avulsa com recibo automático único, atualizando o mesmo recibo atomicamente, sem duplicação ou alteração do cartão.
+- [x] Distinguir despesa apagada/invalidada (`voidedAt`) de despesa apenas arquivada; preservar recibos auditáveis e retirar os lançamentos anulados do saldo e patrimônio.
+- [x] Criar migration aditiva e testes PostgreSQL para edição, exclusão, histórico antigo e fluxo patrimonial.
+- [ ] Validar todos os gates, promover e fazer deploy protegido com backup; após migration, anular somente as duas despesas já excluídas e verificadas de R$ 85,00 e R$ 95,00, sem alterar recibos ou outras contas.
+
+## Incidente de 02/11/2026 — login bloqueado, edição de data e latência
+
+- [x] Isolar o rate limit de navegação da cota de operações de escrita, manter proteção independente para autenticação; permitir health e restauração de sessão mesmo com cota esgotada.
+- [x] Liberar correção atômica da data de despesa avulsa PIX com recibo automático único e sem alterações de valor ou forma de pagamento; preservar faturas consolidadas.
+- [x] Desacoplar o tempo de confirmação do cadastro do refetch de múltiplos painéis; atualizar a lista localmente após resposta de criação e revalidar em segundo plano.
+- [ ] Validar via CI (incluindo testes integrados e segurança) e medir impacto real no navegador; o erro visual exato após criar entrada ainda precisa ser reproduzido caso persista após corrigir o 429.
+
 Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a etapa que o usuário pedir.
 
 ## Como usar (agents)
@@ -26,6 +40,10 @@ Checklist vivo das features. Agents devem **sempre** ler este arquivo e seguir a
 
 - [x] **Implementação em branch de correção** — Confirmação explícita de entradas avulsas com data efetiva histórica, recibo imutável para valor/data, isolamento por usuário, versão otimista contra concorrência/replay e interface autenticada "Já recebi". Previsões sem confirmação continuam fora do saldo.
 - [ ] **Publicação e recuperação da conta** — Aguardar CI PostgreSQL/CodeQL e revisão formal do PR; implantar somente após gates protegidos e backup verificado. O titular deve registrar individualmente os recebimentos de 09/10/2026 (R$ 700,00 e R$ 234,87) na própria sessão autenticada; conferir então o saldo, sem SQL administrativo nem conversão automática de previsões.
+
+### Saldo acumulado na virada do mês — 02/11/2026
+
+- [x] **Correção do cálculo do dashboard em branch isolada** — Preservar o resultado acumulado de todos os meses com movimentações registradas, sem limitar ao gráfico de seis meses; somar as movimentações do mês corrente pelas regras existentes. Incluir eventos de cofres e ativos uma única vez, preservar a distinção entre saldo acumulado e KPIs mensais, e testar a virada outubro → novembro sem alterar os dados armazenados.
 
 ## P0 — Dados (maior prioridade)
 

@@ -23,6 +23,30 @@ on:
         description: 'Issue 87 only: SHA256 of fresh private PostgreSQL 31-to-35 rehearsal proof'
         required: false
         type: string
+      reviewed_issue105_backup_sha256:
+        description: 'Issue 105 only: exact separately restored production backup SHA256'
+        required: false
+        type: string
+      reviewed_issue105_rehearsal_sha256:
+        description: 'Issue 105 only: verified isolated PostgreSQL 18 rehearsal proof SHA256'
+        required: false
+        type: string
+      reviewed_issue105_live_migration_sha256:
+        description: 'Issue 105 only: verified separate live schema migration proof SHA256'
+        required: false
+        type: string
+      reviewed_issue97_backup_sha256:
+        description: 'Issue 97 only: verified unchanged-finances private production backup SHA256'
+        required: false
+        type: string
+      reviewed_issue97_rehearsal_sha256:
+        description: 'Issue 97 only: isolated PostgreSQL 18 restoration and migration proof SHA256'
+        required: false
+        type: string
+      reviewed_issue97_live_migration_sha256:
+        description: 'Issue 97 only: separate completed live salary schema migration proof SHA256'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -49,6 +73,12 @@ jobs:
       REVIEWED_PR47_BACKUP_SHA256: ${{ inputs.reviewed_pr47_backup_sha256 }}
       REVIEWED_ISSUE87_BACKUP_SHA256: ${{ inputs.reviewed_issue87_backup_sha256 }}
       REVIEWED_ISSUE87_REHEARSAL_SHA256: ${{ inputs.reviewed_issue87_rehearsal_sha256 }}
+      REVIEWED_ISSUE105_BACKUP_SHA256: ${{ inputs.reviewed_issue105_backup_sha256 }}
+      REVIEWED_ISSUE105_REHEARSAL_SHA256: ${{ inputs.reviewed_issue105_rehearsal_sha256 }}
+      REVIEWED_ISSUE105_LIVE_MIGRATION_SHA256: ${{ inputs.reviewed_issue105_live_migration_sha256 }}
+      REVIEWED_ISSUE97_BACKUP_SHA256: ${{ inputs.reviewed_issue97_backup_sha256 }}
+      REVIEWED_ISSUE97_REHEARSAL_SHA256: ${{ inputs.reviewed_issue97_rehearsal_sha256 }}
+      REVIEWED_ISSUE97_LIVE_MIGRATION_SHA256: ${{ inputs.reviewed_issue97_live_migration_sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -119,6 +149,22 @@ jobs:
               exit 1
             fi
           fi
+          if [[ -n "$REVIEWED_ISSUE105_BACKUP_SHA256" || -n "$REVIEWED_ISSUE105_REHEARSAL_SHA256" ||
+                -n "$REVIEWED_ISSUE105_LIVE_MIGRATION_SHA256" ]]; then
+            if [[ "$PREVIOUS_SHA" != '4bda79dfeb959ebb813e22f602a15599fe6b00fb' ||
+                  "$TARGET_SHA" != 'faa174f8c53cca9226cc709893df9e7bcae5131e' ]]; then
+              echo "::error::Issue105 migration witness inputs are invalid for other releases."
+              exit 1
+            fi
+          fi
+          if [[ -n "$REVIEWED_ISSUE97_BACKUP_SHA256" || -n "$REVIEWED_ISSUE97_REHEARSAL_SHA256" ||
+                -n "$REVIEWED_ISSUE97_LIVE_MIGRATION_SHA256" ]]; then
+            if [[ "$PREVIOUS_SHA" != '4d9beefa6faefce070b2bc0b8cba2821c3a91945' ||
+                  "$TARGET_SHA" != 'dbaac461d74753ddbe22bb6889b2baa2e9717a61' ]]; then
+              echo "::error::Issue97 migration witness inputs are invalid for other releases."
+              exit 1
+            fi
+          fi
           if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
             backend/prisma backend/prisma.config.ts backend/entrypoint.sh docker-compose.prod.yml; then
             # Strictly scoped, single-release exception: this exact SHA was
@@ -136,6 +182,20 @@ jobs:
               # reviewed proof, expiry and both OCI digests after resolution.
               echo "ISSUE87_IMAGE_CHECK_REQUIRED=1" >> "$GITHUB_ENV"
               echo "::notice::Issue87 exact migration candidate; awaiting immutable OCI verification."
+            elif [[ "$PREVIOUS_SHA" == '4bda79dfeb959ebb813e22f602a15599fe6b00fb' &&
+                    "$TARGET_SHA" == 'faa174f8c53cca9226cc709893df9e7bcae5131e' &&
+                    -n "$REVIEWED_ISSUE105_BACKUP_SHA256" &&
+                    -n "$REVIEWED_ISSUE105_REHEARSAL_SHA256" &&
+                    -n "$REVIEWED_ISSUE105_LIVE_MIGRATION_SHA256" ]]; then
+              echo "ISSUE105_IMAGE_CHECK_REQUIRED=1" >> "$GITHUB_ENV"
+              echo "::notice::Issue105 exact pre-migrated schema candidate; verifying reviewed bytes, three proofs and immutable OCI digests."
+            elif [[ "$PREVIOUS_SHA" == '4d9beefa6faefce070b2bc0b8cba2821c3a91945' &&
+                    "$TARGET_SHA" == 'dbaac461d74753ddbe22bb6889b2baa2e9717a61' &&
+                    -n "$REVIEWED_ISSUE97_BACKUP_SHA256" &&
+                    -n "$REVIEWED_ISSUE97_REHEARSAL_SHA256" &&
+                    -n "$REVIEWED_ISSUE97_LIVE_MIGRATION_SHA256" ]]; then
+              echo "ISSUE97_IMAGE_CHECK_REQUIRED=1" >> "$GITHUB_ENV"
+              echo "::notice::Issue97 exact pre-migrated salary schema candidate; verifying reviewed bytes, three proofs and immutable OCI digests."
             else
               echo "::error::Migrations, entrypoint or base Compose changed; production promotion blocked. A separate reviewed migration is required."
               exit 1
@@ -162,6 +222,22 @@ jobs:
               --repo . --previous "$PREVIOUS_SHA" --target "$TARGET_SHA" \
               --dump-sha256 "$REVIEWED_ISSUE87_BACKUP_SHA256" \
               --rehearsal-sha256 "$REVIEWED_ISSUE87_REHEARSAL_SHA256" \
+              --backend "$BACKEND_IMAGE" --frontend "$FRONTEND_IMAGE"
+          fi
+          if [[ "${ISSUE105_IMAGE_CHECK_REQUIRED:-}" == 1 ]]; then
+            python3 ops/cd/issue105_release_gate.py \
+              --repo . --previous "$PREVIOUS_SHA" --target "$TARGET_SHA" \
+              --dump-sha256 "$REVIEWED_ISSUE105_BACKUP_SHA256" \
+              --rehearsal-sha256 "$REVIEWED_ISSUE105_REHEARSAL_SHA256" \
+              --live-migration-sha256 "$REVIEWED_ISSUE105_LIVE_MIGRATION_SHA256" \
+              --backend "$BACKEND_IMAGE" --frontend "$FRONTEND_IMAGE"
+          fi
+          if [[ "${ISSUE97_IMAGE_CHECK_REQUIRED:-}" == 1 ]]; then
+            python3 ops/cd/issue97_release_gate.py \
+              --repo . --previous "$PREVIOUS_SHA" --target "$TARGET_SHA" \
+              --dump-sha256 "$REVIEWED_ISSUE97_BACKUP_SHA256" \
+              --rehearsal-sha256 "$REVIEWED_ISSUE97_REHEARSAL_SHA256" \
+              --live-migration-sha256 "$REVIEWED_ISSUE97_LIVE_MIGRATION_SHA256" \
               --backend "$BACKEND_IMAGE" --frontend "$FRONTEND_IMAGE"
           fi
       - name: Prepare exact production pointer bytes

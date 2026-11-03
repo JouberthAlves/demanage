@@ -1,4 +1,5 @@
 import type { ExpenseObligationVersion, Prisma } from '@/generated/prisma/client';
+import { dayKeyInSaoPaulo, dayKeyOfDate } from '@/lib/civil-date';
 
 import type { BillableObligationVersion } from './charges';
 
@@ -74,7 +75,7 @@ export async function loadBillableExpensesForCards(tx: Prisma.TransactionClient,
  * schedule's first month, so a card cycle straddling the edit month still
  * bills old occurrences; never infer or reopen an already-closed invoice. */
 export function legacyBaselineMonth(startsAt: Date | null, createdAt: Date): string {
-  return (startsAt ?? createdAt).toISOString().slice(0, 7);
+  return (startsAt ? dayKeyOfDate(startsAt) : dayKeyInSaoPaulo(createdAt)).slice(0, 7);
 }
 
 /** Moving a recurring start backwards invents earlier scheduled obligations.

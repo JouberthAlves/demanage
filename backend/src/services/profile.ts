@@ -7,7 +7,9 @@ import {
 } from '@/http/parsers';
 import { parsePatchNote } from '@/http/request';
 import { todayInSaoPaulo } from '@/lib/card-billing';
+import { dayKeyInSaoPaulo, monthKey } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
+import { withUserWriteLockTransaction } from '@/lib/user-write-transaction';
 import { MAX_MONEY_AMOUNT } from '@/lib/validate';
 
 const SALARY_ENTRY = {
@@ -73,7 +75,7 @@ export function lastDayOfPreviousMonth(today: Date) {
  * encerra a vigência preservando o histórico de recebimentos.
  */
 export function updateProfile(userId: string, input: UpdateProfileInput) {
-  return prisma.$transaction(async (tx) => {
+  return withUserWriteLockTransaction(userId, async (tx) => {
     const user = await tx.user.update({
       where: { id: userId },
       data: {
@@ -94,6 +96,28 @@ export function updateProfile(userId: string, input: UpdateProfileInput) {
       input.salaryReceiveDay !== undefined
         ? input.salaryReceiveDay
         : (salaryEntry?.receiveDay ?? null);
+    const currentMonth = dayKeyInSaoPaulo(new Date()).slice(0, 7);
+
+    // Existing pre-migration entries have a baseline from the additive migration.
+    // Also cover entries created after it but before the first profile edit.
+    if (salaryEntry) {
+      const hasVersion = await tx.salaryVersion.findFirst({
+        where: { entryId: salaryEntry.id },
+        select: { id: true },
+      });
+      if (!hasVersion) {
+        await tx.salaryVersion.create({
+          data: {
+            entryId: salaryEntry.id,
+            month: salaryEntry.startsAt
+              ? monthKey(salaryEntry.startsAt)
+              : dayKeyInSaoPaulo(salaryEntry.createdAt).slice(0, 7),
+            amount: salaryEntry.amount,
+            receiveDay: salaryEntry.receiveDay ?? 1,
+          },
+        });
+      }
+    }
 
     if (nextSalary > 0) {
       if (nextReceiveDay == null) {
@@ -108,6 +132,18 @@ export function updateProfile(userId: string, input: UpdateProfileInput) {
             endsAt: null,
           },
         });
+        await tx.salaryVersion.upsert({
+          where: {
+            entryId_month: { entryId: salaryEntry.id, month: currentMonth },
+          },
+          create: {
+            entryId: salaryEntry.id,
+            month: currentMonth,
+            amount: nextSalary,
+            receiveDay: nextReceiveDay,
+          },
+          update: { amount: nextSalary, receiveDay: nextReceiveDay },
+        });
       } else {
         await tx.entry.create({
           data: {
@@ -116,6 +152,13 @@ export function updateProfile(userId: string, input: UpdateProfileInput) {
             amount: nextSalary,
             receiveDay: nextReceiveDay,
             endsAt: null,
+            salaryVersions: {
+              create: {
+                month: currentMonth,
+                amount: nextSalary,
+                receiveDay: nextReceiveDay,
+              },
+            },
           },
         });
       }
@@ -126,6 +169,18 @@ export function updateProfile(userId: string, input: UpdateProfileInput) {
           amount: 0,
           endsAt: lastDayOfPreviousMonth(todayInSaoPaulo()),
         },
+      });
+      await tx.salaryVersion.upsert({
+        where: {
+          entryId_month: { entryId: salaryEntry.id, month: currentMonth },
+        },
+        create: {
+          entryId: salaryEntry.id,
+          month: currentMonth,
+          amount: 0,
+          receiveDay: nextReceiveDay ?? 1,
+        },
+        update: { amount: 0, receiveDay: nextReceiveDay ?? 1 },
       });
     }
 

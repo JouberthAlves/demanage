@@ -75,7 +75,8 @@ function roundCents(value: number) {
   return Math.round(value * 100) / 100;
 }
 
-/** One-off payments and closed card charges are historical cash facts. */
+/** Closed card charges are historical facts. Plain PIX input errors can be
+ * corrected only when the matching receipt is reconciled atomically. */
 export function assertOneOffMutationSafe(args: {
   paymentCount: number;
   oldCashAmount: number;
@@ -94,6 +95,30 @@ export function assertOneOffMutationSafe(args: {
   }
   // Card-only -> PIX (before closing): the newly paid cash must be recorded.
   return args.newCashAmount > 0;
+}
+
+/** One-off PIX expenses create a payment snapshot automatically. Corrections
+ * to a mistaken date or amount must update exactly that receipt atomically;
+ * never change the payment method or rewrite a settled card invoice. */
+export function isSafeOneOffCashCorrection(args: {
+  oldDate: Date | null;
+  newDate: Date | null;
+  oldAmount: number;
+  newAmount: number;
+  cashAmount: number;
+  allPix: boolean;
+  hasCardComponent: boolean;
+  payments: Array<{ month: string; amount: number; paidAt: Date }>;
+}) {
+  const { oldDate, newDate, payments } = args;
+  if (!oldDate || !newDate) return false;
+  if (!args.allPix || args.hasCardComponent ||
+      args.cashAmount <= 0 || args.newAmount <= 0 || payments.length !== 1) return false;
+  const payment = payments[0];
+  return payment.month === dateKey(oldDate).slice(0, 7) &&
+    dateKey(payment.paidAt) === dateKey(oldDate) &&
+    Math.round(payment.amount * 100) === Math.round(args.cashAmount * 100) &&
+    Math.round(args.oldAmount * 100) === Math.round(args.cashAmount * 100);
 }
 
 /** A one-off cannot restart an old recurring obligation's immutable price chain. */
@@ -400,19 +425,6 @@ export async function updateExpense(
 
     const nextOccurredAt =
       nextFrequency === 'unica' ? (schedule.date ?? existing.occurredAt) : null;
-    if (
-      existing.frequency === 'unica' &&
-      existing.payments.length > 0 &&
-      input.schedule.date !== undefined &&
-      nextFrequency === 'unica' &&
-      (!nextOccurredAt ||
-        !existing.occurredAt ||
-        dateKey(nextOccurredAt) !== dateKey(existing.occurredAt))
-    ) {
-      throw badRequest(
-        'A data de uma despesa já registrada não pode ser alterada',
-      );
-    }
     assertUniqueDateNotFuture(nextOccurredAt);
 
     const nextSplits = await resolveNextSplits({
@@ -434,9 +446,35 @@ export async function updateExpense(
     }));
     const oldAmount = Number(existing.amount);
     const revisedSplits = nextSplits ?? oldSplits;
+    const oneOffDateChanged = existing.frequency === 'unica' &&
+      nextFrequency === 'unica' &&
+      input.schedule.date !== undefined &&
+      (nextOccurredAt ? dateKey(nextOccurredAt) : null) !==
+        (existing.occurredAt ? dateKey(existing.occurredAt) : null);
     const financialChange = nextAmount !== oldAmount ||
       (nextSplits !== null && comparableSplits(revisedSplits, existing.cardId, nextAmount) !==
         comparableSplits(oldSplits, existing.cardId, oldAmount));
+    const safeCashCorrection = existing.frequency === 'unica' &&
+      nextFrequency === 'unica' && (oneOffDateChanged || financialChange) &&
+      isSafeOneOffCashCorrection({
+      oldDate: existing.occurredAt,
+      newDate: nextOccurredAt,
+      oldAmount,
+      newAmount: nextAmount,
+      cashAmount: cashOfPersistedExpense(existing),
+      allPix: existing.splits.every((split) => split.kind === 'pix') &&
+        revisedSplits.every((split) => split.kind === 'pix'),
+      hasCardComponent: Boolean(existing.cardId) ||
+        existing.splits.some((split) => split.kind === 'card'),
+      payments: existing.payments.map((payment) => ({
+        month: payment.month,
+        amount: Number(payment.amount),
+        paidAt: payment.paidAt,
+      })),
+    });
+    if (oneOffDateChanged && existing.payments.length > 0 && !safeCashCorrection) {
+      throw conflict('A data está vinculada a pagamento ou cartão consolidado; apenas despesas PIX avulsas podem ser corrigidas');
+    }
     const recurringVersionChange = financialChange &&
       existing.frequency !== 'unica' && nextFrequency !== 'unica';
     const oldScheduleChanged = existing.frequency !== 'unica' && (
@@ -606,7 +644,7 @@ export async function updateExpense(
           comparableSplits(nextSplits, null, nextAmount) !==
             comparableSplits(oldSplits, existing.cardId, oldAmount));
 
-      if (financialChange) {
+      if (financialChange && !safeCashCorrection) {
         const affectedCardIds = [
           ...new Set(
             [
@@ -685,6 +723,24 @@ export async function updateExpense(
       },
     });
     if (count === 0) throw conflict(CONFLICT_MESSAGE);
+
+    if (safeCashCorrection && nextOccurredAt) {
+      const original = existing.payments[0];
+      const result = await tx.expensePayment.updateMany({
+        where: {
+          id: original.id,
+          expenseId: id,
+          month: original.month,
+          paidAt: original.paidAt,
+        },
+        data: {
+          month: dateKey(nextOccurredAt).slice(0, 7),
+          paidAt: nextOccurredAt,
+          amount: nextAmount,
+        },
+      });
+      if (result.count !== 1) throw conflict(CONFLICT_MESSAGE);
+    }
 
     if (nextSplits) {
       await replaceExpenseSplits({ tx, expenseId: id, resolved: nextSplits });
@@ -833,7 +889,7 @@ export async function archiveExpense(userId: string, id: string) {
   await withUserWriteLockTransaction(userId, async (tx) => {
     const existing = await tx.expense.findFirst({
       where: { id, userId, archivedAt: null },
-      include: { splits: true, obligationVersions: true },
+      include: { splits: true, payments: true, obligationVersions: true },
     });
     if (!existing) throw notFound(NOT_FOUND_MESSAGE);
     if (existing.systemOrigin !== 'manual') {
@@ -856,10 +912,21 @@ export async function archiveExpense(userId: string, id: string) {
       ]),
     ]);
 
-    await tx.expense.update({
-      where: { id },
-      data: { archivedAt: new Date() },
+    // A card-linked expense may already have generated an invoice. Never
+    // silently erase that history; only void entries with no card component.
+    if (existing.cardId || existing.splits.some((split) => split.kind === 'card') ||
+        existing.obligationVersions.some((v) => v.cardId ||
+          (Array.isArray(v.splits) && v.splits.some((s) =>
+            typeof s === 'object' && s !== null && 'kind' in s && s.kind === 'card')))) {
+      throw conflict('Despesa vinculada a cartão ou fatura não pode ser anulada; ajuste pela fatura correspondente');
+    }
+
+    const voidedAt = new Date();
+    const { count } = await tx.expense.updateMany({
+      where: { id, userId, archivedAt: null, voidedAt: null, updatedAt: existing.updatedAt },
+      data: { archivedAt: voidedAt, voidedAt },
     });
+    if (count !== 1) throw conflict(CONFLICT_MESSAGE);
   });
 }
 

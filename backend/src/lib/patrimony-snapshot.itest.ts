@@ -6,6 +6,44 @@ import type { Prisma, PrismaClient } from '@/generated/prisma/client';
 import { readPatrimonySnapshot } from '@/lib/patrimony-snapshot';
 import { prisma } from '@/lib/prisma';
 
+test('patrimony excludes voided mistaken expense but retains older archived paid expense', async () => {
+  const user = await prisma.user.create({
+    data: {
+      name: 'Voided patrimony verification',
+      email: `voided-${randomUUID()}@example.invalid`,
+      passwordHash: 'test-only-not-a-login-hash',
+    },
+  });
+  try {
+    await prisma.patrimonySettings.create({
+      data: { userId: user.id, baseDate: new Date('2026-01-01T12:00:00Z'), openingCashBrl: '500' },
+    });
+    const old = new Date('2026-10-09T12:00:00Z');
+    for (const [name, voidedAt] of [
+      ['Prior legitimate archived expense', null],
+      ['Wrong purchase deleted by user', new Date('2026-11-02T12:00:00Z')],
+    ] as const) {
+      const expense = await prisma.expense.create({
+        data: {
+          userId: user.id, name, amount: 85,
+          category: 'outro', frequency: 'unica',
+          occurredAt: old, archivedAt: new Date('2026-11-02T12:00:00Z'), voidedAt,
+        },
+      });
+      await prisma.expensePayment.create({
+        data: { expenseId: expense.id, month: '2026-10', amount: 85, paidAt: old },
+      });
+    }
+    const snapshot = await readPatrimonySnapshot(prisma, user.id);
+    assert.deepEqual(snapshot.expenses.map((expense) => expense.name), ['Prior legitimate archived expense']);
+    assert.equal(snapshot.expenses[0].payments.length, 1);
+  } finally {
+    const expenses = await prisma.expense.findMany({ where: { userId: user.id }, select: { id: true } });
+    await prisma.expensePayment.deleteMany({ where: { expenseId: { in: expenses.map((expense) => expense.id) } } });
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
 // Runs only in the isolated PostgreSQL integration suite. The first SELECT
 // pins the reader's snapshot; the writer then commits both transfer rows.
 test('patrimony read uses one PostgreSQL snapshot across an intervening transfer', async () => {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { CreditCard, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -24,6 +24,8 @@ export function CardsSection({
   const removeCard = useDeleteCard();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCard, setEditingCard] = useState<Card | null>(null);
+  const [deletingIds, setDeletingIds] = useState<Set<string>>(() => new Set());
+  const deletingIdsRef = useRef(new Set<string>());
 
   function openCreateCard() {
     setEditingCard(null);
@@ -36,11 +38,17 @@ export function CardsSection({
   }
 
   async function handleDeleteCard(id: string, cardName: string) {
+    if (deletingIdsRef.current.has(id)) return;
+    deletingIdsRef.current.add(id);
+    setDeletingIds(new Set(deletingIdsRef.current));
     try {
       await removeCard.mutateAsync(id);
       toast.success(`Cartão "${cardName}" removido`);
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Não foi possível remover o cartão'));
+    } finally {
+      deletingIdsRef.current.delete(id);
+      setDeletingIds(new Set(deletingIdsRef.current));
     }
   }
 
@@ -94,7 +102,7 @@ export function CardsSection({
               key={card.id}
               card={card}
               committed={card.committed}
-              deleting={removeCard.isPending}
+              deleting={deletingIds.has(card.id)}
               onEdit={() => openEditCard(card)}
               onDelete={() => void handleDeleteCard(card.id, card.name)}
             />

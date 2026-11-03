@@ -21,6 +21,28 @@ export type CreateAppOptions = {
 };
 
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+const AUTH_WRITE_PATHS = new Set([
+  '/auth/login',
+  '/auth/register',
+  '/auth/recovery-code',
+  '/auth/recover-password',
+]);
+
+/** Browsing and reloading never consumes the mutation budget. The login/
+ * recovery endpoints have their own stricter limiter below. */
+export function skipGeneralMutationLimit(method: string, path: string) {
+  const canonicalPath = path.replace(/\/+$/, '').toLowerCase();
+  return ['GET', 'HEAD', 'OPTIONS'].includes(method) ||
+    AUTH_WRITE_PATHS.has(canonicalPath);
+}
+
+/** Keep a much larger but finite read budget (behind shared Tunnel peers),
+ * while never locking out health checks and auth session restoration. */
+export function skipReadLimit(method: string, path: string) {
+  const canonicalPath = path.replace(/\/+$/, '').toLowerCase();
+  return !['GET', 'HEAD'].includes(method) ||
+    canonicalPath === '/health' || canonicalPath === '/auth/me';
+}
 
 /** Monta a aplicação Express sem iniciar o servidor (`listen` fica em server.ts). */
 export function createApp({ logRequests = true }: CreateAppOptions = {}) {
@@ -44,11 +66,20 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
       rateLimit({
         windowMs: FIFTEEN_MINUTES_MS,
         max: 100,
+        skip: (req) => skipGeneralMutationLimit(req.method, req.path),
         standardHeaders: true,
         legacyHeaders: false,
         message: { error: 'Too many requests. Please try again later.' },
       }),
     );
+    app.use(rateLimit({
+      windowMs: FIFTEEN_MINUTES_MS,
+      limit: 1200,
+      skip: (req) => skipReadLimit(req.method, req.path),
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: 'Muitas consultas. Tente novamente em alguns minutos.' },
+    }));
   }
 
   app.use((_req, res, next) => {
@@ -109,12 +140,7 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
     legacyHeaders: false,
     message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' },
   });
-  for (const path of [
-    '/auth/login',
-    '/auth/register',
-    '/auth/recovery-code',
-    '/auth/recover-password',
-  ]) {
+  for (const path of AUTH_WRITE_PATHS) {
     app.use(path, authLimiter);
   }
 

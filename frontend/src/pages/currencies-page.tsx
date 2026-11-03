@@ -9,6 +9,7 @@ import { useAssetTransactionForm } from '@/components/currencies/use-asset-trans
 import { PageHeader } from '@/components/layout/page-header';
 import { PageHero } from '@/components/layout/page-hero';
 import { SectionPanel } from '@/components/layout/section-panel';
+import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { useAssetsSummary } from '@/hooks/use-patrimony';
 import { toCents } from '@/lib/decimal-input';
@@ -30,7 +31,8 @@ function combinePositions(data: AssetsSummary) {
 }
 
 export function CurrenciesPage() {
-  const { data, isLoading, isError } = useAssetsSummary();
+  const summaryQuery = useAssetsSummary();
+  const { data, isLoading, isError } = summaryQuery;
   const [asset, setAsset] = useState<Asset>('BTC');
   const form = useAssetTransactionForm({ asset, onAssetChange: setAsset });
   const combined = useMemo(() => (data ? combinePositions(data) : null), [data]);
@@ -44,14 +46,25 @@ export function CurrenciesPage() {
       />
 
       {isLoading ? (
-        <div className='flex h-48 items-center justify-center'>
+        <div className='flex h-48 items-center justify-center' role='status' aria-label='Carregando moedas'>
           <Spinner className='size-5' />
         </div>
       ) : isError || !data ? (
         <SectionPanel>
-          <p className='text-sm text-destructive'>
-            As cotações estão indisponíveis e ainda não existe cache suficiente.
-          </p>
+          <div role='alert' className='space-y-3'>
+            <p className='text-sm text-destructive'>
+              As cotações estão indisponíveis e ainda não existe cache suficiente.
+            </p>
+            <Button
+              variant='outline'
+              size='sm'
+              disabled={summaryQuery.isFetching}
+              onClick={() => void summaryQuery.refetch()}
+            >
+              {summaryQuery.isFetching ? <Spinner data-icon='inline-start' /> : null}
+              {summaryQuery.isFetching ? 'Tentando novamente…' : 'Tentar novamente'}
+            </Button>
+          </div>
         </SectionPanel>
       ) : (
         <>
