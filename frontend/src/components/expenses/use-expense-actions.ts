@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 
 import {
@@ -20,13 +20,15 @@ export function useExpenseActions(now: Date) {
   const [confirmDelete, setConfirmDelete] = useState<RecurringExpense | null>(
     null,
   );
+  const [actionPending, setActionPending] = useState(false);
+  const actionLock = useRef(false);
 
   async function pay(expense: RecurringExpense) {
     // Single (non-invoice) expenses are already paid; nothing to register.
-    if (!expense.isInvoice && expense.frequency !== 'mensal') return;
+    if (!expense.isInvoice && expense.frequency !== 'mensal') return true;
     // "Entendi" on an already-settled invoice must not register it again.
     if (expense.isInvoice && isExpenseInvoicePaidThisMonth(expense, now)) {
-      return;
+      return true;
     }
     try {
       await markExpensePaid.mutateAsync({
@@ -40,8 +42,10 @@ export function useExpenseActions(now: Date) {
           ? `Pagamento da fatura de "${expense.name}" registrado`
           : `Pagamento de "${expense.name}" registrado neste mês`,
       );
+      return true;
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Não foi possível marcar como paga'));
+      return false;
     }
   }
 
@@ -49,26 +53,42 @@ export function useExpenseActions(now: Date) {
     try {
       await removeExpense.mutateAsync(expense.id);
       toast.success(`Despesa "${expense.name}" removida`);
+      return true;
     } catch (err) {
       toast.error(getApiErrorMessage(err, 'Não foi possível remover a despesa'));
+      return false;
     }
   }
 
   return {
-    pending: removeExpense.isPending || markExpensePaid.isPending,
+    pending: actionPending || removeExpense.isPending || markExpensePaid.isPending,
     confirmPay,
     askPay: setConfirmPay,
     confirmDelete,
     askDelete: setConfirmDelete,
     async runPay() {
       const target = confirmPay;
-      setConfirmPay(null);
-      if (target) await pay(target);
+      if (!target || actionLock.current) return;
+      actionLock.current = true;
+      setActionPending(true);
+      try {
+        if (await pay(target)) setConfirmPay(null);
+      } finally {
+        actionLock.current = false;
+        setActionPending(false);
+      }
     },
     async runDelete() {
       const target = confirmDelete;
-      setConfirmDelete(null);
-      if (target) await remove(target);
+      if (!target || actionLock.current) return;
+      actionLock.current = true;
+      setActionPending(true);
+      try {
+        if (await remove(target)) setConfirmDelete(null);
+      } finally {
+        actionLock.current = false;
+        setActionPending(false);
+      }
     },
   };
 }

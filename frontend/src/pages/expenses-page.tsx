@@ -157,13 +157,15 @@ export function ExpensesPage() {
       <ExpensePayDialog
         expense={actions.confirmPay}
         now={now}
+        pending={actions.pending}
         onCancel={() => actions.askPay(null)}
-        onConfirm={() => void actions.runPay()}
+        onConfirm={actions.runPay}
       />
       <ExpenseDeleteDialog
         expense={actions.confirmDelete}
+        pending={actions.pending}
         onCancel={() => actions.askDelete(null)}
-        onConfirm={() => void actions.runDelete()}
+        onConfirm={actions.runDelete}
       />
     </div>
   );
