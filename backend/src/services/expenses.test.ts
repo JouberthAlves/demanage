@@ -16,6 +16,7 @@ import {
   assertOneOffMutationSafe,
   cashAmountOf,
   existingSplitInputs,
+  isSafeOneOffCashCorrection,
   projectedRecurringEndAt,
   requiresVersionedCardProjection,
 } from './expenses';
@@ -37,6 +38,26 @@ test('schedule-only edits with historical versions must validate the full card c
   assert.equal(requiresVersionedCardProjection(true, false, 0, 'mensal'), false);
   assert.equal(requiresVersionedCardProjection(false, false, 2, 'mensal'), false);
   assert.equal(requiresVersionedCardProjection(true, false, 2, 'unica'), false);
+});
+
+test('manual one-off PIX correction reconciles the same receipt for date and amount', () => {
+  const oldDate = new Date('2026-10-09T12:00:00Z');
+  const newDate = new Date('2026-11-02T12:00:00Z');
+  const base = {
+    oldDate, newDate, oldAmount: 120, newAmount: 120,
+    cashAmount: 120, allPix: true, hasCardComponent: false,
+    payments: [{ month: '2026-10', amount: 120, paidAt: oldDate }],
+  };
+  assert.equal(isSafeOneOffCashCorrection(base), true);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, newAmount: 130 }), true);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, allPix: false }), false);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, hasCardComponent: true }), false);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, payments: [] }), false);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, payments: [base.payments[0], base.payments[0]] }), false);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, payments: [{ ...base.payments[0], month: '2026-09' }] }), false);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, payments: [{ ...base.payments[0], paidAt: newDate }] }), false);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, newDate: oldDate }), true);
+  assert.equal(isSafeOneOffCashCorrection({ ...base, newAmount: 0 }), false);
 });
 
 test('card projections respect explicit clearing of a recurring end date', () => {

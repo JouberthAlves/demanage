@@ -5,6 +5,7 @@ import test from 'node:test';
 import { processUserCardBilling } from '@/lib/card-billing';
 import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
+import { archiveCard } from '@/services/cards';
 import { parseUpdateExpense } from '@/services/expense-input';
 import { archiveExpense, updateExpense } from '@/services/expenses';
 
@@ -63,6 +64,87 @@ test('billing includes a creation-day purchase once and is idempotent', async ()
       '2026-09-05T12:00:00.000Z',
     );
   } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
+test('A04: real PostgreSQL invoices a pre-creation purchase once across first and subsequent card cycles', async () => {
+  const user = await prisma.user.create({
+    data: { name: 'A04 backdated purchase', email: `a04-${randomUUID()}@example.invalid`, passwordHash: 'test-only' },
+  });
+  try {
+    const card = await prisma.card.create({
+      data: { userId: user.id, name: 'A04 card', closingDay: 20, createdAt: new Date('2026-03-15T12:00:00.000Z') },
+    });
+    await prisma.expense.create({
+      data: { userId: user.id, cardId: card.id, name: 'Before card', category: 'outro',
+        frequency: 'unica', amount: '37.25', occurredAt: new Date('2026-03-05T12:00:00.000Z'),
+        createdAt: new Date('2026-03-16T12:00:00.000Z') },
+    });
+    assert.deepEqual(await processUserCardBilling(user.id, new Date('2026-04-21T16:00:00.000Z')), { createdCount: 1 });
+    assert.deepEqual(await processUserCardBilling(user.id, new Date('2026-05-21T16:00:00.000Z')), { createdCount: 0 });
+    const invoices = await prisma.expense.findMany({ where: { userId: user.id, isInvoice: true } });
+    assert.deepEqual(invoices.map((invoice) => [invoice.billingPeriodEnd?.toISOString().slice(0, 10), invoice.amount.toFixed(2)]), [
+      ['2026-03-20', '37.25'],
+    ]);
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
+test('A04: archiving an unbilled card preserves its pre-creation one-off purchase in the final invoice', async () => {
+  const user = await prisma.user.create({
+    data: { name: 'A04 final archive', email: `a04-final-${randomUUID()}@example.invalid`, passwordHash: 'test-only' },
+  });
+  try {
+    const card = await prisma.card.create({ data: {
+      userId: user.id, name: 'A04 final card', closingDay: 20,
+      createdAt: new Date('2026-03-15T12:00:00.000Z'),
+    } });
+    await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Before card', amount: '17.15', category: 'outro', frequency: 'unica',
+      occurredAt: new Date('2026-03-05T12:00:00.000Z'), createdAt: new Date('2026-03-16T12:00:00.000Z'),
+    } });
+    await archiveCard(user.id, card.id);
+    const invoices = await prisma.expense.findMany({ where: { userId: user.id, isInvoice: true } });
+    assert.deepEqual(invoices.map((invoice) => invoice.amount.toFixed(2)), ['17.15']);
+    await assert.rejects(() => archiveCard(user.id, card.id), /Cartão não encontrado/);
+    assert.equal(await prisma.expense.count({ where: { userId: user.id, isInvoice: true } }), 1);
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
+test('A05: archive refuses live recurring card and split obligations without creating a final invoice', async () => {
+  const user = await prisma.user.create({
+    data: { name: 'A05 active subscriptions', email: `a05-${randomUUID()}@example.invalid`, passwordHash: 'test-only' },
+  });
+  try {
+    const card = await prisma.card.create({ data: { userId: user.id, name: 'A05 card', closingDay: 20 } });
+    await prisma.expense.create({ data: {
+      userId: user.id, cardId: card.id, name: 'Monthly card', category: 'outro',
+      frequency: 'mensal', amount: 10, dueDay: 1, startsAt: new Date('2026-10-01T00:00:00.000Z'),
+    } });
+    const split = await prisma.expense.create({ data: {
+      userId: user.id, name: 'Split weekly', category: 'outro',
+      frequency: 'semanal', amount: 20, dueDay: 1, startsAt: new Date('2026-10-01T00:00:00.000Z'),
+      splits: { create: [
+        { kind: 'card', cardId: card.id, amount: 10, percent: 50 },
+        { kind: 'pix', cardId: null, amount: 10, percent: 50 },
+      ] },
+    } });
+    await assert.rejects(() => archiveCard(user.id, card.id), /recorrência|recorrentes|recorrente/);
+    await prisma.expense.updateMany({ where: { userId: user.id, cardId: card.id, isInvoice: false }, data: { archivedAt: new Date() } });
+    await assert.rejects(() => archiveCard(user.id, card.id), /recorrência|recorrentes|recorrente/,
+      'a split-only obligation must also block archive');
+    const after = await prisma.card.findUniqueOrThrow({ where: { id: card.id } });
+    assert.equal(after.archivedAt, null);
+    assert.equal(await prisma.expense.count({ where: { userId: user.id, isInvoice: true } }), 0);
+    await prisma.expense.update({ where: { id: split.id }, data: { archivedAt: new Date() } });
+    await archiveCard(user.id, card.id);
+    assert.notEqual((await prisma.card.findUniqueOrThrow({ where: { id: card.id } })).archivedAt, null);
+  } finally {
+    await prisma.expenseSplit.deleteMany({ where: { expense: { userId: user.id } } });
     await prisma.user.delete({ where: { id: user.id } });
   }
 });

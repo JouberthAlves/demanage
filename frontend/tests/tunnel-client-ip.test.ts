@@ -44,7 +44,7 @@ test('Cloudflare visitor headers are ignored by default and cannot override ngin
   const result = configure();
   assert.equal(result.status, 0, result.stderr);
   assert.doesNotMatch(result.stdout, /set_real_ip_from|real_ip_header/);
-  assert.match(nginx, /include \/etc\/nginx\/demanage-tunnel-realip\.conf;/);
+  assert.match(nginx, /include \/tmp\/demanage-nginx\/demanage-tunnel-realip\.conf;/);
   assert.doesNotMatch(nginx, /\$http_cf_connecting_ip|\$http_x_forwarded_for/);
   assert.equal(
     (nginx.match(/proxy_set_header X-Forwarded-For \$remote_addr;/g) ?? [])

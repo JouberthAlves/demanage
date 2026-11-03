@@ -9,6 +9,7 @@ import { listFinancialHistory } from '@/lib/financial-history-api';
 import {
   assetCashContribution,
   buildMonthlyHistory,
+  cashCarryoverBeforeCurrentMonth,
   financialExpenseThisMonth,
   financialIncomeThisMonth,
   piggyCashContribution,
@@ -27,7 +28,7 @@ const NO_INCOMES: Income[] = [];
 export function useFinancialHistory() {
   return useQuery({
     queryKey: queryKeys.financialHistory,
-    queryFn: listFinancialHistory,
+    queryFn: ({ signal }) => listFinancialHistory(signal),
     staleTime: 60_000,
   });
 }
@@ -115,11 +116,37 @@ export function useMonthlyIncome() {
 /** Dashboard figures, all derived from the same query data and clock. */
 export function useFinanceSummary() {
   const historicalQuery = useFinancialHistory();
-  const history = useMonthlyHistory();
-  const income = useMonthlyIncome();
-  const expenses = useMonthlyExpenses();
+  const piggyMovements = usePiggyCashMovements().data ?? NO_PIGGY_MOVEMENTS;
+  const { transactions } = useAssetCashTransactions();
+  const now = useFinancialNow();
+  const expenseRecords = historicalQuery.data?.expenses ?? NO_EXPENSES;
+  const incomeRecords = historicalQuery.data?.incomes ?? NO_INCOMES;
 
   return useMemo(() => {
+    const history = buildMonthlyHistory(
+      expenseRecords,
+      incomeRecords,
+      now,
+      6,
+      piggyMovements,
+      transactions,
+    );
+    const month = currentMonthKey(now);
+    const income =
+      financialIncomeThisMonth(incomeRecords, now) +
+      piggyCashContribution(piggyMovements, month, 'withdraw', now) +
+      assetCashContribution(transactions, month, 'SELL', now);
+    const expenses =
+      financialExpenseThisMonth(expenseRecords, now) +
+      piggyCashContribution(piggyMovements, month, 'deposit', now) +
+      assetCashContribution(transactions, month, 'BUY', now);
+    const carryover = cashCarryoverBeforeCurrentMonth(
+      expenseRecords,
+      incomeRecords,
+      now,
+      piggyMovements,
+      transactions,
+    );
     const active = history.filter((item) => item.hasActivity);
     const averageExpense =
       active.length === 0
@@ -129,9 +156,11 @@ export function useFinanceSummary() {
       history,
       income,
       expenses,
+      balance: carryover + income - expenses,
+      carryover,
       averageExpense,
       recurringShare: income > 0 ? expenses / income : 0,
       historyQuery: historicalQuery,
     };
-  }, [history, income, expenses, historicalQuery]);
+  }, [expenseRecords, incomeRecords, now, piggyMovements, transactions, historicalQuery]);
 }

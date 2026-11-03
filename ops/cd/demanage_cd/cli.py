@@ -8,7 +8,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 
-from .compose import validate_compose
+from .compose import cleanup_unused_overlays, validate_compose
 from .deploy import Context, db_identity, deploy, initialize, reconcile
 from .manifest import load_json, validate_config
 from .runner import SubprocessRunner
@@ -58,9 +58,11 @@ def run_agent(
             state = reconcile(ctx, state, journal)
         release = ctx.fetch()
         if release is None:
+            cleanup_unused_overlays(ctx.runner, ctx.config, ctx.workdir)
             print("No approved production release has been published")
             return 0
         if release["source_commit"] == state["source_commit"]:
+            cleanup_unused_overlays(ctx.runner, ctx.config, ctx.workdir)
             print("Already at approved version", state["source_commit"])
             return 0
         deploy(ctx, release, state)

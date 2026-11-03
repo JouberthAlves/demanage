@@ -5,6 +5,7 @@ import {
   dayKeyOfDate,
   dayKeyToDate,
 } from '@/lib/civil-date';
+import { decimal } from '@/lib/decimal';
 import { getCdiHistory } from '@/lib/market';
 import type { MarketPoint, MarketSeries } from '@/lib/market/types';
 import { prisma } from '@/lib/prisma';
@@ -16,6 +17,8 @@ import {
   lastCompletedWeekday,
   splitCdiHistoryRange,
 } from './interest';
+import { balanceDecimalFromTransactions } from './ledger';
+import { computeMonthlyGoal, hasAutoDebitInCurrentMonth } from './model';
 
 type FetchHistory = typeof getCdiHistory;
 
@@ -164,7 +167,15 @@ async function accruePiggyInterest(
           targetKey,
         });
 
+        let runningBalance = balanceDecimalFromTransactions(bank.transactions);
+        const goal = bank.goalAmount == null ? null : decimal(bank.goalAmount);
+        let completedAt: Date | null = null;
+
         for (const posting of result.postings) {
+          runningBalance = runningBalance.plus(posting.amount);
+          if (!bank.completedAt && !completedAt && goal && runningBalance.gte(goal)) {
+            completedAt = dayKeyToDate(posting.day);
+          }
           rows.push({
             piggyBankId: bank.id,
             userId,
@@ -184,13 +195,25 @@ async function accruePiggyInterest(
         const nextThrough = result.accruedThrough
           ? dayKeyToDate(result.accruedThrough)
           : null;
-        if (
-          nextThrough &&
-          nextThrough.getTime() !== bank.interestAccruedThrough?.getTime()
-        ) {
+        const data: Prisma.PiggyBankUpdateInput = {};
+        if (nextThrough && nextThrough.getTime() !== bank.interestAccruedThrough?.getTime()) {
+          data.interestAccruedThrough = nextThrough;
+        }
+        if (completedAt) data.completedAt = completedAt;
+        if (result.postings.length > 0 && goal && bank.targetDate) {
+          data.monthlyGoal = computeMonthlyGoal(
+            goal,
+            bank.targetDate,
+            now,
+            runningBalance,
+            bank.autoDebit ? bank.autoDebitDay : undefined,
+            hasAutoDebitInCurrentMonth(bank.transactions, now),
+          );
+        }
+        if (Object.keys(data).length > 0) {
           await tx.piggyBank.update({
             where: { id: bank.id },
-            data: { interestAccruedThrough: nextThrough },
+            data,
           });
         }
       }

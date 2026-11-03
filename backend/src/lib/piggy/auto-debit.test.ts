@@ -11,6 +11,7 @@ import {
 import { balanceFromTransactions } from '@/lib/piggy/ledger';
 import {
   computeMonthlyGoal,
+  hasAutoDebitInCurrentMonth,
   parseOptionalTargetDate,
   serializePiggyTransaction,
 } from '@/lib/piggy/model';
@@ -29,13 +30,61 @@ test('target date accepts today and rejects a past date in São Paulo time', () 
   assert.throws(() => parseOptionalTargetDate('2026-02-30'), /INVALID_TARGET_DATE/);
 });
 
-test('monthly goal is rounded half-up to cents (R$0.29 / 2 = 0.15)', () => {
+test('monthly goal counts the current and target calendar months, rounding half-up to cents', () => {
   const target = new Date('2026-11-30T12:00:00.000Z');
   const from = new Date('2026-09-30T15:00:00.000Z');
-  assert.equal(computeMonthlyGoal(0.29, target, from), 0.15);
-  assert.equal(computeMonthlyGoal(1000, target, from), 500);
-  assert.equal(computeMonthlyGoal(100, new Date('2026-12-31T12:00:00.000Z'), from), 33.33);
+  assert.equal(computeMonthlyGoal(0.29, target, from), 0.10);
+  assert.equal(computeMonthlyGoal(1000, target, from), 333.33);
+  assert.equal(computeMonthlyGoal(100, new Date('2026-12-31T12:00:00.000Z'), from), 25);
   assert.equal(computeMonthlyGoal(null, target, from), 0);
+});
+
+test('B01: monthly plan covers January through December and uses only remaining cents', () => {
+  const january = new Date('2026-01-01T15:00:00.000Z');
+  const december = new Date('2026-12-31T12:00:00.000Z');
+  assert.equal(computeMonthlyGoal(1200, december, january), 100);
+  assert.equal(computeMonthlyGoal(1200, december, january, 600), 50);
+  assert.equal(computeMonthlyGoal(1200, december, january, 1200), 0);
+  assert.equal(computeMonthlyGoal(1200, december, january, 1200.01), 0);
+  assert.equal(computeMonthlyGoal(0.29, december, january, 0.20), 0.01);
+  assert.equal(computeMonthlyGoal(1200, december, january, 600, 5), 50);
+  // Jan 21 is after its auto-debit; Dec 15 precedes its scheduled day 20.
+  assert.equal(
+    computeMonthlyGoal(
+      1200,
+      new Date('2026-12-15T12:00:00.000Z'),
+      new Date('2026-01-21T15:00:00.000Z'),
+      0,
+      20,
+    ),
+    120,
+  );
+  // November 2 is the due day: once November posts, only December remains.
+  assert.equal(
+    computeMonthlyGoal(
+      300.03,
+      new Date('2026-12-31T12:00:00.000Z'),
+      new Date('2026-11-02T15:00:00.000Z'),
+      150.02,
+      2,
+      true,
+    ),
+    150.01,
+  );
+});
+
+test('B01 P2: only a posted auto-debit for the current calendar month consumes the installment', () => {
+  const paidInNovember = [{
+    type: 'deposit' as const,
+    source: 'auto_debit' as const,
+    date: new Date('2026-11-02T12:00:00.000Z'),
+  }];
+  assert.equal(hasAutoDebitInCurrentMonth(paidInNovember, new Date('2026-11-02T15:00:00.000Z')), true);
+  assert.equal(hasAutoDebitInCurrentMonth(paidInNovember, new Date('2026-12-02T15:00:00.000Z')), false);
+  assert.equal(hasAutoDebitInCurrentMonth([
+    { type: 'deposit', source: 'manual', date: new Date('2026-11-02T12:00:00.000Z') },
+    { type: 'interest', source: 'yield', date: new Date('2026-11-02T12:00:00.000Z') },
+  ], new Date('2026-11-02T15:00:00.000Z')), false);
 });
 
 test('auto-debit catches up an overdue day once and records the due date', () => {

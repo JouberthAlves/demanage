@@ -151,3 +151,58 @@ test('F02: old expenses without recorded versions must first settle overdue invo
     await prisma.user.delete({ where: { id: user.id } });
   }
 });
+
+test('B06: São Paulo April legacy baseline retains closed April invoice after editing in May', async () => {
+  const user = await prisma.user.create({
+    data: {
+      name: 'B06 civil legacy billing',
+      email: `b06-legacy-${randomUUID()}@example.invalid`,
+      passwordHash: 'not-a-login-hash',
+    },
+  });
+  try {
+    const card = await prisma.card.create({
+      data: { userId: user.id, name: 'Civil month', closingDay: 30, createdAt: at('2026-04-01') },
+    });
+    const expense = await prisma.expense.create({
+      data: {
+        userId: user.id, cardId: card.id, name: 'Legacy late April', amount: 100,
+        category: 'outro', frequency: 'mensal', dueDay: 30,
+        createdAt: new Date('2026-05-01T01:30:00.000Z'), // April 30, 22:30 São Paulo
+      },
+    });
+
+    await processUserCardBilling(user.id, at('2026-05-01'));
+    const april = await prisma.expense.findFirstOrThrow({
+      where: { userId: user.id, isInvoice: true },
+    });
+    assert.equal(april.billingPeriodEnd?.toISOString().slice(0, 10), '2026-04-30');
+    assert.equal(Number(april.amount), 100);
+
+    // Legacy rows can lack startsAt; the PATCH must supply the equivalent
+    // civil start day required by current schedule validation.
+    await updateExpense(user.id, expense.id, parseUpdateExpense({
+      amount: 200, startsAt: '2026-04-30',
+    }), at('2026-05-10'));
+    const versions = await prisma.expenseObligationVersion.findMany({
+      where: { expenseId: expense.id }, orderBy: { sequence: 'asc' },
+    });
+    assert.deepEqual(versions.map((version) => [version.sequence, version.effectiveMonth, Number(version.amount)]), [
+      [1, '2026-04', 100], [2, '2026-05', 200],
+    ]);
+
+    await processUserCardBilling(user.id, at('2026-06-01'));
+    const invoices = await prisma.expense.findMany({
+      where: { userId: user.id, isInvoice: true }, orderBy: { billingPeriodEnd: 'asc' },
+    });
+    assert.deepEqual(invoices.map((invoice) => Number(invoice.amount)), [100, 200]);
+    assert.equal((await prisma.expense.findUniqueOrThrow({ where: { id: april.id } })).amount.toFixed(2), '100.00');
+  } finally {
+    const expenses = await prisma.expense.findMany({ where: { userId: user.id }, select: { id: true } });
+    await prisma.expensePayment.deleteMany({ where: { expenseId: { in: expenses.map((row) => row.id) } } });
+    await prisma.expenseSplit.deleteMany({ where: { expenseId: { in: expenses.map((row) => row.id) } } });
+    await prisma.expense.deleteMany({ where: { userId: user.id } });
+    await prisma.card.deleteMany({ where: { userId: user.id } });
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});

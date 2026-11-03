@@ -139,6 +139,9 @@ test('separate historical endpoint maps archived facts without changing normal C
       statusText: 'OK',
       headers: {},
       data: {
+        snapshot: '2026-11-02T20:00:00.000Z',
+        nextExpenseCursor: null,
+        nextIncomeCursor: null,
         expenses: [
           {
             id: 'archived-expense',
@@ -181,7 +184,7 @@ test('separate historical endpoint maps archived facts without changing normal C
   };
   try {
     const result = await listFinancialHistory();
-    assert.deepEqual(paths, ['/financial-history']);
+    assert.deepEqual(paths, ['/financial-history?limit=200']);
     assert.equal(result.expenses[0]?.archivedAt, '2026-10-01T12:00:00Z');
     assert.equal(result.expenses[0]?.payments?.[0]?.amount, 42);
     assert.equal(result.incomes[0]?.archivedAt, '2026-10-01T12:00:00Z');
