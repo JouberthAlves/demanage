@@ -289,8 +289,8 @@ export function PiggyPage() {
                     >
                       {historyBankId === bank.id ? 'Ocultar histórico' : 'Histórico'}
                     </Button>
-                    {goalDone || !hasGoal ? (
-                      <Button size='sm' variant='outline' disabled={archiveBank.isPending} onClick={() => void handleArchive(bank)}>
+                    {bank.balance <= 0 || goalDone || !hasGoal ? (
+                      <Button size='sm' variant='outline' disabled={archiveBank.isPending || bank.balance > 0} title={bank.balance > 0 ? 'Saque o saldo antes de arquivar' : undefined} onClick={() => void handleArchive(bank)}>
                         <Archive data-icon='inline-start' />
                         Arquivar
                       </Button>

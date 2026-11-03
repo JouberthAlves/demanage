@@ -39,6 +39,7 @@ export type PiggyBank = {
   goalAmount: number | null;
   targetDate: string | null;
   monthlyGoal: number;
+  autoDebitPaidThisMonth: boolean;
   autoDebit: boolean;
   autoDebitDay: number;
   isEmergency: boolean;
