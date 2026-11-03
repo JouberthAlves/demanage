@@ -3,7 +3,7 @@ set -e
 
 : "${API_HOST:?API_HOST is required}"
 : "${API_PORT:?API_PORT is required}"
-: "${PORT:=80}"
+: "${PORT:=8080}"
 : "${TRUST_CF_CONNECTING_IP:=0}"
 : "${TRUST_CF_INGRESS_VERIFIED:=0}"
 : "${APP_URL:=http://localhost}"
@@ -63,11 +63,12 @@ export API_HOST API_PORT PORT NGINX_RESOLVER NGINX_RESOLVER_IPV6 \
 
 # Never write raw user-provided variables into nginx directives. The helper
 # rejects missing, unverified or non-canonical ingress peers when enabled.
-sh /realip-config.sh > /etc/nginx/demanage-tunnel-realip.conf
+mkdir -p /tmp/demanage-nginx
+sh /realip-config.sh > /tmp/demanage-nginx/demanage-tunnel-realip.conf
 
 envsubst '${API_HOST} ${API_PORT} ${PORT} ${NGINX_RESOLVER} ${NGINX_RESOLVER_IPV6} ${APP_URL} ${API_CSP_SOURCE}' \
   < /etc/nginx/templates/default.conf.template \
-  > /etc/nginx/conf.d/default.conf
+  > /tmp/demanage-nginx/default.conf
 
 echo "[deManage] nginx listening on ${PORT}, proxy /api → http://${API_HOST}:${API_PORT}, resolver ${NGINX_RESOLVER}"
 exec nginx -g 'daemon off;'
