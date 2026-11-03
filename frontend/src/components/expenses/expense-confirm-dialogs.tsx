@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Spinner } from '@/components/ui/spinner';
 import {
   isExpenseAutoDebitedThisMonth,
   isExpenseInvoicePaidThisMonth,
@@ -18,8 +19,9 @@ import type { RecurringExpense } from '@/types/finance';
 type PayDialogProps = {
   expense: RecurringExpense | null;
   now: Date;
+  pending: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
 };
 
 type PayVariant = 'invoice' | 'in_balance' | 'early' | 'already_paid';
@@ -93,6 +95,7 @@ function PayDescription({
 export function ExpensePayDialog({
   expense,
   now,
+  pending,
   onCancel,
   onConfirm,
 }: PayDialogProps) {
@@ -103,7 +106,7 @@ export function ExpensePayDialog({
     <AlertDialog
       open={expense != null}
       onOpenChange={(open) => {
-        if (!open) onCancel();
+        if (!open && !pending) onCancel();
       }}
     >
       <AlertDialogContent>
@@ -114,8 +117,17 @@ export function ExpensePayDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-          <AlertDialogAction onClick={onConfirm}>{copy.action}</AlertDialogAction>
+          <AlertDialogCancel disabled={pending}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={pending}
+            onClick={(event) => {
+              event.preventDefault();
+              void onConfirm();
+            }}
+          >
+            {pending ? <Spinner data-icon='inline-start' /> : null}
+            {copy.action}
+          </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -124,18 +136,20 @@ export function ExpensePayDialog({
 
 export function ExpenseDeleteDialog({
   expense,
+  pending,
   onCancel,
   onConfirm,
 }: {
   expense: RecurringExpense | null;
+  pending: boolean;
   onCancel: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
 }) {
   return (
     <AlertDialog
       open={expense != null}
       onOpenChange={(open) => {
-        if (!open) onCancel();
+        if (!open && !pending) onCancel();
       }}
     >
       <AlertDialogContent>
@@ -146,8 +160,16 @@ export function ExpenseDeleteDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancelar</AlertDialogCancel>
-          <AlertDialogAction variant='destructive' onClick={onConfirm}>
+          <AlertDialogCancel disabled={pending}>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            variant='destructive'
+            disabled={pending}
+            onClick={(event) => {
+              event.preventDefault();
+              void onConfirm();
+            }}
+          >
+            {pending ? <Spinner data-icon='inline-start' /> : null}
             Excluir
           </AlertDialogAction>
         </AlertDialogFooter>
