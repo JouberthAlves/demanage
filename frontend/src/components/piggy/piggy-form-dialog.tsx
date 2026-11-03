@@ -85,11 +85,18 @@ function PiggyForm({
   const previewMonthly = useMemo(() => {
     const goal = form.goalAmount ? parseCurrencyInput(form.goalAmount) : 0;
     if (!goal || !form.targetDate) return 0;
-    return computeMonthlyGoal(goal, form.targetDate);
-  }, [form.goalAmount, form.targetDate]);
+    return computeMonthlyGoal(
+      goal,
+      form.targetDate,
+      bank?.balance ?? 0,
+      now,
+      form.autoDebit ? Number(form.autoDebitDay) || 1 : undefined,
+      bank?.autoDebitPaidThisMonth ?? false,
+    );
+  }, [form.goalAmount, form.targetDate, form.autoDebit, form.autoDebitDay, bank?.balance, bank?.autoDebitPaidThisMonth, now]);
 
   const previewMonths = form.targetDate
-    ? monthsUntilTarget(form.targetDate, now)
+    ? monthsUntilTarget(form.targetDate, now, form.autoDebit ? Number(form.autoDebitDay) || 1 : undefined, bank?.autoDebitPaidThisMonth ?? false)
     : 0;
 
   async function handleSubmit(event: React.FormEvent) {
