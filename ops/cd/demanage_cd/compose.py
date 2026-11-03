@@ -6,6 +6,7 @@ The agent never runs down, up on the database, --build, prune or volume commands
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from pathlib import Path
 from typing import Any
@@ -149,6 +150,40 @@ def write_overlay(folder: Path, images: dict[str, str]) -> Path:
     return file
 
 
+def cleanup_unused_overlays(runner: Runner, config: dict[str, Any], folder: Path) -> None:
+    """Reclaim only our unreferenced overlays after checking all three containers."""
+    if not folder.is_dir():
+        return
+    files = [path for path in folder.iterdir() if path.is_file() and
+             re.fullmatch(r"image-override-[0-9a-f]{32}\.yml", path.name)]
+    if len(files) <= 2:
+        return
+    referenced: set[str] = set()
+    try:
+        for service, name in EXPECTED_CONTAINERS.items():
+            labels = (inspect_one(runner, name).get("Config") or {}).get("Labels") or {}
+            if (labels.get("com.docker.compose.project") != config["project_name"]
+                    or labels.get("com.docker.compose.service") != service):
+                return
+            config_files = labels.get("com.docker.compose.project.config_files")
+            if not isinstance(config_files, str) or not config_files:
+                return
+            referenced.update(part.strip() for part in config_files.split(","))
+    except (OSError, RuntimeError, ValueError, KeyError):
+        # Inability to prove Docker ownership must never delete a file.
+        return
+    # Keep two recent overlays for immediate retry/rollback even when Docker
+    # no longer references either one. A crash may leave a new overlay unused.
+    newest = set(sorted(files, key=lambda file: file.stat().st_mtime_ns)[-2:])
+    for path in files:
+        if path in newest or str(path) in referenced:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
 def apply_overlay(
     runner: Runner,
     config: dict[str, Any],
@@ -157,10 +192,14 @@ def apply_overlay(
     *,
     rollback: bool = False,
 ) -> None:
+    cleanup_unused_overlays(runner, config, folder)
     overlay = write_overlay(folder, images)
-    validate_compose(runner, config, overlay, check_runtime=not rollback)
-    # NEVER invoke down, up on db/tunnel, --build, prune or volume commands.
-    runner.run(compose_command(config, overlay) + [
-        "up", "--detach", "--no-deps", "--no-build", "--pull", "never",
-        "backend", "frontend",
-    ])
+    try:
+        validate_compose(runner, config, overlay, check_runtime=not rollback)
+        # NEVER invoke down, up on db/tunnel, --build, prune or volume commands.
+        runner.run(compose_command(config, overlay) + [
+            "up", "--detach", "--no-deps", "--no-build", "--pull", "never",
+            "backend", "frontend",
+        ])
+    finally:
+        cleanup_unused_overlays(runner, config, folder)
