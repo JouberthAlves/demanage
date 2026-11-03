@@ -44,7 +44,8 @@ services:
       HOME: /tmp
       API_PORT: 8888
       APP_URL: ${APP_URL:-https://demanage.biel.dev.br}
-      DATABASE_URL: postgresql://demanage:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/demanage?schema=public
+      # The backend entrypoint URL-encodes reserved password characters before Prisma starts.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
     depends_on:
@@ -71,8 +72,13 @@ services:
     image: ${DEMANAGE_FRONTEND_IMAGE:?DEMANAGE_FRONTEND_IMAGE is required (ghcr digest reference)}
     container_name: demanage-frontend
     restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     environment:
-      PORT: 80
+      PORT: 8080
       TZ: UTC
       API_HOST: backend
       API_PORT: 8888
@@ -83,7 +89,7 @@ services:
       TRUSTED_TUNNEL_PROXY_IP: ${TRUSTED_TUNNEL_PROXY_IP:-}
       APP_URL: ${APP_URL:-https://demanage.biel.dev.br}
     ports:
-      - '127.0.0.1:${DEMANAGE_PORT:-8080}:80'
+      - '127.0.0.1:${DEMANAGE_PORT:-8080}:8080'
     depends_on:
       backend:
         condition: service_healthy

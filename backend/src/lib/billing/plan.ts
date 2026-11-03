@@ -14,6 +14,7 @@ import {
   type BillableExpense,
   chargesTotalDecimal,
   lateOneOffsDecimal,
+  preCreationOneOffsDecimal,
 } from './charges';
 
 export type BillingCardState = {
@@ -103,7 +104,10 @@ export function planCardBilling(
             lastBillingProcessedAt,
           )
         : new Prisma.Decimal(0);
-    const amount = toMoney(cycleAmount.plus(lateAdjustment));
+    const firstCloseAdjustment = !hasClosedCycle
+      ? preCreationOneOffsDecimal(expenses, card.id, card.createdAt)
+      : new Prisma.Decimal(0);
+    const amount = toMoney(cycleAmount.plus(lateAdjustment).plus(firstCloseAdjustment));
 
     if (amount.gt(0)) {
       invoices.push({
@@ -112,7 +116,9 @@ export function planCardBilling(
         amount,
         notes: lateAdjustment.gt(0)
           ? `Fechamento ${formatPtBrDayKey(closingKey)} · inclui compras retroativas informadas após o fechamento anterior`
-          : `Fechamento ${formatPtBrDayKey(closingKey)}`,
+          : firstCloseAdjustment.gt(0)
+            ? `Fechamento ${formatPtBrDayKey(closingKey)} · inclui compras anteriores à criação do cartão`
+            : `Fechamento ${formatPtBrDayKey(closingKey)}`,
       });
     }
 

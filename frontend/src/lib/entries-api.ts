@@ -14,6 +14,8 @@ export type ApiEntry = {
   endsAt?: string | null;
   date: string | null;
   receiptHoldForMonth?: string | null;
+  salaryHolds?: Array<{ month: string }>;
+  salaryVersions?: Array<{ month: string; amount: string | number; receiveDay: number }>;
   receivedForMonth?: string | null;
   receivedAt?: string | null;
   createdAt?: string;
@@ -66,6 +68,8 @@ export function mapEntryToIncome(entry: ApiEntry): Income {
     endsAt: mapDateOnly(entry.endsAt),
     date: mapDateOnly(entry.date),
     receiptHoldForMonth: entry.receiptHoldForMonth ?? undefined,
+    salaryHolds: entry.salaryHolds,
+    salaryVersions: entry.salaryVersions?.map((rate) => ({ ...rate, amount: Number(rate.amount) })),
     receivedForMonth: entry.receivedForMonth ?? undefined,
     receivedAt: entry.receivedAt ?? undefined,
     createdAt: entry.createdAt,

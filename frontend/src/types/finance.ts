@@ -39,6 +39,7 @@ export type PiggyBank = {
   goalAmount: number | null;
   targetDate: string | null;
   monthlyGoal: number;
+  autoDebitPaidThisMonth: boolean;
   autoDebit: boolean;
   autoDebitDay: number;
   isEmergency: boolean;
@@ -138,6 +139,8 @@ export type Income = {
   endsAt?: string;
   date?: string;
   receiptHoldForMonth?: string;
+  salaryHolds?: Array<{ month: string }>;
+  salaryVersions?: Array<{ month: string; amount: number; receiveDay: number }>;
   receivedForMonth?: string;
   receivedAt?: string;
   createdAt?: string;

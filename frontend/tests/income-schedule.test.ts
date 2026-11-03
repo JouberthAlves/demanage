@@ -150,3 +150,31 @@ test('salary receipt uses cash date and adds late prior-cycle receipt to current
   };
   assert.equal(incomeContributionThisMonth(prepaid, now), 0);
 });
+
+test('salary versions freeze previous forecasts and holds keep separate delayed cycles', () => {
+  const salary: Income = {
+    id: 'versioned-salary',
+    name: 'Salário',
+    type: 'salario',
+    frequency: 'mensal',
+    amount: 0,
+    receiveDay: 5,
+    startsAt: '2026-08-01',
+    salaryVersions: [
+      { month: '2026-08', amount: 3000, receiveDay: 5 },
+      { month: '2026-10', amount: 4500, receiveDay: 8 },
+      { month: '2026-11', amount: 0, receiveDay: 8 },
+    ],
+    salaryHolds: [{ month: '2026-09' }, { month: '2026-10' }],
+  };
+  const september = new Date('2026-09-20T12:00:00Z');
+  const october = new Date('2026-10-20T12:00:00Z');
+  const november = new Date('2026-11-20T12:00:00Z');
+  assert.equal(incomeForecastContributionThisMonth(salary, september), 3000);
+  assert.equal(incomeForecastContributionThisMonth(salary, october), 4500);
+  assert.equal(incomeForecastContributionThisMonth(salary, november), 0);
+  assert.equal(incomeContributionThisMonth(salary, september), 0);
+  assert.equal(incomeContributionThisMonth(salary, october), 0);
+  assert.equal(incomeContributionThisMonth(salary, november), 0);
+  assert.equal(incomeContributionThisMonth({ ...salary, salaryHolds: [{ month: '2026-09' }] }, october), 4500);
+});
