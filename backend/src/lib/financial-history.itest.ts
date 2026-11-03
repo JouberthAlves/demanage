@@ -138,6 +138,69 @@ test('historical endpoint keeps archived cash but isolates users and ordinary CR
     const ordinaryIncomes = await request('/entries', cookie);
     assert.deepEqual(ordinaryExpenses.data, []);
     assert.deepEqual(ordinaryIncomes.data, []);
+
+    // B13: a large archived history must be delivered in bounded keyset pages,
+    // with independent cursors and a stable createdAt+id tie-breaker.
+    const older = new Date('2026-09-01T12:00:00.000Z');
+    await prisma.expense.createMany({
+      data: Array.from({ length: 225 }, (_, i) => ({
+        userId: owner, name: `Archived expense ${i}`, amount: 7,
+        category: 'outro' as const, frequency: 'unica' as const,
+        archivedAt: old, occurredAt: older, createdAt: older,
+      })),
+    });
+    await prisma.entry.createMany({
+      data: Array.from({ length: 225 }, (_, i) => ({
+        userId: owner, name: `Archived income ${i}`, amount: 11,
+        type: 'outro' as const, frequency: 'unica' as const,
+        archivedAt: old, date: older, createdAt: older,
+      })),
+    });
+    const visitedExpenses = new Set<string>();
+    const visitedIncomes = new Set<string>();
+    let snapshot: string | undefined;
+    let expenseCursor: string | null | undefined;
+    let incomeCursor: string | null | undefined;
+    let pages = 0;
+    do {
+      const params = new URLSearchParams({ limit: '40' });
+      if (snapshot) params.set('snapshot', snapshot);
+      if (expenseCursor !== undefined) params.set('expenseCursor', expenseCursor ?? 'end');
+      if (incomeCursor !== undefined) params.set('incomeCursor', incomeCursor ?? 'end');
+      const page = await request(`/financial-history?${params.toString()}`, cookie);
+      assert.equal(page.status, 200);
+      const body = page.data as {
+        snapshot: string;
+        expenses: Array<{ id: string; userId: string; payments: Array<{ amount: number }> }>;
+        incomes: Array<{ id: string; userId: string; receipts: Array<{ amount: number }> }>;
+        nextExpenseCursor: string | null;
+        nextIncomeCursor: string | null;
+      };
+      assert.ok(body.expenses.length <= 40);
+      assert.ok(body.incomes.length <= 40);
+      if (snapshot) assert.equal(body.snapshot, snapshot);
+      snapshot = body.snapshot;
+      for (const item of body.expenses) {
+        assert.equal(item.userId, owner);
+        assert.equal(visitedExpenses.has(item.id), false, 'duplicate expense in pages');
+        visitedExpenses.add(item.id);
+      }
+      for (const item of body.incomes) {
+        assert.equal(item.userId, owner);
+        assert.equal(visitedIncomes.has(item.id), false, 'duplicate income in pages');
+        visitedIncomes.add(item.id);
+      }
+      expenseCursor = body.nextExpenseCursor;
+      incomeCursor = body.nextIncomeCursor;
+      pages++;
+      assert.ok(pages <= 10, 'keyset cursors must terminate');
+    } while (expenseCursor || incomeCursor);
+    assert.equal(pages, 6);
+    assert.equal(visitedExpenses.size, 226);
+    assert.equal(visitedIncomes.size, 226);
+    assert.equal(visitedExpenses.has(voided.id), false, 'voided expenses are excluded');
+    assert.equal((await request('/financial-history?limit=201', cookie)).status, 400);
+    assert.equal((await request('/financial-history?expenseCursor=bad&limit=10', cookie)).status, 400);
   } finally {
     if (server)
       await new Promise<void>((resolve, reject) =>
