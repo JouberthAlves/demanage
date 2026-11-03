@@ -383,6 +383,67 @@ export function chargesTotalForClosing(
   ).toNumber();
 }
 
+/** One-offs registered before the first close can predate the card itself.
+ * Include them on that first close; subsequent closes use lateOneOffsDecimal. */
+export function preCreationOneOffsDecimal(
+  expenses: BillableExpense[],
+  cardId: string,
+  cardCreatedAt: Date,
+): Prisma.Decimal {
+  const createdKey = dayKeyInSaoPaulo(cardCreatedAt);
+  return expenses.reduce((sum, expense) => {
+    if (expense.isInvoice || expense.frequency !== 'unica' ||
+      compareDayKeys(oneOffKey(expense), createdKey) >= 0) return sum;
+    return sum.plus(splitShareFor(expense, { kind: 'card', cardId }));
+  }, ZERO);
+}
+
+export function preCreationOneOffsTotalForClosing(
+  expenses: BillableExpense[],
+  cardId: string,
+  cardCreatedAt: Date,
+) {
+  return preCreationOneOffsDecimal(expenses, cardId, cardCreatedAt).toNumber();
+}
+
+/** Archive only when no future weekly/monthly occurrence will charge this card.
+ * Check current and future immutable allocation versions, not obsolete owners. */
+export function hasFutureRecurringCardCharge(
+  expense: BillableExpense,
+  cardId: string,
+  firstFutureKey: DayKey,
+): boolean {
+  if (expense.isInvoice || expense.frequency === 'unica' || expense.archivedAt) return false;
+  if (expense.endsAt && dayKeyOfDate(expense.endsAt) < firstFutureKey) return false;
+
+  const versions = expense.obligationVersions?.length
+    ? expense.obligationVersions
+    : [{ sequence: 1, effectiveMonth: '0000-01', amount: expense.amount,
+      cardId: expense.cardId, splits: expense.splits ?? [] }];
+  const sorted = [...versions].sort((a, b) => a.effectiveMonth.localeCompare(b.effectiveMonth) || a.sequence - b.sequence);
+  const current = sorted.filter((version) => version.effectiveMonth <= firstFutureKey.slice(0, 7)).at(-1);
+  const relevant = [
+    ...(current ? [current] : []),
+    ...sorted.filter((version) => version.effectiveMonth > firstFutureKey.slice(0, 7)),
+  ];
+  const anchor = recurringStartKey(expense);
+
+  return relevant.some((version, index) => {
+    const start = [firstFutureKey, anchor, `${version.effectiveMonth}-01`].sort().at(-1)!;
+    const next = relevant[index + 1];
+    let end = next
+      ? addDaysToKey(`${next.effectiveMonth}-01`, -1)
+      : addDaysToKey(start, 31); // At least one monthly/weekly occurrence.
+    if (expense.endsAt && dayKeyOfDate(expense.endsAt) < end) end = dayKeyOfDate(expense.endsAt);
+    if (end < start) return false;
+    const terms = { ...expense, ...version };
+    return splitShareFor(terms, { kind: 'card', cardId }).gt(0) &&
+      chargeOccurrences(terms, {
+        periodStartKey: start, closingKey: end, includePeriodStart: true,
+      }) > 0;
+  });
+}
+
 /**
  * A one-off purchase entered after a card close but dated on or before that
  * close is included as an adjustment in the next invoice. The per-card

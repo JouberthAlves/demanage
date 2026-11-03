@@ -70,6 +70,42 @@ test('billing includes a creation-day purchase in the first invoice only', () =>
   assert.equal(again.cardUpdate, null);
 });
 
+test('A04: first close includes a purchase dated before card creation exactly once', () => {
+  const initialCard = card({ closingDay: 20, createdAt: at('2026-03-15') });
+  const purchase = expense({
+    amount: '37.25',
+    occurredAt: at('2026-03-05'),
+    createdAt: at('2026-03-16'),
+  });
+  const plan = planCardBilling(initialCard, [purchase], at('2026-04-20'), at('2026-04-21'));
+  assert.deepEqual(plan.invoices.map((invoice) => [
+    invoice.closingOn.toISOString().slice(0, 10), invoice.amount.toFixed(2),
+  ]), [['2026-03-20', '37.25']]);
+  assert.match(plan.invoices[0].notes, /anteriores à criação do cartão/);
+  const next = planCardBilling(card({
+    ...initialCard,
+    lastInvoicedOn: plan.cardUpdate!.lastInvoicedOn,
+    lastBillingProcessedAt: plan.cardUpdate!.lastBillingProcessedAt,
+  }), [purchase], at('2026-05-20'), at('2026-05-21'));
+  assert.deepEqual(next.invoices, []);
+});
+
+test('A04: a retroactive purchase entered after a closed first cycle is adjusted only on the next close', () => {
+  const purchase = expense({
+    amount: '37.25',
+    occurredAt: at('2026-03-05'),
+    createdAt: at('2026-03-24'),
+  });
+  const afterFirstClose = card({
+    createdAt: at('2026-03-15'), closingDay: 20,
+    lastInvoicedOn: at('2026-03-20'), lastBillingProcessedAt: at('2026-03-21'),
+  });
+  const next = planCardBilling(afterFirstClose, [purchase], at('2026-04-20'), at('2026-04-21'));
+  assert.deepEqual(next.invoices.map((invoice) => invoice.amount.toFixed(2)), ['37.25']);
+  const again = planCardBilling(card({ ...afterFirstClose, ...next.cardUpdate }), [purchase], at('2026-05-20'), at('2026-05-21'));
+  assert.deepEqual(again.invoices, []);
+});
+
 test('a skipped closing (28-day rule) still bills every monthly occurrence', () => {
   const monthly = expense({
     frequency: 'mensal',
