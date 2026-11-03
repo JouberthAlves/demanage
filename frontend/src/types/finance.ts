@@ -138,6 +138,8 @@ export type Income = {
   endsAt?: string;
   date?: string;
   receiptHoldForMonth?: string;
+  salaryHolds?: Array<{ month: string }>;
+  salaryVersions?: Array<{ month: string; amount: number; receiveDay: number }>;
   receivedForMonth?: string;
   receivedAt?: string;
   createdAt?: string;
