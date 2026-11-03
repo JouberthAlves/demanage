@@ -19,7 +19,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from demanage_cd import cli, deploy, manifest, state  # noqa: E402
+from demanage_cd import cli, compose, deploy, manifest, state  # noqa: E402
 from demanage_cd.runner import CommandError  # noqa: E402
 
 FIRST = 'b70d556e28832400d1ae07ee7f2d94218736195f'
@@ -348,6 +348,54 @@ class DeployFlowTest(unittest.TestCase):
         self.assertEqual(saved['running_image_ids'], NEW)
         self.assertTrue(saved.get('recovered_from_journal'))
         self.assertFalse(self.journal_file.exists())
+
+    def test_crash_reconciled_without_new_release_reclaims_unused_overlays(self):
+        self.write_state(FIRST, OLD)
+        self._journal(new=NEW, previous=OLD)
+        fake = self.make_fake(running=NEW)
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+        overlays = [
+            compose.write_overlay(ctx.workdir, {'backend': 'old', 'frontend': 'old'})
+            for _ in range(5)
+        ]
+        active = overlays[1]
+        rollback = overlays[-2]
+        latest = overlays[-1]
+
+        original_container = fake._container
+
+        def inspect_with_current_compose_labels(name):
+            container = original_container(name)
+            container['Config']['Labels']['com.docker.compose.project.config_files'] = (
+                f'/srv/demanage/docker-compose.prod.yml,{active}'
+            )
+            return container
+
+        fake._container = inspect_with_current_compose_labels
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_agent(ctx), 0)
+
+        self.assertFalse(self.journal_file.exists())
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], SECOND)
+        self.assertFalse(overlays[0].exists(), 'orphan must be reclaimed without future deploy')
+        self.assertTrue(active.exists(), 'active Compose overlay must survive')
+        self.assertTrue(rollback.exists(), 'immediate rollback overlay must survive')
+        self.assertTrue(latest.exists(), 'recent retry overlay must survive')
+        self.assertFalse(any('up' in call for call in fake.calls), 'must not redeploy')
+
+    def test_crash_reconciled_when_approval_already_current_reclaims_overlays(self):
+        self.write_state(FIRST, OLD)
+        self._journal(new=NEW, previous=OLD)
+        fake = self.make_fake(running=NEW)
+        ctx = self.make_ctx(fake, fetch=lambda: manifest.validate_release(release_manifest()))
+        with mock.patch.object(cli, 'cleanup_unused_overlays') as cleanup:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(cli.run_agent(ctx), 0)
+
+        cleanup.assert_called_once_with(fake, self.config, ctx.workdir)
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], SECOND)
+        self.assertFalse(self.journal_file.exists())
+        self.assertFalse(any('up' in call for call in fake.calls), 'must not redeploy')
 
     def test_crash_with_replaced_database_refuses_to_reconcile(self):
         self.write_state(FIRST, OLD)
