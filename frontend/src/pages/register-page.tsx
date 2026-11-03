@@ -22,6 +22,7 @@ import { useAuthStore } from '@/stores/auth-store';
 export function RegisterPage() {
   const navigate = useNavigate();
   const register = useAuthStore((state) => state.register);
+  const acknowledgeRecoveryCode = useAuthStore((state) => state.acknowledgeRecoveryCode);
   const fetchMe = useAuthStore((state) => state.fetchMe);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isLoading = useAuthStore((state) => state.isLoading);
@@ -31,7 +32,7 @@ export function RegisterPage() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+  const recoveryCode = useAuthStore((state) => state.pendingRecoveryCode);
   const [error, setError] = useState<string | null>(null);
   const [emailError, setEmailError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<
@@ -69,8 +70,7 @@ export function RegisterPage() {
     setSubmitting(true);
 
     try {
-      const result = await register(name.trim(), email.trim(), password);
-      setRecoveryCode(result.recoveryCode);
+      await register(name.trim(), email.trim(), password);
       toast.success('Conta criada');
     } catch (err) {
       const message = getApiErrorMessage(err, 'Não foi possível criar a conta');
@@ -96,7 +96,10 @@ export function RegisterPage() {
           <Button
             type='button'
             className='w-full'
-            onClick={() => navigate('/', { replace: true })}
+            onClick={() => {
+              acknowledgeRecoveryCode();
+              navigate('/', { replace: true });
+            }}
           >
             Já guardei, continuar
           </Button>

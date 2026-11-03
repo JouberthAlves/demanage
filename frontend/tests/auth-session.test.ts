@@ -52,6 +52,14 @@ function failure(config: InternalAxiosRequestConfig, status?: number) {
   );
 }
 
+async function waitForAdapterStart(started: () => boolean) {
+  for (let attempt = 0; attempt < 20 && !started(); attempt++) {
+    // Axios request interceptors run asynchronously before reaching the test adapter.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  assert.ok(started(), 'expected the request to reach the test adapter');
+}
+
 test('login and logout bump the session revision on every account change', async () => {
   const originalAdapter = api.defaults.adapter;
 
@@ -87,6 +95,45 @@ test('login and logout bump the session revision on every account change', async
   }
 });
 
+test('A02 failed offline/5xx logout clears UI immediately and refuses stale cookie reauthentication', async () => {
+  const adapter = api.defaults.adapter;
+  for (const status of [undefined, 500]) {
+    try {
+      useAuthStore.getState().setUser(user('account-a'));
+      const revision = useAuthStore.getState().sessionRevision;
+      let rejectLogout: ((error: unknown) => void) | undefined;
+      let meRequests = 0;
+      api.defaults.adapter = async (config) => {
+        if (config.url === '/auth/logout') {
+          return new Promise<AxiosResponse>((_resolve, reject) => {
+            rejectLogout = reject;
+          });
+        }
+        if (config.url === '/auth/me') {
+          meRequests++;
+          return response(config, { user: user('account-a') });
+        }
+        if (config.url === '/auth/login') return response(config, { user: user('account-b') });
+        throw new Error(`Unexpected ${config.url}`);
+      };
+      const pendingLogout = useAuthStore.getState().logout();
+      assert.equal(useAuthStore.getState().user, null, 'financial data must disappear before HTTP settles');
+      assert.equal(useAuthStore.getState().isAuthenticated, false);
+      assert.ok(useAuthStore.getState().sessionRevision > revision);
+      await waitForAdapterStart(() => Boolean(rejectLogout));
+      rejectLogout!(failure({ url: '/auth/logout', headers: {} } as InternalAxiosRequestConfig, status));
+      await assert.rejects(pendingLogout);
+      assert.equal(await useAuthStore.getState().fetchMe(), null);
+      assert.equal(meRequests, 0, 'still-live server cookie must not reopen the local financial UI');
+      await useAuthStore.getState().login('b@example.invalid', 'secret');
+      assert.equal(useAuthStore.getState().user?.id, 'account-b');
+    } finally {
+      api.defaults.adapter = adapter;
+      useAuthStore.getState().setUser(null);
+    }
+  }
+});
+
 test('late auth/me from the previous user cannot overwrite a new login', async () => {
   const originalAdapter = api.defaults.adapter;
   let resolvePreviousMe: ((value: AxiosResponse) => void) | undefined;
@@ -106,6 +153,7 @@ test('late auth/me from the previous user cannot overwrite a new login', async (
     };
 
     const pendingMe = useAuthStore.getState().fetchMe();
+    await waitForAdapterStart(() => Boolean(resolvePreviousMe));
     await useAuthStore.getState().login('b@example.com', 'password');
     const revision = useAuthStore.getState().sessionRevision;
     assert.ok(resolvePreviousMe);
