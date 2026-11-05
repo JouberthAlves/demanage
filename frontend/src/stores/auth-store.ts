@@ -168,7 +168,9 @@ export const useAuthStore = create<AuthState>((set, get) => {
       );
       ++meRequestVersion;
       setLocalLogoutPending(false);
-      setSessionUser(data.user, true);
+      // App keys its RouterProvider by sessionRevision. Keep the rotated
+      // one-time code in volatile store before that remount, just like signup.
+      setSessionUser(data.user, true, data.recoveryCode);
       publishAuthSessionChange();
       return data.recoveryCode;
     },
