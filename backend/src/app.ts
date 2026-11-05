@@ -5,6 +5,7 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 
 import { errorHandler, notFoundHandler } from '@/http/errors';
+import { createLoginFailureLimiter } from '@/lib/login-failure-limiter';
 import { isAllowedBrowserOrigin } from '@/lib/request-origin';
 import { createMcpHttpRouter } from '@/mcp/http';
 import { csrfProtection } from '@/middlewares/csrf-protection';
@@ -143,6 +144,7 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
   for (const path of AUTH_WRITE_PATHS) {
     app.use(path, authLimiter);
   }
+  app.post('/auth/login', createLoginFailureLimiter());
 
   app.use(api);
   app.use(notFoundHandler);
