@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildCashFlows } from '@/lib/patrimony-calc';
+import { decimal } from '@/lib/decimal';
+import { buildCashFlows, buildPatrimonyRows } from '@/lib/patrimony-calc';
 
 const baseDate = new Date('2026-08-31T12:00:00.000Z');
 const to = new Date('2026-09-30T12:00:00.000Z');
@@ -72,6 +73,59 @@ test('uses a confirmed expense amount and date snapshot after the template chang
 
 test('does not project an unpaid recurring expense into historical cash flow', () => {
   assert.deepEqual(flows([expense()]), []);
+});
+
+test('opening cash is the end-of-base-day snapshot, not the start of that day', () => {
+  const nextDay = new Date('2026-09-01T12:00:00.000Z');
+  const actualFlows = flows(
+    [
+      expense({
+        payments: [
+          { amount: '10.00', paidAt: baseDate },
+          { amount: '7.00', paidAt: nextDay },
+        ],
+      }),
+    ],
+    [
+      entry({
+        receipts: [
+          { amount: '30.00', receivedAt: baseDate },
+          { amount: '15.00', receivedAt: nextDay },
+        ],
+      }),
+    ],
+  );
+  assert.deepEqual(
+    actualFlows.map(({ date, amount }) => ({ date, amount: amount.toString() })),
+    [
+      { date: '2026-09-01', amount: '-7' },
+      { date: '2026-09-01', amount: '15' },
+    ],
+  );
+
+  // The user entered 100 after the base day's payment and receipt; neither
+  // 10 nor 30 may be applied again to the first row or the next day.
+  const rows = buildPatrimonyRows({
+    storedBaseKey: '2026-08-31',
+    calculationBaseKey: '2026-08-31',
+    fromKey: '2026-08-31',
+    toKey: '2026-09-01',
+    openingCash: decimal('100.00'),
+    flows: actualFlows,
+    piggyTransactions: [],
+    assetTransactions: [],
+    btcPoints: [{ date: '2026-08-31', value: '300000' }],
+    usdPoints: [{ date: '2026-08-31', value: '5' }],
+    cdiPoints: [],
+    ipcaPoints: [],
+  });
+  assert.deepEqual(
+    rows.map(({ date, cashBrl }) => ({ date, cashBrl })),
+    [
+      { date: '2026-08-31', cashBrl: '100' },
+      { date: '2026-09-01', cashBrl: '108' },
+    ],
+  );
 });
 
 test('counts confirmed income by its receipt snapshot instead of the scheduled date or current amount', () => {

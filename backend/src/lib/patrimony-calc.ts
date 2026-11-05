@@ -93,6 +93,8 @@ export function buildCashFlows(args: {
   internalEntryIds: Set<string>;
 }) {
   const flows: CashFlow[] = [];
+  // openingCashBrl is the closing balance of the base day: those events are
+  // already reflected in it and must not be replayed into later days.
   const baseKey = dayKeyInSaoPaulo(args.baseDate);
   const toKey = dayKeyInSaoPaulo(args.to);
 
