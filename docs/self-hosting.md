@@ -10,11 +10,13 @@ Internet
   -> Cloudflare Tunnel (cloudflared no host)
   -> http://127.0.0.1:8080
   -> frontend Nginx
-     -> /api/* -> backend:8888 (rede Docker interna)
-                 -> db:5432 (rede Docker interna)
+     -> /api/* -> backend:8888 (rede demanage)
+                 -> db:5432 (rede demanage_db, somente backend + PostgreSQL)
 ```
 
-O host publica somente `127.0.0.1:8080`. PostgreSQL e API não possuem `ports:` no Compose de produção.
+O host publica somente `127.0.0.1:8080`. PostgreSQL e API não possuem `ports:` no Compose de produção. O banco participa somente da rede `demanage_db` (`internal: true`); o backend participa das duas redes e o frontend somente de `demanage`. O banco usa `no-new-privileges:true` e mantém o healthcheck local `pg_isready`.
+
+Ao adotar esse Compose em um servidor já em execução, a topologia dos containers precisa ser atualizada em uma operação controlada e autorizada. O agente CD verifica que as redes reais correspondem ao Compose e bloqueia o deploy enquanto houver divergência; sua sobreposição de imagens não altera as redes nem recria o banco. A mudança de rede não exige migração ou troca do volume `demanage_pgdata`.
 
 O self-host usa PostgreSQL 18 para ficar alinhado ao banco de origem. Na imagem oficial do PostgreSQL 18, o volume persistente deve ser montado em `/var/lib/postgresql`; o `PGDATA` interno é versionado (`/var/lib/postgresql/18/docker`). As imagens de produção usam tags de patch e digests imutáveis; atualize a tag e o digest juntos após revisar a nova imagem.
 
