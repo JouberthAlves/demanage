@@ -28,6 +28,18 @@ Não é um ERP nem um open banking. É o controle do mês: o que entra, o que sa
 
 Faturas de cartão fecham no dia configurado (fuso America/Sao_Paulo). Recuperação de senha usa código de alta entropia gerado no Perfil — sem e-mail.
 
+**Dispositivos confiáveis (opt-in):** após autenticar e confirmar a senha atual,
+é possível cadastrar este navegador no Perfil. Um segredo de posse fica apenas
+em cookie HttpOnly (Secure e `__Host-` em produção), com validade máxima de 30 dias;
+no banco permanece somente o HMAC. Para entrar por este dispositivo ainda é preciso
+digitar a senha e concluir um desafio de uso único de 3 minutos. Esse caminho
+permanece disponível quando terceiros esgotam o limite público de falhas por
+e-mail, sem afrouxar o limite original de 10 falhas/15min nem o limite por IP;
+o dispositivo tem limite independente de 5 falhas/15min. O logout encerra sessões
+mas preserva o cadastro voluntário; a recuperação offline de senha revoga todos
+os dispositivos confiáveis. **Não ajuda navegadores ainda não cadastrados e não
+substitui o código offline**. Não há envio de e-mail de recuperação.
+
 **Integração MCP (outubro de 2026):** o backend inclui ferramentas opcionais de finanças para clientes compatíveis com MCP, com autorização OAuth 2.1, consentimento e escopos. As operações incluem consulta do resumo financeiro mensal e histórico, prévia e reversão controlada de operações criadas pelo próprio MCP. A integração permanece **desligada por padrão** (`MCP_ENABLED=false`); código mesclado não significa ativação ou validação em produção. Veja [a configuração segura do MCP](./docs/mcp-finance-setup.md) e os PRs [#62](https://github.com/bielxdh3/demanage/pull/62), [#74](https://github.com/bielxdh3/demanage/pull/74) e [#76](https://github.com/bielxdh3/demanage/pull/76).
 
 ## Como é feito
