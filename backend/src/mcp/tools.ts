@@ -1,7 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 
-import { balanceDecimalFromTransactions } from '@/lib/piggy/ledger';
+import { Prisma } from '@/generated/prisma/client';
+import { signedAmount } from '@/lib/piggy/ledger';
+import { prisma } from '@/lib/prisma';
 import { listCustomTags } from '@/services/custom-tags';
 import {
   commitFinanceOperation,
@@ -9,7 +11,6 @@ import {
   getCommittedOperation,
   getRecentFinanceOperations,
 } from '@/services/finance-operation-store';
-import { listPiggyBanks } from '@/services/piggy-banks';
 
 import type { McpIdentity } from './auth';
 import { previewFinanceOperation, verifyIntentWithNonce } from './finance-preview';
@@ -33,6 +34,42 @@ function readableError(error: unknown): string {
   return 'Não foi possível concluir a operação. Nenhum sucesso financeiro foi confirmado.';
 }
 
+/** Page bank metadata first, then ask PostgreSQL to sum only this page's ledger. */
+export async function readPiggyBankPage(userId: string, limit = 50, cursor?: string) {
+  if (cursor && !(await prisma.piggyBank.findFirst({
+    where: { id: cursor, userId, archivedAt: null }, select: { id: true },
+  }))) throw new Error('Cursor de cofrinho inválido');
+  const rows = await prisma.piggyBank.findMany({
+    where: { userId, archivedAt: null },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    take: limit + 1,
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+    select: { id: true, name: true, goalAmount: true, completedAt: true },
+  });
+  const hasMore = rows.length > limit;
+  const page = rows.slice(0, limit);
+  const grouped = page.length ? await prisma.piggyTransaction.groupBy({
+    by: ['piggyBankId', 'type'],
+    where: { userId, piggyBankId: { in: page.map(({ id }) => id) } },
+    _sum: { amount: true },
+  }) : [];
+  const balances = new Map(page.map(({ id }) => [id, new Prisma.Decimal(0)]));
+  for (const group of grouped) {
+    balances.set(group.piggyBankId, balances.get(group.piggyBankId)!
+      .plus(signedAmount(group.type, group._sum.amount ?? 0)));
+  }
+  return {
+    banks: page.map((bank) => ({
+      id: bank.id,
+      name: bank.name,
+      balanceBrl: balances.get(bank.id)!.toFixed(2),
+      goalBrl: bank.goalAmount?.toFixed(2) ?? null,
+      completed: bank.completedAt !== null,
+    })),
+    nextCursor: hasMore ? page[page.length - 1]!.id : null,
+  };
+}
+
 /** Each MCP request gets its own verified identity. Tool arguments never include a userId. */
 export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
   const canRead = identity.scopes.has('finance:read');
@@ -41,7 +78,7 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
   server.registerTool(
     'get_financial_overview',
     {
-      description: 'Consultar saldo do mês até hoje: pagamentos e recebimentos registrados pela data efetiva, mais recorrências vencidas sem baixa; patrimônio opcional. Não é saldo bancário absoluto.',
+      description: 'Consultar saldo do mês até hoje: pagamentos e recebimentos registrados pela data efetiva, mais recorrências vencidas sem baixa; patrimônio opcional, que pode vir indisponível para históricos muito grandes. Não é saldo bancário absoluto.',
       annotations: { ...READ_ONLY_ANNOTATIONS, openWorldHint: true },
       inputSchema: {},
     },
@@ -58,21 +95,15 @@ export function registerFinanceTools(server: McpServer, identity: McpIdentity) {
   server.registerTool(
     'list_piggy_banks',
     {
-      description: 'Listar seus cofrinhos, nomes, IDs, saldos e metas. Use o ID exato para operações. Não escolha entre cofrinhos ambíguos.',
+      description: 'Listar seus cofrinhos, nomes, IDs, saldos e metas em páginas de até 100. Continue com nextCursor até null. Use o ID exato para operações; não escolha cofrinhos ambíguos.',
       annotations: READ_ONLY_ANNOTATIONS,
-      inputSchema: {},
+      // Historical rows may carry pre-UUID CUIDs; only DB user ownership validates cursors.
+      inputSchema: { cursor: z.string().min(1).max(191).optional(), limit: z.number().int().min(1).max(100).default(50) },
     },
-    async () => {
+    async ({ cursor, limit }) => {
       if (!canRead) return failure('Sem permissão finance:read.');
       try {
-        const banks = await listPiggyBanks(identity.userId, false);
-        return response(banks.map((bank) => ({
-          id: bank.id,
-          name: bank.name,
-          balanceBrl: balanceDecimalFromTransactions(bank.transactions).toFixed(2),
-          goalBrl: bank.goalAmount?.toFixed(2) ?? null,
-          completed: bank.completedAt !== null,
-        })));
+        return response(await readPiggyBankPage(identity.userId, limit, cursor));
       } catch (error) {
         return failure(readableError(error));
       }
