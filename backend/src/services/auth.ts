@@ -207,8 +207,12 @@ export function parseRecoverPassword(
   return { email, recoveryCode, newPassword };
 }
 
-/** Troca a senha com o código de recuperação, revoga sessões e gira o código. */
-export async function recoverPassword(
+/**
+ * Consumes the offline recovery proof exactly once. The returned session
+ * version is tied to the successful CAS, never a later read: a concurrent
+ * logout/recovery must invalidate this token instead of minting a newer one.
+ */
+export async function recoverPasswordWithSession(
   input: RecoverPasswordInput,
   database: Pick<typeof prisma, 'user' | '$transaction'> = prisma,
 ) {
@@ -222,11 +226,16 @@ export async function recoverPassword(
 
   const passwordHash = await hashPassword(input.newPassword);
   const nextRecoveryCode = generateRecoveryCode();
+  const nextSessionVersion = user.sessionVersion + 1;
   await database.$transaction(async (tx) => {
     // Password, session epoch and OAuth revocation either commit together or
     // all roll back. Updating User first locks its row against consent writes.
     const { count } = await tx.user.updateMany({
-      where: { id: user.id, recoveryCodeHash: user.recoveryCodeHash },
+      where: {
+        id: user.id,
+        recoveryCodeHash: user.recoveryCodeHash,
+        sessionVersion: user.sessionVersion,
+      },
       data: {
         passwordHash,
         recoveryCodeHash: hashRecoveryCode(nextRecoveryCode),
@@ -256,5 +265,17 @@ export async function recoverPassword(
       });
     }
   });
-  return nextRecoveryCode;
+  return {
+    recoveryCode: nextRecoveryCode,
+    user: { ...user, sessionVersion: nextSessionVersion },
+  };
+}
+
+/** Backward-compatible password recovery for service and OAuth callers. */
+export async function recoverPassword(
+  input: RecoverPasswordInput,
+  database: Pick<typeof prisma, 'user' | '$transaction'> = prisma,
+) {
+  const result = await recoverPasswordWithSession(input, database);
+  return result.recoveryCode;
 }

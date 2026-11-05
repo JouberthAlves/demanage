@@ -43,6 +43,7 @@ function recoveryStore(waitForBothReads = false) {
     const snapshot = {
       id: 'test-user',
       recoveryCodeHash: state.recoveryCodeHash,
+      sessionVersion: state.sessionVersion,
     };
     if (waitForBothReads) {
       reads += 1;
@@ -55,12 +56,13 @@ function recoveryStore(waitForBothReads = false) {
     where,
     data,
   }: {
-    where: { id: string; recoveryCodeHash: string };
+    where: { id: string; recoveryCodeHash: string; sessionVersion: number };
     data: Write;
   }) => {
     if (
       where.id !== 'test-user' ||
-      where.recoveryCodeHash !== state.recoveryCodeHash
+      where.recoveryCodeHash !== state.recoveryCodeHash ||
+      where.sessionVersion !== state.sessionVersion
     ) {
       return { count: 0 };
     }
