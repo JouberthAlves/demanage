@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate } from 'react-router';
+import { Link, Navigate, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 
 import { AuthCard, AuthLoading } from '@/components/auth/auth-card';
@@ -15,12 +15,15 @@ import {
 } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Spinner } from '@/components/ui/spinner';
-import { api } from '@/lib/api';
 import { getApiErrorMessage } from '@/lib/api-error';
 import { useAuthStore } from '@/stores/auth-store';
 
 export function RecoverPasswordPage() {
+  const navigate = useNavigate();
   const fetchMe = useAuthStore((state) => state.fetchMe);
+  const recoverWithCode = useAuthStore((state) => state.recoverWithCode);
+  const acknowledgeRecoveryCode = useAuthStore((state) => state.acknowledgeRecoveryCode);
+  const nextRecoveryCode = useAuthStore((state) => state.pendingRecoveryCode);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isLoading = useAuthStore((state) => state.isLoading);
 
@@ -28,7 +31,6 @@ export function RecoverPasswordPage() {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [nextRecoveryCode, setNextRecoveryCode] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<
@@ -41,7 +43,7 @@ export function RecoverPasswordPage() {
 
   if (isLoading) return <AuthLoading />;
 
-  if (isAuthenticated) {
+  if (isAuthenticated && !nextRecoveryCode && !submitting) {
     return <Navigate to='/' replace />;
   }
 
@@ -65,16 +67,9 @@ export function RecoverPasswordPage() {
     setSubmitting(true);
 
     try {
-      // Direct call kept in the page: there is no auth API module for this route yet.
-      const { data } = await api.post<{ recoveryCode: string }>(
-        '/auth/recover-password',
-        {
-          email: email.trim(),
-          recoveryCode: recoveryCode.trim(),
-          newPassword: password,
-        },
+      await recoverWithCode(
+        email.trim(), recoveryCode.trim(), password,
       );
-      setNextRecoveryCode(data.recoveryCode);
       toast.success('Senha redefinida');
     } catch (err) {
       const message = getApiErrorMessage(
@@ -95,16 +90,23 @@ export function RecoverPasswordPage() {
       title={nextRecoveryCode ? 'Senha alterada' : 'Código de recuperação'}
       description={
         nextRecoveryCode
-          ? 'Seu código antigo foi invalidado. Salve o novo código abaixo.'
+          ? 'Você já está conectado. Seu código antigo foi invalidado; salve o novo código abaixo antes de continuar.'
           : 'Não é necessário e-mail, SMS ou serviço externo.'
       }
-      footer={
+      footer={nextRecoveryCode ? (
+        <Button type='button' className='w-full' onClick={() => {
+          acknowledgeRecoveryCode();
+          navigate('/', { replace: true });
+        }}>
+          Já guardei, continuar
+        </Button>
+      ) : (
         <FieldDescription>
           <Link to='/login' className='underline underline-offset-4'>
-            {nextRecoveryCode ? 'Ir para o login' : 'Voltar para o login'}
+            Voltar para o login
           </Link>
         </FieldDescription>
-      }
+      )}
     >
       {nextRecoveryCode ? (
         <RecoveryCodePanel recoveryCode={nextRecoveryCode} />
