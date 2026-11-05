@@ -22,6 +22,8 @@ export function RecoverPasswordPage() {
   const navigate = useNavigate();
   const fetchMe = useAuthStore((state) => state.fetchMe);
   const recoverWithCode = useAuthStore((state) => state.recoverWithCode);
+  const acknowledgeRecoveryCode = useAuthStore((state) => state.acknowledgeRecoveryCode);
+  const nextRecoveryCode = useAuthStore((state) => state.pendingRecoveryCode);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isLoading = useAuthStore((state) => state.isLoading);
 
@@ -29,7 +31,6 @@ export function RecoverPasswordPage() {
   const [recoveryCode, setRecoveryCode] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [nextRecoveryCode, setNextRecoveryCode] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmPasswordError, setConfirmPasswordError] = useState<
@@ -66,10 +67,9 @@ export function RecoverPasswordPage() {
     setSubmitting(true);
 
     try {
-      const nextCode = await recoverWithCode(
+      await recoverWithCode(
         email.trim(), recoveryCode.trim(), password,
       );
-      setNextRecoveryCode(nextCode);
       toast.success('Senha redefinida');
     } catch (err) {
       const message = getApiErrorMessage(
@@ -94,7 +94,10 @@ export function RecoverPasswordPage() {
           : 'Não é necessário e-mail, SMS ou serviço externo.'
       }
       footer={nextRecoveryCode ? (
-        <Button type='button' className='w-full' onClick={() => navigate('/', { replace: true })}>
+        <Button type='button' className='w-full' onClick={() => {
+          acknowledgeRecoveryCode();
+          navigate('/', { replace: true });
+        }}>
           Já guardei, continuar
         </Button>
       ) : (
