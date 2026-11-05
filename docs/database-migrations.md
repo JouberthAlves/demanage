@@ -101,6 +101,27 @@ compatível do PGlite (WASM), servido por protocolo de rede:
 O PGlite não é o PostgreSQL 18 de produção. Os testes de integração (`*.itest.ts`) e a
 execução real em PostgreSQL 18 continuam pendentes até a próxima execução da CI.
 
+## DEM-01: ensaio pequeno de compatibilidade de rollback
+
+O teste `ops/cd/tests/test_rollback_postgres.py` usa somente um container
+`postgres:18-alpine` descartável, sem rede nem porta publicada e sem dados reais.
+Ele compara uma alteração aditiva (consulta antiga continua funcionando) com
+uma alteração incompatível (consulta antiga falha, embora `SELECT 1` continue
+respondendo), confirma o bloqueio da alteração destrutiva pelo gate de SQL e
+verifica que ambas as alterações no histórico do Prisma interrompem a decisão
+automática de rollback. Repetir no Windows com Docker e imagem já disponível:
+
+```powershell
+$env:DEMANAGE_DEM01_POSTGRES = '1'
+python -m unittest discover -s ops/cd/tests -p test_rollback_postgres.py -v
+Remove-Item Env:DEMANAGE_DEM01_POSTGRES
+```
+
+Esse teste demonstra a distinção entre saúde e compatibilidade; **não** atesta
+o comportamento de todas as versões reais do backend. Para uma migração real,
+seguir o ensaio com a imagem anterior e a candidata, conforme
+[`continuous-deployment.md`](./continuous-deployment.md#dem-01--compatibilidade-do-rollback-depois-de-uma-migração).
+
 ## Comandos de referência
 
 ```bash
