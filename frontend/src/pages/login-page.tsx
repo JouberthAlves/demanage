@@ -36,6 +36,7 @@ export function LoginPage() {
   const location = useLocation();
   const redirect = loginRedirect(location.state);
   const login = useAuthStore((state) => state.login);
+  const trustedDeviceLogin = useAuthStore((state) => state.trustedDeviceLogin);
   const fetchMe = useAuthStore((state) => state.fetchMe);
   const isAuthenticated = useAuthStore((state) => state.isAuthenticated);
   const isLoading = useAuthStore((state) => state.isLoading);
@@ -68,6 +69,24 @@ export function LoginPage() {
       const message = isTransientFailure(err)
         ? TRANSIENT_MESSAGE
         : getApiErrorMessage(err, 'Não foi possível entrar');
+      setError(message);
+      toast.error(message);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleTrustedDeviceLogin() {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await trustedDeviceLogin(email.trim(), password);
+      toast.success('Login realizado com dispositivo confiável');
+      navigate(redirect, { replace: true });
+    } catch (err) {
+      const message = isTransientFailure(err)
+        ? TRANSIENT_MESSAGE
+        : getApiErrorMessage(err, 'Dispositivo não cadastrado ou credenciais inválidas');
       setError(message);
       toast.error(message);
     } finally {
@@ -132,6 +151,16 @@ export function LoginPage() {
             {submitting ? <Spinner data-icon='inline-start' /> : null}
             Entrar
           </Button>
+          <Button type='button' variant='outline' className='w-full'
+            disabled={submitting || !email.trim() || !password}
+            onClick={() => void handleTrustedDeviceLogin()}>
+            Entrar usando dispositivo confiável
+          </Button>
+          <FieldDescription>
+            Disponível somente neste navegador após cadastro no Perfil.
+            Continua exigindo sua senha e funciona mesmo quando o limite de
+            falhas por e-mail foi esgotado.
+          </FieldDescription>
         </FieldGroup>
       </form>
     </AuthCard>

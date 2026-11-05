@@ -89,6 +89,11 @@ function recoveryStore(waitForBothReads = false) {
             return { count: state.deletedGrants.size };
           },
         },
+        trustedLoginDevice: {
+          async updateMany() {
+            return { count: 0 };
+          },
+        },
       });
     },
   } as unknown as NonNullable<Parameters<typeof recoverPassword>[1]>;

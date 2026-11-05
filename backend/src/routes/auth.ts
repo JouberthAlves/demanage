@@ -7,6 +7,18 @@ import {
   toPublicUser,
 } from '@/lib/auth';
 import { createLogoutHandler } from '@/lib/logout-handler';
+import {
+  authenticateTrustedDevice,
+  beginTrustedDeviceChallenge,
+  clearTrustedDeviceCookie,
+  denyTrustedLogin,
+  enrollTrustedDevice,
+  listTrustedDevices,
+  revokeTrustedDevice,
+  TRUSTED_DEVICE_COOKIE_NAME,
+  trustedDeviceCookieOptions,
+} from '@/lib/trusted-device-login';
+import { strictBrowserOrigin } from '@/middlewares/csrf-protection';
 import { requireAuth } from '@/middlewares/require-auth';
 import {
   authenticate,
@@ -25,6 +37,46 @@ import {
 } from '@/services/profile';
 
 const authRoutes = Router();
+
+// A trusted-device cookie remains after routine logout. The global browser
+// CSRF guard only applies when an auth JWT cookie exists, so these POSTs must
+// require a trusted browser Origin or Referer independently.
+authRoutes.use('/auth/trusted-device', (req, res, next) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  if (req.method === 'POST') return strictBrowserOrigin(req, res, next);
+  next();
+});
+
+authRoutes.post('/auth/trusted-device/enroll', requireAuth, async (req, res) => {
+  const { id, label, expiresAt, cookie } = await enrollTrustedDevice(req);
+  res.cookie(TRUSTED_DEVICE_COOKIE_NAME, cookie, trustedDeviceCookieOptions(req));
+  res.status(201).json({ id, label, expiresAt });
+});
+
+authRoutes.get('/auth/trusted-device', requireAuth, async (req, res) => {
+  res.json({ devices: await listTrustedDevices(requireUserId(req)) });
+});
+
+authRoutes.post('/auth/trusted-device/revoke', requireAuth, async (req, res) => {
+  if (await revokeTrustedDevice(req)) clearTrustedDeviceCookie(res, req);
+  res.json({ ok: true });
+});
+
+authRoutes.post('/auth/trusted-device/challenge', async (req, res) => {
+  res.json(await beginTrustedDeviceChallenge(req));
+});
+
+authRoutes.post('/auth/trusted-device/login', async (req, res) => {
+  const proof = await authenticateTrustedDevice(req);
+  if (proof.kind !== 'ok') return denyTrustedLogin(proof.kind);
+  const user = await (await import('@/lib/prisma')).prisma.user.findUnique({
+    where: { id: proof.userId },
+  });
+  if (!user) return denyTrustedLogin('denied');
+  setAuthCookie(res, signAuthToken(user.id, proof.sessionVersion), req);
+  const salaryReceiveDay = await salaryReceiveDayOf(user.id);
+  res.json({ user: toPublicUser(user, salaryReceiveDay) });
+});
 
 authRoutes.post('/auth/register', async (req, res) => {
   const input = parseRegister(bodyOf(req));

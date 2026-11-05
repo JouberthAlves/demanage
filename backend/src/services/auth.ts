@@ -241,9 +241,18 @@ export async function recoverPasswordWithSession(
         recoveryCodeHash: hashRecoveryCode(nextRecoveryCode),
         recoveryCodeCreatedAt: new Date(),
         sessionVersion: { increment: 1 },
+        trustedDeviceVersion: { increment: 1 },
+        trustedProofFailures: 0,
+        trustedProofWindowAt: null,
       },
     });
     if (count !== 1) throw unauthorized(INVALID_RECOVERY_MESSAGE);
+
+    // Password recovery revokes the independent possession factor atomically
+    // with the session epoch and OAuth grants. Routine logout does not.
+    await tx.trustedLoginDevice.updateMany({
+      where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() },
+    });
 
     const connections = await tx.oAuthConnection.findMany({
       where: { userId: user.id },
