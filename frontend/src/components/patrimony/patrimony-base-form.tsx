@@ -81,7 +81,7 @@ export function PatrimonyBaseForm({
           />
         </div>
         <div className='space-y-2'>
-          <Label htmlFor='patrimony-opening-cash'>Saldo em reais na data-base</Label>
+          <Label htmlFor='patrimony-opening-cash'>Saldo em reais ao final da data-base</Label>
           <Input
             id='patrimony-opening-cash'
             inputMode='decimal'
