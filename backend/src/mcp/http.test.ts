@@ -5,6 +5,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express from 'express';
 
+
 test('protected MCP discovery, request origin, user auth and read-only tools/list', async () => {
   process.env.DATABASE_URL ??= 'postgresql://test:test@127.0.0.1:1/nonexistent';
   const { createMcpHttpRouter } = await import('./http');
@@ -106,6 +107,69 @@ test('protected MCP discovery, request origin, user auth and read-only tools/lis
     assert.deepEqual(byName.get('undo_financial_operation')?.annotations, {
       readOnlyHint: false, destructiveHint: true, openWorldHint: false,
     }, 'undo is a sensitive local financial write');
+  } finally {
+    await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  }
+});
+
+test('MCP enforces its own byte budget at the exact boundary, with and without Content-Length', async () => {
+  process.env.DATABASE_URL ??= 'postgresql://test:test@127.0.0.1:1/nonexistent';
+  const { createMcpHttpRouter, MCP_REQUEST_BODY_MAX_BYTES } = await import('./http');
+  const app = express();
+  app.use(createMcpHttpRouter({
+    resourceUrl: 'http://127.0.0.1/api/mcp',
+    issuerUrl: 'http://127.0.0.1/api/oauth',
+    isProduction: false,
+    verifyBearer: async (token) => token === 'test-reader'
+      ? { userId: 'only-this-user', clientId: 'read-client', scopes: new Set(['finance:read']) }
+      : null,
+  }));
+  const server = app.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`;
+  const baseHeaders = {
+    Authorization: 'Bearer test-reader',
+    Accept: 'application/json, text/event-stream',
+    'Content-Type': 'application/json',
+  };
+  const payload = (size: number) => {
+    const minimum = JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list', params: { padding: '' } });
+    assert.ok(size >= Buffer.byteLength(minimum));
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/list',
+      params: { padding: 'x'.repeat(size - Buffer.byteLength(minimum)) } });
+    assert.equal(Buffer.byteLength(body), size);
+    return body;
+  };
+
+  try {
+    const boundary = await fetch(url, {
+      method: 'POST', headers: baseHeaders, body: payload(MCP_REQUEST_BODY_MAX_BYTES),
+    });
+    assert.equal(boundary.status, 200, 'exact byte budget must remain usable');
+    const over = await fetch(url, {
+      method: 'POST', headers: baseHeaders, body: payload(MCP_REQUEST_BODY_MAX_BYTES + 1),
+    });
+    assert.equal(over.status, 413, 'declared Content-Length above budget');
+
+    const chunked = await new Promise<number>((resolve, reject) => {
+      const request = httpRequest(url, {
+        method: 'POST', headers: { ...baseHeaders, 'Transfer-Encoding': 'chunked' },
+      }, (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode ?? 0));
+      });
+      request.on('error', reject);
+      const body = payload(MCP_REQUEST_BODY_MAX_BYTES + 1);
+      request.write(body.slice(0, 100_000));
+      request.end(body.slice(100_000));
+    });
+    assert.equal(chunked, 413, 'stream without Content-Length is bounded too');
+
+    const unauthorized = await fetch(url, {
+      method: 'POST', headers: { ...baseHeaders, Authorization: '' },
+      body: payload(MCP_REQUEST_BODY_MAX_BYTES + 1),
+    });
+    assert.equal(unauthorized.status, 401, 'bearer guard precedes the MCP parser');
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
   }

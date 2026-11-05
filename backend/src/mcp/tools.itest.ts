@@ -9,6 +9,7 @@ import { todayKeyInSaoPaulo } from '@/lib/civil-date';
 import { prisma } from '@/lib/prisma';
 
 import { createMcpHttpRouter } from './http';
+import { readPiggyBankPage } from './tools';
 
 function readRpc(text: string): { result?: { content?: Array<{ text: string }>; isError?: boolean } } {
   const payload = text.startsWith('event:')
@@ -103,6 +104,12 @@ test('MCP client previews, executes once and queries its own committed income+pi
     const gift = await prisma.piggyTransaction.findFirstOrThrow({ where: { userId: user.id } });
     assert.equal(gift.piggyBankId, bank.id);
     assert.equal(Number(gift.amount), 20);
+
+    const listed = await call('list_piggy_banks', {});
+    assert.equal(listed.isError, false);
+    assert.deepEqual(listed.data, { banks: [{
+      id: bank.id, name: 'Porco', balanceBrl: '20.00', goalBrl: null, completed: false,
+    }], nextCursor: null }, 'MCP response exposes stable paginated shape and exact computed balance');
   } finally {
     await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     await prisma.financeMcpOperation.deleteMany({ where: { userId: user.id } });
@@ -111,6 +118,65 @@ test('MCP client previews, executes once and queries its own committed income+pi
     await prisma.expense.deleteMany({ where: { userId: user.id } });
     await prisma.entry.deleteMany({ where: { userId: user.id } });
     await prisma.customTag.deleteMany({ where: { userId: user.id } });
+    await prisma.piggyBank.deleteMany({ where: { userId: user.id } });
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
+
+test('MCP piggy pages are stable and DB sums exactly match large signed ledgers', async () => {
+  const user = await prisma.user.create({
+    data: { name: 'Piggy aggregation stress', email: `mcp-piggy-${randomUUID()}@example.invalid`, passwordHash: 'test-only' },
+  });
+  try {
+    const banks = Array.from({ length: 113 }, (_, i) => ({
+      id: randomUUID(), userId: user.id, name: `Bank ${i}`,
+      monthlyGoal: 0, createdAt: new Date('2026-10-01T00:00:00.000Z'),
+    }));
+    await prisma.piggyBank.createMany({ data: banks });
+    const transactions = banks.flatMap((bank) => [
+      { userId: user.id, piggyBankId: bank.id, type: 'deposit' as const, amount: 0.10, date: new Date('2026-10-03T12:00:00Z') },
+      { userId: user.id, piggyBankId: bank.id, type: 'interest' as const, amount: 0.20, date: new Date('2026-10-04T12:00:00Z') },
+      { userId: user.id, piggyBankId: bank.id, type: 'withdraw' as const, amount: 0.05, date: new Date('2026-10-05T12:00:00Z') },
+    ]);
+    await prisma.piggyTransaction.createMany({ data: transactions });
+    const seen = new Map<string, string>();
+    let cursor: string | undefined;
+    const pageSizes: number[] = [];
+    do {
+      const page = await readPiggyBankPage(user.id, 50, cursor);
+      pageSizes.push(page.banks.length);
+      for (const bank of page.banks) {
+        assert.equal(seen.has(bank.id), false, 'stable cursor must not repeat records');
+        seen.set(bank.id, bank.balanceBrl);
+      }
+      cursor = page.nextCursor ?? undefined;
+    } while (cursor);
+    assert.deepEqual(pageSizes, [50, 50, 13]);
+    assert.equal(seen.size, 113);
+    for (const bank of banks) assert.equal(seen.get(bank.id), '0.25');
+
+    const extra = await prisma.piggyTransaction.createMany({ data: Array.from({ length: 420 }, () => ({
+      userId: user.id, piggyBankId: banks[0]!.id, type: 'deposit' as const,
+      amount: 0.01, date: new Date('2026-10-05T12:00:00Z'),
+    })) });
+    assert.equal(extra.count, 420);
+    const first = await readPiggyBankPage(user.id, 100);
+    const next = await readPiggyBankPage(user.id, 100, first.nextCursor!);
+    assert.equal(first.banks.length + next.banks.length, 113);
+    const recomputed = [...first.banks, ...next.banks].find(({ id }) => id === banks[0]!.id);
+    assert.equal(recomputed?.balanceBrl, '4.45');
+    const legacyId = `ck${randomUUID().replace(/-/g, '')}`;
+    await prisma.piggyBank.create({ data: {
+      id: legacyId, userId: user.id, name: 'Legacy CUID ID', monthlyGoal: 0,
+      createdAt: new Date('2026-11-01T00:00:00.000Z'),
+    } });
+    const legacyFirst = await readPiggyBankPage(user.id, 1);
+    assert.equal(legacyFirst.nextCursor, legacyId);
+    const afterLegacy = await readPiggyBankPage(user.id, 1, legacyId);
+    assert.equal(afterLegacy.banks.length, 1, 'legacy ID must also work as a cursor');
+    await assert.rejects(readPiggyBankPage(user.id, 50, randomUUID()), /Cursor/);
+  } finally {
+    await prisma.piggyTransaction.deleteMany({ where: { userId: user.id } });
     await prisma.piggyBank.deleteMany({ where: { userId: user.id } });
     await prisma.user.delete({ where: { id: user.id } });
   }
