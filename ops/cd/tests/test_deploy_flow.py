@@ -31,6 +31,10 @@ REFS = {
     'backend': 'ghcr.io/bielxdh3/demanage-backend@sha256:' + 'a' * 64,
     'frontend': 'ghcr.io/bielxdh3/demanage-frontend@sha256:' + 'b' * 64,
 }
+INITIAL_MIGRATIONS = [['baseline', 'checksum-a', '2026-10-01T00:00:00+00:00',
+                       '2026-10-01T00:00:01+00:00', None]]
+EXTRA_MIGRATION = ['additive', 'checksum-b', '2026-10-02T00:00:00+00:00',
+                   '2026-10-02T00:00:01+00:00', None]
 
 
 def release_manifest():
@@ -82,6 +86,9 @@ class FakeDocker:
         self.images = {}
         self.calls = []
         self.journal_present_at_up = []
+        self.migrations = [list(item) for item in INITIAL_MIGRATIONS]
+        self.migrate_on_new_up = False
+        self.migrate_on_old_up = False
 
     def add_image(self, ref, image_id, revision):
         image = {
@@ -106,6 +113,8 @@ class FakeDocker:
             return json.dumps([self.images[args[3]]])
         if args[:2] == ['docker', 'inspect']:
             return json.dumps([self._container(args[2])])
+        if args[:4] == ['docker', 'exec', 'demanage-db', 'psql']:
+            return json.dumps(self.migrations)
         if args[:2] == ['docker', 'compose']:
             if 'config' in args:
                 return json.dumps(compose_model())
@@ -124,6 +133,12 @@ class FakeDocker:
             raise CommandError('compose up failed')
         self.running['backend'] = self.images[refs[0]]['Id']
         self.running['frontend'] = self.images[refs[1]]['Id']
+        if self.migrate_on_new_up and self.running['backend'] == NEW['backend']:
+            self.migrations.append(list(EXTRA_MIGRATION))
+            self.migrate_on_new_up = False
+        if self.migrate_on_old_up and self.running['backend'] == OLD['backend']:
+            self.migrations.append(list(EXTRA_MIGRATION))
+            self.migrate_on_old_up = False
         return ''
 
     def _container(self, name):
@@ -298,6 +313,93 @@ class DeployFlowTest(unittest.TestCase):
         ]
         self.assertEqual(len(rollback_ups), 2)
 
+    def test_migration_during_failed_deploy_blocks_old_image_before_start(self):
+        self.write_state(FIRST, OLD)
+        fake = self.make_fake()
+        fake.migrate_on_new_up = True
+        ctx = self.make_ctx(fake, fetch=lambda: manifest.validate_release(release_manifest()))
+        original_probe = ctx.probe
+
+        def fail_new_readiness(url):
+            if url.endswith('/ready') and fake.running['backend'] == NEW['backend']:
+                return {'status': 'unavailable', 'service': 'demanage-backend', 'db': 'unavailable'}
+            return original_probe(url)
+
+        ctx.probe = fail_new_readiness
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                cli.run_agent(ctx)
+
+        self.assertEqual(fake.running, NEW)
+        self.assertEqual(fake.journal_present_at_up, [True], 'old images must never be launched')
+        self.assertEqual(len(fake.migrations), 2)
+        journal = state.read_journal(self.journal_file)
+        self.assertIsNotNone(journal, 'migration must not be treated as a clean code-only rollback')
+        self.assertEqual(journal['phase'], state.ROLLBACK_FAILED)
+        self.assertEqual(journal['rollback_error'], 'MigrationCompatibilityUnverified')
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], FIRST)
+        with self.assertRaisesRegex(RuntimeError, 'operator action needed'):
+            cli.run_agent(ctx)
+
+    def test_incomplete_migration_change_blocks_rollback_even_without_new_row(self):
+        self.write_state(FIRST, OLD)
+        fake = self.make_fake()
+        ctx = self.make_ctx(fake)
+        before = deploy.prisma_migration_snapshot(fake)
+        journal = {'prisma_migrations': before}
+
+        # Prisma can record an attempted/failed migration without incrementing
+        # the completed count. Such a state change must not look unchanged.
+        fake.migrations[0][3] = None
+        self.assertEqual(len(fake.migrations), len(before))
+        with self.assertRaises(deploy.MigrationCompatibilityUnverified):
+            deploy.require_unchanged_migrations(ctx.runner, journal)
+
+    def test_failed_readiness_without_new_migrations_allows_previous_images(self):
+        self.write_state(FIRST, OLD)
+        fake = self.make_fake()
+        ctx = self.make_ctx(fake, fetch=lambda: manifest.validate_release(release_manifest()))
+        original_probe = ctx.probe
+
+        def fail_new_readiness(url):
+            if url.endswith('/ready') and fake.running['backend'] == NEW['backend']:
+                return {'status': 'unavailable', 'service': 'demanage-backend'}
+            return original_probe(url)
+
+        ctx.probe = fail_new_readiness
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(RuntimeError):
+                cli.run_agent(ctx)
+
+        self.assertEqual(fake.running, OLD)
+        self.assertFalse(self.journal_file.exists())
+
+    def test_migration_change_during_old_image_start_keeps_journal(self):
+        self.write_state(FIRST, OLD)
+        fake = self.make_fake(fail_up=lambda refs: refs[0] == REFS['backend'])
+        fake.migrate_on_old_up = True
+        ctx = self.make_ctx(fake, fetch=lambda: manifest.validate_release(release_manifest()))
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(CommandError):
+                cli.run_agent(ctx)
+
+        self.assertEqual(fake.running, OLD)
+        journal = state.read_journal(self.journal_file)
+        self.assertEqual(journal['phase'], state.ROLLBACK_FAILED)
+        self.assertEqual(journal['rollback_error'], 'MigrationCompatibilityUnverified')
+
+    def test_missing_prisma_ledger_blocks_before_container_mutation(self):
+        self.write_state(FIRST, OLD)
+        fake = self.make_fake()
+        fake.migrations = []
+        ctx = self.make_ctx(fake, fetch=lambda: manifest.validate_release(release_manifest()))
+        with self.assertRaisesRegex(RuntimeError, 'Prisma migration state'):
+            cli.run_agent(ctx)
+
+        self.assertEqual(fake.journal_present_at_up, [])
+        self.assertEqual(fake.running, OLD)
+        self.assertFalse(self.journal_file.exists())
+
     def test_failed_rollback_keeps_journal_and_blocks_next_run(self):
         self.write_state(FIRST, OLD)
         fake = self.make_fake(fail_up=lambda refs: True)
@@ -329,6 +431,7 @@ class DeployFlowTest(unittest.TestCase):
                 'image': 'sha256:db',
                 'volumes': [['demanage_pgdata', '/var/lib/postgresql']],
             },
+            'prisma_migrations': [list(row) for row in INITIAL_MIGRATIONS],
             'rollback_refs': {'backend': 'localhost/x:1', 'frontend': 'localhost/y:1'},
             'backup': str(self.base / 'demanage.dump'),
             'started_at': '2026-10-10T12:00:00+00:00',
@@ -434,6 +537,31 @@ class DeployFlowTest(unittest.TestCase):
 
         self.assertFalse(self.journal_file.exists())
         self.assertEqual(state.load_state(self.state_file)['source_commit'], FIRST)
+
+    def test_crash_with_previous_images_and_new_migration_keeps_journal(self):
+        self.write_state(FIRST, OLD)
+        self._journal(new=NEW, previous=OLD)
+        fake = self.make_fake(running=OLD)
+        fake.migrations.append(list(EXTRA_MIGRATION))
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+
+        with self.assertRaisesRegex(RuntimeError, 'migration|compatib'):
+            cli.run_agent(ctx)
+        self.assertTrue(self.journal_file.exists())
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], FIRST)
+
+    def test_crash_with_previous_images_and_missing_migration_snapshot_blocks(self):
+        self.write_state(FIRST, OLD)
+        self._journal(new=NEW, previous=OLD)
+        journal = state.read_journal(self.journal_file)
+        del journal['prisma_migrations']
+        state.write_journal(self.journal_file, journal)
+        fake = self.make_fake(running=OLD)
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+
+        with self.assertRaisesRegex(RuntimeError, 'migration|compatib'):
+            cli.run_agent(ctx)
+        self.assertTrue(self.journal_file.exists())
 
     def test_unknown_container_state_blocks_and_keeps_journal(self):
         self.write_state(FIRST, OLD)

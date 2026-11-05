@@ -9,6 +9,8 @@ Order of operations for a release (each step can stop the deploy):
   6. write the deploy state, then remove the journal
 On failure: application-only rollback to the previous images. If that fails the
 journal is kept with phase "rollback-failed" and every later run refuses to act.
+Rollback is also blocked when Prisma migrations changed: old image health does
+not establish backward schema compatibility.
 """
 
 from __future__ import annotations
@@ -37,6 +39,10 @@ from .state import (
 )
 
 HEALTH_TIMEOUT_SECONDS = 150
+
+
+class MigrationCompatibilityUnverified(RuntimeError):
+    """A schema change makes an automatic code-only rollback unverified."""
 
 
 def http_health_probe(url: str) -> dict[str, Any]:
@@ -103,6 +109,49 @@ def db_identity(runner: Runner) -> dict[str, Any]:
     if db["State"].get("Health", {}).get("Status") != "healthy":
         raise RuntimeError("PostgreSQL is not healthy")
     return {"id": db["Id"], "image": db["Image"], "volumes": sorted(volumes)}
+
+
+def prisma_migration_snapshot(runner: Runner) -> list[list[Any]]:
+    """Read the migration ledger, including incomplete/rolled-back attempts.
+
+    A completed migration count alone misses failed attempts. This snapshot
+    detects changes; it does not claim arbitrary SQL changes are compatible.
+    """
+    sql = (
+        'SELECT COALESCE(jsonb_agg(jsonb_build_array('
+        'migration_name, checksum, started_at, finished_at, rolled_back_at) '
+        'ORDER BY migration_name, started_at), \'[]\'::jsonb) '
+        'FROM public."_prisma_migrations"'
+    )
+    result = runner.run([
+        "docker", "exec", "demanage-db", "psql", "-X", "-U", "demanage",
+        "-d", "demanage", "-A", "-t", "-v", "ON_ERROR_STOP=1", "-c", sql,
+    ], timeout=30)
+    try:
+        rows = json.loads(result)
+    except (ValueError, TypeError) as error:
+        raise RuntimeError("Cannot validate Prisma migration state") from error
+    if not isinstance(rows, list) or not rows or any(
+        not isinstance(row, list)
+        or len(row) != 5
+        or not isinstance(row[0], str)
+        or not isinstance(row[1], str)
+        for row in rows
+    ):
+        raise RuntimeError("Unexpected Prisma migration state; refusing deploy")
+    return rows
+
+
+def require_unchanged_migrations(runner: Runner, journal: dict[str, Any]) -> None:
+    before = journal.get("prisma_migrations")
+    if not isinstance(before, list) or not before:
+        raise MigrationCompatibilityUnverified(
+            "Prisma migration snapshot missing; operator must verify rollback compatibility"
+        )
+    if prisma_migration_snapshot(runner) != before:
+        raise MigrationCompatibilityUnverified(
+            "Prisma migration state changed; operator must verify rollback compatibility"
+        )
 
 
 def healthy(
@@ -201,6 +250,7 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
     # The PostgreSQL dump is mandatory before container mutation.
     backup_path, digest = ctx.backup(ctx.runner, ctx.config, target)
     log(f"validated pre-deploy database dump {backup_path}, sha256:{digest}")
+    before_migrations = prisma_migration_snapshot(ctx.runner)
 
     stamp = ctx.clock().strftime("%Y%m%d%H%M%S")
     rollback_refs = {
@@ -221,6 +271,7 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
         # Serialize the pre-deploy identity in the crash journal. Container
         # liveness alone cannot prove that PostgreSQL was not replaced.
         "database_identity": before_db,
+        "prisma_migrations": before_migrations,
         "rollback_refs": rollback_refs,
         "backup": backup_path,
         "started_at": ctx.clock().isoformat(),
@@ -256,6 +307,9 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
 def rollback(ctx: Context, journal: dict[str, Any], before_db: dict[str, Any]) -> None:
     """Restore the previous application images. Never touches the database or tunnel."""
     try:
+        # Do not start a previous image on a schema whose compatibility was
+        # never established. A healthy /health response would not prove it.
+        require_unchanged_migrations(ctx.runner, journal)
         apply_overlay(
             ctx.runner, ctx.config, journal["rollback_refs"], ctx.workdir, rollback=True
         )
@@ -263,11 +317,12 @@ def rollback(ctx: Context, journal: dict[str, Any], before_db: dict[str, Any]) -
             raise RuntimeError("rollback healthcheck did not pass")
         if db_identity(ctx.runner) != before_db:
             raise RuntimeError("database identity changed during rollback")
+        require_unchanged_migrations(ctx.runner, journal)
     except Exception as error:  # noqa: BLE001 - recorded in the journal, then re-raised by caller
         journal["phase"] = ROLLBACK_FAILED
         journal["rollback_error"] = type(error).__name__
         write_journal(ctx.journal, journal)
-        log("CRITICAL: application rollback failed; journal kept, operator action needed")
+        log("CRITICAL: application rollback blocked or failed; journal kept, operator action needed")
         return
     clear_journal(ctx.journal)
     log("application rollback successful; database and tunnel untouched")
@@ -302,6 +357,7 @@ def reconcile(ctx: Context, state: dict[str, Any], journal: dict[str, Any]) -> d
         log(f"recovered interrupted deploy: {journal['target']} is running and healthy")
         return recovered
     if running == journal["previous_images"] and wait_healthy(ctx, journal["previous_images"]):
+        require_unchanged_migrations(ctx.runner, journal)
         clear_journal(ctx.journal)
         log("interrupted deploy left the previous release running; journal cleared")
         return state
