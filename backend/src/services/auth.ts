@@ -18,6 +18,10 @@ const ABNT2_PASSWORD_MESSAGE =
   'Use apenas caracteres do teclado ABNT2 na senha';
 const EMAIL_TAKEN_MESSAGE = 'E-mail já cadastrado';
 const INVALID_RECOVERY_MESSAGE = 'E-mail ou código de recuperação inválidos';
+// bcrypt cost 10, generated once offline. No request ever hashes a dummy
+// password at runtime; missing and existing accounts both compare one hash.
+const DUMMY_LOGIN_PASSWORD_HASH =
+  '$2b$10$X.PHm9ikr7jqfq5BRg096emZR7SXrSmVLLYBol4HTz75XO30hQu4K';
 
 /** String do corpo, ou `''` quando ausente/não-string (nunca lança). */
 function stringField(value: unknown) {
@@ -92,9 +96,17 @@ export function parseLogin(body: Record<string, unknown>) {
   return { email, password };
 }
 
-export async function authenticate(email: string, password: string) {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await comparePassword(password, user.passwordHash))) {
+export async function authenticate(
+  email: string,
+  password: string,
+  userStore: Pick<typeof prisma.user, 'findUnique'> = prisma.user,
+) {
+  const user = await userStore.findUnique({ where: { email } });
+  const matches = await comparePassword(
+    password,
+    user?.passwordHash ?? DUMMY_LOGIN_PASSWORD_HASH,
+  );
+  if (!user || !matches) {
     throw unauthorized('E-mail ou senha inválidos');
   }
   return user;
