@@ -314,10 +314,10 @@ async function readMonthlyCash(userId: string, today: string) {
  */
 export async function patrimonyWithinHistoryBudget(userId: string, budget = MCP_PATRIMONY_SNAPSHOT_ROW_BUDGET) {
   const counts = await Promise.all([
-    prisma.expense.count({ where: { userId } }),
+    prisma.expense.count({ where: { userId, voidedAt: null } }),
     prisma.entry.count({ where: { userId } }),
-    prisma.expenseSplit.count({ where: { expense: { userId } } }),
-    prisma.expensePayment.count({ where: { expense: { userId } } }),
+    prisma.expenseSplit.count({ where: { expense: { userId, voidedAt: null } } }),
+    prisma.expensePayment.count({ where: { expense: { userId, voidedAt: null } } }),
     prisma.entryReceipt.count({ where: { entry: { userId } } }),
     prisma.piggyTransaction.count({ where: { userId } }),
     prisma.assetTransaction.count({ where: { userId } }),
