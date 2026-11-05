@@ -17,6 +17,7 @@ async function withLoginServer(
       ip: string,
     ) => Promise<{ status: number; body: ResponseBody }>,
   ) => Promise<void>,
+  { windowMs = 60_000, limit = 3 }: { windowMs?: number; limit?: number } = {},
 ) {
   const app = express();
   // Test harness models the single trusted nginx hop which overwrites XFF.
@@ -24,15 +25,16 @@ async function withLoginServer(
   app.use(express.json());
   app.use(
     rateLimit({
-      windowMs: 60_000,
+      windowMs,
       limit: 20,
       standardHeaders: false,
       legacyHeaders: false,
+      message: { error: 'Muitas tentativas. Tente novamente em alguns minutos.' },
     }),
   );
   app.post(
     '/auth/login',
-    createLoginFailureLimiter({ windowMs: 60_000, limit: 3 }),
+    createLoginFailureLimiter({ windowMs, limit }),
     (req, res) => {
       const { email, password } = req.body as {
         email?: unknown;
@@ -161,5 +163,50 @@ test('successful logins do not consume the failed-identifier budget; malformed b
         .status,
       429,
     );
+  });
+});
+
+test('ten distributed failures deny a subsequent correct login for the same identifier', async () => {
+  await withLoginServer(async (attempt) => {
+    for (const email of ['registered@example.invalid', 'missing@example.invalid']) {
+      for (let i = 1; i <= 10; i++) {
+        const response = await attempt(email, 'wrong-password', `198.51.100.${i}`);
+        assert.equal(response.status, 401);
+        assert.deepEqual(response.body, { error: 'E-mail ou senha inválidos' });
+      }
+    }
+
+    const deniedValid = await attempt('registered@example.invalid', 'right-password', '198.51.100.4');
+    const deniedUnknown = await attempt('missing@example.invalid', 'wrong-password', '198.51.100.5');
+    assert.equal(deniedValid.status, 429, 'correct credentials cannot pass after identifier budget is spent');
+    assert.equal(deniedUnknown.status, 429);
+    assert.deepEqual(deniedValid.body, deniedUnknown.body, '429 must not enumerate registered identities');
+  }, { limit: 10 });
+});
+
+test('identifier lockout expires with its configured window', async () => {
+  await withLoginServer(async (attempt) => {
+    assert.equal((await attempt('registered@example.invalid', 'wrong', '198.51.100.30')).status, 401);
+    assert.equal((await attempt('registered@example.invalid', 'right-password', '198.51.100.31')).status, 429);
+    // Small window models the 15-minute production expiration without sleeping 15 minutes.
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    const recovered = await attempt('registered@example.invalid', 'right-password', '198.51.100.6');
+    assert.equal(recovered.status, 200);
+    assert.deepEqual(recovered.body, { ok: true });
+    assert.equal((await attempt('missing@example.invalid', 'wrong-password', '198.51.100.7')).status, 401);
+  }, { windowMs: 400, limit: 1 });
+});
+
+test('twenty distinct identifiers from one IP cannot bypass the independent IP ceiling', async () => {
+  await withLoginServer(async (attempt) => {
+    // One origin can create at most 20 identifier failures per window in this
+    // harness; the production auth limiter is stricter (20 or 100 / 15 min).
+    for (let i = 0; i < 20; i++) {
+      const result = await attempt(`unique-${i}@example.invalid`, 'wrong-password', '198.51.100.50');
+      assert.equal(result.status, 401);
+    }
+    assert.equal((await attempt('another-key@example.invalid', 'wrong-password', '198.51.100.50')).status, 429);
+    // Other trusted source IPs still have independent per-IP quotas.
+    assert.equal((await attempt('another-key@example.invalid', 'wrong-password', '198.51.100.51')).status, 401);
   });
 });
