@@ -3,6 +3,7 @@ import { KeyRound } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { RecoveryCodePanel } from '@/components/auth/recovery-code-panel';
+import { TrustedDeviceSection } from '@/components/profile/trusted-device-section';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -94,6 +95,7 @@ export function RecoverySection({ hasRecoveryCode }: RecoverySectionProps) {
         ) : null}
       </section>
 
+      <TrustedDeviceSection />
       <Dialog
         open={dialogOpen}
         onOpenChange={(open) => (open ? setDialogOpen(true) : closeDialog())}

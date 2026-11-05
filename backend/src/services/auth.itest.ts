@@ -25,6 +25,10 @@ test('recovery transaction aborts without changing code or session epoch', async
         findMany: (args: Parameters<typeof tx.oAuthConnection.findMany>[0]) => tx.oAuthConnection.findMany(args),
         updateMany: async () => { throw new Error('simulated authorization revocation error'); },
       },
+      trustedLoginDevice: {
+        updateMany: (args: Parameters<typeof tx.trustedLoginDevice.updateMany>[0]) =>
+          tx.trustedLoginDevice.updateMany(args),
+      },
     })),
   } as unknown as NonNullable<Parameters<typeof recoverPasswordWithSession>[1]>;
   try {
