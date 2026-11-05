@@ -225,7 +225,7 @@ async function readMonthlyCash(userId: string, today: string) {
   });
 
   await eachPage((cursor) => prisma.expense.findMany({
-    where: { userId, systemOrigin: 'manual' },
+    where: { userId, systemOrigin: 'manual', voidedAt: null },
     orderBy: { id: 'asc' }, take: MCP_FINANCIAL_READ_PAGE,
     ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
     select: {
