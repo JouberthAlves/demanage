@@ -8,7 +8,7 @@ import { errorHandler, notFoundHandler } from '@/http/errors';
 import { createLoginFailureLimiter } from '@/lib/login-failure-limiter';
 import { isAllowedBrowserOrigin } from '@/lib/request-origin';
 import { createMcpHttpRouter } from '@/mcp/http';
-import { csrfProtection } from '@/middlewares/csrf-protection';
+import { csrfProtection, sessionCreationOrigin } from '@/middlewares/csrf-protection';
 import { requestLogger } from '@/middlewares/request-logger';
 import { startOAuthArtifactCleanup } from '@/oauth/cleanup';
 import { getOAuthGrantSubject, oauthSettings } from '@/oauth/provider';
@@ -126,6 +126,9 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
       isProduction,
     }));
   }
+  // Without an existing auth cookie, these browser requests can still set one.
+  // Native clients with no browser headers retain the JSON API contract.
+  app.post(['/auth/login', '/auth/register', '/auth/recover-password'], sessionCreationOrigin);
   app.use(csrfProtection);
   app.use(express.json({ limit: '256kb' }));
 

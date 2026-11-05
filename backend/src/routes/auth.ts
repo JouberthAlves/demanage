@@ -15,8 +15,7 @@ import {
   enrollTrustedDevice,
   listTrustedDevices,
   revokeTrustedDevice,
-  TRUSTED_DEVICE_COOKIE_NAME,
-  trustedDeviceCookieOptions,
+  setTrustedDeviceCookie,
 } from '@/lib/trusted-device-login';
 import { strictBrowserOrigin } from '@/middlewares/csrf-protection';
 import { requireAuth } from '@/middlewares/require-auth';
@@ -49,7 +48,7 @@ authRoutes.use('/auth/trusted-device', (req, res, next) => {
 
 authRoutes.post('/auth/trusted-device/enroll', requireAuth, async (req, res) => {
   const { id, label, expiresAt, cookie } = await enrollTrustedDevice(req);
-  res.cookie(TRUSTED_DEVICE_COOKIE_NAME, cookie, trustedDeviceCookieOptions(req));
+  setTrustedDeviceCookie(res, cookie, req);
   res.status(201).json({ id, label, expiresAt });
 });
 

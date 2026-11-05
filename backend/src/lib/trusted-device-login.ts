@@ -50,9 +50,21 @@ function sameHash(left: string, right: string) {
 }
 
 export function trustedDeviceCookieOptions(req?: Request) {
-  return { ...authCookieOptions(req), path: '/' as const,
-    secure: NODE_ENV === 'production' || authCookieOptions(req).secure,
-    maxAge: DEVICE_TTL_MS };
+  const sameSite = authCookieOptions(req).sameSite;
+  return { httpOnly: true, secure: NODE_ENV === 'production' || sameSite === 'none',
+    sameSite, path: '/' as const, maxAge: DEVICE_TTL_MS };
+}
+
+/** Explicit browser-only flags at the Express emission site for static analysis. */
+export function setTrustedDeviceCookie(res: Response, cookie: string, req: Request) {
+  const options = trustedDeviceCookieOptions(req);
+  res.cookie(TRUSTED_DEVICE_COOKIE_NAME, cookie, {
+    httpOnly: true,
+    secure: NODE_ENV === 'production' || options.sameSite === 'none',
+    sameSite: options.sameSite,
+    path: '/',
+    maxAge: DEVICE_TTL_MS,
+  });
 }
 
 export function clearTrustedDeviceCookie(res: Response, req?: Request) {

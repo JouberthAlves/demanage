@@ -84,6 +84,13 @@ test('enrolled device + password unlocks after 10 distributed email failures wit
       assert.ok(deviceCookie, 'secret only travels in an HttpOnly Set-Cookie');
       assert.match(enroll.response.headers.get('set-cookie')!, /HttpOnly/);
       assert.equal(enroll.data.secret, undefined);
+      const storedDevice = await prisma.trustedLoginDevice.findUniqueOrThrow({
+        where: { id: enroll.data.id as string },
+      });
+      const browserSecret = deviceCookie!.split('=')[1]!.split('.')[1]!;
+      assert.match(storedDevice.secretHash, /^[a-f0-9]{64}$/u);
+      assert.equal(storedDevice.secretHash.includes(browserSecret), false,
+        'the database must never retain the browser possession secret in plaintext');
 
       for (let i = 1; i <= 10; i++) {
         const denied = await request('/auth/login', { email, password: WRONG },
