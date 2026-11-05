@@ -35,6 +35,11 @@ type AuthState = {
     email: string,
     password: string,
   ) => Promise<RegisterResult>;
+  recoverWithCode: (
+    email: string,
+    recoveryCode: string,
+    newPassword: string,
+  ) => Promise<string>;
   acknowledgeRecoveryCode: () => void;
   updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
   generateRecoveryCode: (currentPassword: string) => Promise<string>;
@@ -154,6 +159,18 @@ export const useAuthStore = create<AuthState>((set, get) => {
       setSessionUser(data.user, true, data.recoveryCode);
       publishAuthSessionChange();
       return data;
+    },
+    recoverWithCode: async (email, recoveryCode, newPassword) => {
+      ++meRequestVersion;
+      const { data } = await api.post<RegisterResult>(
+        '/auth/recover-password',
+        { email, recoveryCode, newPassword },
+      );
+      ++meRequestVersion;
+      setLocalLogoutPending(false);
+      setSessionUser(data.user, true);
+      publishAuthSessionChange();
+      return data.recoveryCode;
     },
     acknowledgeRecoveryCode: () => {
       set({ pendingRecoveryCode: null });
