@@ -96,6 +96,10 @@ model User {
   recoveryCodeHash      String?
   recoveryCodeCreatedAt DateTime?
   sessionVersion        Int                @default(0)
+  // Separate epoch: ordinary logout revokes sessions, not an opt-in trusted device.
+  trustedDeviceVersion  Int                @default(0)
+  trustedProofFailures  Int                @default(0)
+  trustedProofWindowAt  DateTime?
   salary                Decimal            @default(0) @db.Decimal(12, 2)
   notes                 String?
   createdAt             DateTime           @default(now())
@@ -111,6 +115,42 @@ model User {
   oauthConnections      OAuthConnection[]
   assetTransactions     AssetTransaction[]
   patrimonySettings     PatrimonySettings?
+  trustedLoginDevices   TrustedLoginDevice[]
+}
+
+// Explicitly enrolled, high-entropy possession factor. Only the keyed hash
+// survives storage; no password or recovery code is replaced by this factor.
+model TrustedLoginDevice {
+  id                    String    @id @default(uuid())
+  userId                String
+  label                 String    @db.VarChar(80)
+  secretHash            String    @db.Char(64)
+  credentialVersion     Int
+  expiresAt             DateTime
+  revokedAt             DateTime?
+  createdAt             DateTime  @default(now())
+  lastUsedAt            DateTime?
+  failedAttempts        Int       @default(0)
+  failedWindowStartedAt DateTime?
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenges            TrustedLoginChallenge[]
+
+  @@index([userId, revokedAt])
+  @@index([expiresAt])
+}
+
+// Every possession challenge is unique, short-lived and atomically consumed.
+model TrustedLoginChallenge {
+  id        String    @id @default(uuid())
+  deviceId  String
+  proofHash String    @db.Char(64)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  device    TrustedLoginDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
+  @@index([deviceId])
 }
 
 model Card {

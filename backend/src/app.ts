@@ -27,6 +27,10 @@ const AUTH_WRITE_PATHS = new Set([
   '/auth/register',
   '/auth/recovery-code',
   '/auth/recover-password',
+  '/auth/trusted-device/enroll',
+  '/auth/trusted-device/challenge',
+  '/auth/trusted-device/login',
+  '/auth/trusted-device/revoke',
 ]);
 
 /** Browsing and reloading never consumes the mutation budget. The login/
