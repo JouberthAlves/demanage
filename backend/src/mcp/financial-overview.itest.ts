@@ -2,13 +2,81 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 
+import { todayKeyInSaoPaulo } from '@/lib/civil-date';
+import { readPatrimonySnapshot } from '@/lib/patrimony-snapshot';
 import { prisma } from '@/lib/prisma';
+import { parseCreateExpense } from '@/services/expense-input';
+import { archiveExpense, createExpense } from '@/services/expenses';
 import { listPiggyCashMovements } from '@/services/piggy-banks';
 
 import {
   calculateMonthlyCash, getFinancialOverview, MCP_PATRIMONY_SNAPSHOT_ROW_BUDGET,
   patrimonyWithinHistoryBudget,
 } from './financial-overview';
+
+test('MCP excludes voided PIX payments but preserves archived cash and independent receipts', async () => {
+  const user = await prisma.user.create({ data: {
+    name: 'MCP voided cash regression',
+    email: `mcp-voided-${randomUUID()}@example.invalid`, passwordHash: 'test-only',
+  } });
+  const today = todayKeyInSaoPaulo();
+  const now = new Date(`${today}T21:00:00.000Z`);
+  try {
+    await prisma.patrimonySettings.create({ data: {
+      userId: user.id, baseDate: new Date('2026-01-01T12:00:00.000Z'), openingCashBrl: 0,
+    } });
+    const voided = await createExpense(user.id, parseCreateExpense({
+      name: 'Pagamento PIX anulado', amount: 85, category: 'outro',
+      frequency: 'unica', date: today,
+    }));
+    const paid = await prisma.expensePayment.findFirstOrThrow({ where: { expenseId: voided.id } });
+    assert.equal(Number(paid.amount), 85);
+
+    const archived = await prisma.expense.create({ data: {
+      userId: user.id, name: 'Pagamento PIX apenas arquivado',
+      category: 'outro', frequency: 'unica', amount: 35,
+      occurredAt: new Date(`${today}T12:00:00.000Z`), archivedAt: now,
+      payments: { create: [{ month: today.slice(0, 7), amount: 35,
+        paidAt: new Date(`${today}T14:00:00.000Z`) }] },
+    } });
+    const entry = await prisma.entry.create({ data: {
+      userId: user.id, name: 'Recebimento independente',
+      type: 'outro', frequency: 'unica', amount: 45,
+      date: new Date(`${today}T12:00:00.000Z`),
+      receipts: { create: [{ month: today.slice(0, 7), amount: 45,
+        receivedAt: new Date(`${today}T14:00:00.000Z`) }] },
+    } });
+
+    const before = (await getFinancialOverview(user.id, now)).monthly;
+    assert.equal(before.expensesBrl, '120.00');
+    assert.equal(before.incomeBrl, '45.00');
+
+    await archiveExpense(user.id, voided.id);
+    const stored = await prisma.expense.findUniqueOrThrow({
+      where: { id: voided.id }, include: { payments: true },
+    });
+    assert.ok(stored.voidedAt);
+    assert.ok(stored.archivedAt);
+    assert.equal(stored.payments[0]?.id, paid.id, 'void keeps an auditable payment');
+    const snapshot = await readPatrimonySnapshot(prisma, user.id);
+    assert.equal(snapshot.expenses.some((expense) => expense.id === voided.id), false);
+    assert.equal(snapshot.expenses.some((expense) => expense.id === archived.id), true);
+
+    const after = (await getFinancialOverview(user.id, now)).monthly;
+    assert.deepEqual(after, {
+      month: today.slice(0, 7), incomeBrl: '45.00',
+      expensesBrl: '35.00', balanceBrl: '10.00',
+    });
+    assert.equal(await prisma.entryReceipt.count({ where: { entryId: entry.id } }), 1);
+  } finally {
+    await prisma.expensePayment.deleteMany({ where: { expense: { userId: user.id } } });
+    await prisma.entryReceipt.deleteMany({ where: { entry: { userId: user.id } } });
+    await prisma.expense.deleteMany({ where: { userId: user.id } });
+    await prisma.entry.deleteMany({ where: { userId: user.id } });
+    await prisma.patrimonySettings.deleteMany({ where: { userId: user.id } });
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
 
 test('MCP keeps recorded cash after archiving parents, without including system movements', async () => {
   const user = await prisma.user.create({

@@ -2,7 +2,6 @@ import { Router } from 'express';
 
 import { bodyOf, requireUserId } from '@/http/request';
 import {
-  clearAuthCookie,
   setAuthCookie,
   signAuthToken,
   toPublicUser,
@@ -15,7 +14,7 @@ import {
   parseLogin,
   parseRecoverPassword,
   parseRegister,
-  recoverPassword,
+  recoverPasswordWithSession,
   registerUser,
   rotateRecoveryCode,
 } from '@/services/auth';
@@ -54,10 +53,14 @@ authRoutes.post('/auth/recovery-code', requireAuth, async (req, res) => {
 });
 
 authRoutes.post('/auth/recover-password', async (req, res) => {
-  const recoveryCode = await recoverPassword(parseRecoverPassword(bodyOf(req)));
-
-  clearAuthCookie(res, req);
-  res.json({ ok: true, recoveryCode });
+  const { user, recoveryCode } = await recoverPasswordWithSession(
+    parseRecoverPassword(bodyOf(req)),
+  );
+  // Recovery code is already a one-time high-entropy account credential.
+  // A new session needs no further password check, which would be blocked
+  // by an attacker exhausting the independent failed-login budget.
+  setAuthCookie(res, signAuthToken(user.id, user.sessionVersion), req);
+  res.json({ ok: true, recoveryCode, user: toPublicUser(user, null) });
 });
 
 authRoutes.post('/auth/logout', createLogoutHandler());
