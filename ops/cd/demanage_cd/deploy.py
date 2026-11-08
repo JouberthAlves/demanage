@@ -40,6 +40,14 @@ from .state import (
 
 HEALTH_TIMEOUT_SECONDS = 150
 
+# This single pre-migrated release must never let the backend entrypoint apply
+# its migration while images are being promoted. The checksum is SHA-256 of the
+# original migration.sql bytes, also stored by Prisma in _prisma_migrations.
+ISSUE122_PREVIOUS_COMMIT = "15237faaf0bbd380d27494a1bfd87993ca8e28ca"
+ISSUE122_TARGET_COMMIT = "13f860b851d1e2a8ae8789bfe2aeb99909d73be4"
+ISSUE122_MIGRATION = "20261105183000_trusted_login_device"
+ISSUE122_MIGRATION_SHA256 = "f1d96022c5a9647eec7f1242c4f6d79be412d07d8c7595b9a86da5d58ff8d296"
+
 
 class MigrationCompatibilityUnverified(RuntimeError):
     """A schema change makes an automatic code-only rollback unverified."""
@@ -154,6 +162,31 @@ def require_unchanged_migrations(runner: Runner, journal: dict[str, Any]) -> Non
         )
 
 
+def is_issue122_release(previous: str, target: str) -> bool:
+    return (previous, target) == (ISSUE122_PREVIOUS_COMMIT, ISSUE122_TARGET_COMMIT)
+
+
+def require_issue122_preapplied_migrations(rows: list[list[Any]]) -> None:
+    """Require the exact already-applied Issue122 ledger before any image swap.
+
+    The snapshot includes every Prisma attempt. Fail closed on any incomplete,
+    rolled-back, extra or duplicate record, even if 38 rows are marked finished.
+    """
+    if (len(rows) != 38 or any(
+        not isinstance(row[3], str) or not row[3] or row[4] is not None
+        for row in rows
+    )):
+        raise MigrationCompatibilityUnverified(
+            "Issue122 requires exactly 38 completed, active Prisma migrations"
+        )
+    target_rows = [row for row in rows if row[0] == ISSUE122_MIGRATION]
+    if (len(target_rows) != 1
+            or target_rows[0][1] != ISSUE122_MIGRATION_SHA256):
+        raise MigrationCompatibilityUnverified(
+            "Issue122 migration must be preapplied once with the reviewed SQL SHA256"
+        )
+
+
 def healthy(
     ctx: Context,
     image_ids: dict[str, str] | None = None,
@@ -251,6 +284,9 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
     backup_path, digest = ctx.backup(ctx.runner, ctx.config, target)
     log(f"validated pre-deploy database dump {backup_path}, sha256:{digest}")
     before_migrations = prisma_migration_snapshot(ctx.runner)
+    issue122 = is_issue122_release(state["source_commit"], target)
+    if issue122:
+        require_issue122_preapplied_migrations(before_migrations)
 
     stamp = ctx.clock().strftime("%Y%m%d%H%M%S")
     rollback_refs = {
@@ -279,6 +315,9 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
     write_journal(ctx.journal, journal)
 
     try:
+        if issue122:
+            # Close the interval between the snapshot and the image-only change.
+            require_unchanged_migrations(ctx.runner, journal)
         apply_overlay(
             ctx.runner,
             ctx.config,
@@ -289,6 +328,10 @@ def deploy(ctx: Context, release: dict[str, Any], state: dict[str, Any]) -> None
             raise RuntimeError("New deployment failed health/identity checks")
         if db_identity(ctx.runner) != before_db:
             raise RuntimeError("PostgreSQL container/volume/image changed unexpectedly")
+        if issue122:
+            # Readiness only probes SELECT 1. It cannot prove the entrypoint
+            # did not modify the migration ledger during application startup.
+            require_unchanged_migrations(ctx.runner, journal)
     except Exception:
         log("deployment failed: attempting application-only rollback")
         rollback(ctx, journal, before_db)
@@ -341,10 +384,18 @@ def reconcile(ctx: Context, state: dict[str, Any], journal: dict[str, Any]) -> d
         # Old/incomplete journals also fail closed: do not silently promote
         # a healthy application attached to a replaced database volume.
         raise RuntimeError("deploy journal database identity missing or database changed; operator action needed")
+    issue122 = is_issue122_release(journal["previous"], journal["target"])
+    if issue122:
+        snapshot = journal.get("prisma_migrations")
+        if not isinstance(snapshot, list):
+            raise MigrationCompatibilityUnverified("Issue122 migration snapshot missing from journal")
+        require_issue122_preapplied_migrations(snapshot)
     running = running_images(ctx.runner)
     if running == journal["new_images"] and wait_healthy(
         ctx, journal["new_images"], require_readiness=True
     ):
+        if issue122:
+            require_unchanged_migrations(ctx.runner, journal)
         recovered = {
             "source_commit": journal["target"],
             "running_image_ids": journal["new_images"],
