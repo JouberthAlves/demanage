@@ -1,6 +1,7 @@
 import {
   badRequest,
   conflict,
+  forbidden,
   isUniqueViolation,
   unauthorized,
 } from '@/http/errors';
@@ -164,6 +165,91 @@ export async function rotateRecoveryCode(
     at: new Date().toISOString(),
   });
   return recoveryCode;
+}
+
+type AccountDeletionTx = Pick<
+  typeof prisma,
+  | 'user'
+  | 'oAuthConnection'
+  | 'oAuthArtifact'
+  | 'piggyTransaction'
+  | 'assetTransaction'
+  | 'entryReceipt'
+  | 'salaryVersion'
+  | 'salaryHold'
+  | 'expensePayment'
+  | 'expenseSplit'
+>;
+
+/**
+ * Remove the user and every row they own inside one transaction. Children
+ * guarded by ON DELETE RESTRICT (receipts, payments, salary history, splits)
+ * and ledger rows whose SET NULL would break CHECK constraints are removed
+ * explicitly first; the User delete then cascades through the rest.
+ */
+export async function deleteAccountInTransaction(
+  userId: string,
+  currentPassword: string,
+  tx: AccountDeletionTx,
+) {
+  const user = await tx.user.findUnique({
+    where: { id: userId },
+    select: { passwordHash: true, sessionVersion: true },
+  });
+  if (!user) throw unauthorized();
+  // 403, not 401: a typo must not look like an expired session to the client.
+  if (!(await comparePassword(currentPassword, user.passwordHash))) {
+    throw forbidden('Senha atual inválida', 'INVALID_PASSWORD');
+  }
+
+  // Lock the row against a concurrent password reset or deletion; a stale
+  // snapshot makes the CAS fail and the whole transaction roll back.
+  const { count } = await tx.user.updateMany({
+    where: {
+      id: userId,
+      passwordHash: user.passwordHash,
+      sessionVersion: user.sessionVersion,
+    },
+    data: { sessionVersion: { increment: 1 } },
+  });
+  if (count !== 1) throw unauthorized('Senha atual inválida');
+
+  const connections = await tx.oAuthConnection.findMany({
+    where: { userId },
+    select: { grantId: true },
+  });
+  const grantIds = connections.map((connection) => connection.grantId);
+  if (grantIds.length) {
+    await tx.oAuthArtifact.deleteMany({
+      where: {
+        OR: [
+          { grantId: { in: grantIds } },
+          { model: 'Grant', id: { in: grantIds } },
+        ],
+      },
+    });
+  }
+
+  await tx.piggyTransaction.deleteMany({ where: { userId } });
+  await tx.assetTransaction.deleteMany({ where: { userId } });
+  await tx.entryReceipt.deleteMany({ where: { entry: { userId } } });
+  await tx.salaryVersion.deleteMany({ where: { entry: { userId } } });
+  await tx.salaryHold.deleteMany({ where: { entry: { userId } } });
+  await tx.expensePayment.deleteMany({ where: { expense: { userId } } });
+  await tx.expenseSplit.deleteMany({ where: { expense: { userId } } });
+  await tx.user.delete({ where: { id: userId } });
+}
+
+export async function deleteAccount(userId: string, currentPassword: string) {
+  await prisma.$transaction(
+    (tx) => deleteAccountInTransaction(userId, currentPassword, tx),
+    { maxWait: 10_000, timeout: 30_000 },
+  );
+
+  console.info('[security] account_deleted', {
+    userId,
+    at: new Date().toISOString(),
+  });
 }
 
 export type RecoverPasswordInput = {
