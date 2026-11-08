@@ -39,6 +39,7 @@ type AuthState = {
   updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
   generateRecoveryCode: (currentPassword: string) => Promise<string>;
   logout: () => Promise<void>;
+  deleteAccount: (currentPassword: string) => Promise<void>;
   externalSessionChanged: () => void;
 };
 
@@ -195,6 +196,15 @@ export const useAuthStore = create<AuthState>((set, get) => {
       setSessionUser(null, true);
       publishAuthSessionChange();
       await api.post('/auth/logout');
+    },
+
+    deleteAccount: async (currentPassword) => {
+      // The session stays intact until the server confirms the deletion, so
+      // a wrong password (403) or network error keeps the user signed in.
+      await api.delete('/auth/me', { data: { currentPassword } });
+      ++meRequestVersion;
+      setSessionUser(null, true);
+      publishAuthSessionChange();
     },
     externalSessionChanged: () => {
       // Drop the previous account immediately; only /auth/me can establish

@@ -1,5 +1,6 @@
 import { PageHeader } from '@/components/layout/page-header';
 import { CardsSection } from '@/components/profile/cards-section';
+import { DeleteAccountSection } from '@/components/profile/delete-account-section';
 import { ProfileInfoForm } from '@/components/profile/profile-info-form';
 import { ProfileSummary } from '@/components/profile/profile-summary';
 import { RecoverySection } from '@/components/profile/recovery-section';
@@ -46,6 +47,8 @@ export function ProfilePage() {
       </div>
 
       <RecoverySection hasRecoveryCode={Boolean(user?.hasRecoveryCode)} />
+
+      <DeleteAccountSection />
     </div>
   );
 }
