@@ -110,6 +110,7 @@ test('S01: password recovery wins after rotation reads old credentials; rotation
           updateMany: () => Promise<{ count: number }>;
         };
         oAuthArtifact: { deleteMany: () => Promise<{ count: number }> };
+        trustedLoginDevice: { updateMany: () => Promise<{ count: number }> };
       }) => Promise<unknown>,
     ) {
       return run({
@@ -128,6 +129,11 @@ test('S01: password recovery wins after rotation reads old credentials; rotation
         },
         oAuthArtifact: {
           async deleteMany() {
+            return { count: 0 };
+          },
+        },
+        trustedLoginDevice: {
+          async updateMany() {
             return { count: 0 };
           },
         },

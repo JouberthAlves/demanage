@@ -7,7 +7,46 @@ import { comparePassword, hashPassword } from '@/lib/auth';
 import { prisma } from '@/lib/prisma';
 import { hashRecoveryCode } from '@/lib/recovery-code';
 
-import { recoverPassword, rotateRecoveryCodeInTransaction } from './auth';
+import { recoverPassword, recoverPasswordWithSession, rotateRecoveryCodeInTransaction } from './auth';
+
+test('recovery transaction aborts without changing code or session epoch', async () => {
+  const recoveryCode = '23456-789AB-CDEFG-HJKLM';
+  const email = `recover-rollback-${randomUUID()}@example.invalid`;
+  const user = await prisma.user.create({ data: {
+    name: 'Recovery rollback', email,
+    passwordHash: await hashPassword('OriginalPassword123!'),
+    recoveryCodeHash: hashRecoveryCode(recoveryCode),
+  } });
+  const database = {
+    user: prisma.user,
+    $transaction: (work: (tx: unknown) => Promise<unknown>) => prisma.$transaction(async (tx) => work({
+      user: tx.user,
+      oAuthConnection: {
+        findMany: (args: Parameters<typeof tx.oAuthConnection.findMany>[0]) => tx.oAuthConnection.findMany(args),
+        updateMany: async () => { throw new Error('simulated authorization revocation error'); },
+      },
+      trustedLoginDevice: {
+        updateMany: (args: Parameters<typeof tx.trustedLoginDevice.updateMany>[0]) =>
+          tx.trustedLoginDevice.updateMany(args),
+      },
+    })),
+  } as unknown as NonNullable<Parameters<typeof recoverPasswordWithSession>[1]>;
+  try {
+    await assert.rejects(recoverPasswordWithSession({
+      email, recoveryCode, newPassword: 'NewPassword123!',
+    }, database), /simulated authorization revocation error/);
+    const persisted = await prisma.user.findUniqueOrThrow({ where: { id: user.id } });
+    assert.equal(persisted.sessionVersion, user.sessionVersion);
+    assert.equal(persisted.recoveryCodeHash, user.recoveryCodeHash);
+    assert.equal(await comparePassword('OriginalPassword123!', persisted.passwordHash), true);
+    const recovered = await recoverPasswordWithSession({
+      email, recoveryCode, newPassword: 'NewPassword123!',
+    });
+    assert.equal(recovered.user.sessionVersion, user.sessionVersion + 1);
+  } finally {
+    await prisma.user.delete({ where: { id: user.id } });
+  }
+});
 
 test('PostgreSQL permits only one recovery per code, rotating it and revoking sessions', async () => {
   const recoveryCode = '23456-789AB-CDEFG-HJKLM';

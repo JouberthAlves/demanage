@@ -43,6 +43,7 @@ function recoveryStore(waitForBothReads = false) {
     const snapshot = {
       id: 'test-user',
       recoveryCodeHash: state.recoveryCodeHash,
+      sessionVersion: state.sessionVersion,
     };
     if (waitForBothReads) {
       reads += 1;
@@ -55,12 +56,13 @@ function recoveryStore(waitForBothReads = false) {
     where,
     data,
   }: {
-    where: { id: string; recoveryCodeHash: string };
+    where: { id: string; recoveryCodeHash: string; sessionVersion: number };
     data: Write;
   }) => {
     if (
       where.id !== 'test-user' ||
-      where.recoveryCodeHash !== state.recoveryCodeHash
+      where.recoveryCodeHash !== state.recoveryCodeHash ||
+      where.sessionVersion !== state.sessionVersion
     ) {
       return { count: 0 };
     }
@@ -85,6 +87,11 @@ function recoveryStore(waitForBothReads = false) {
           async deleteMany({ where }: { where: { OR: [{ grantId: { in: string[] } }] } }) {
             for (const grantId of where.OR[0].grantId.in) state.deletedGrants.add(grantId);
             return { count: state.deletedGrants.size };
+          },
+        },
+        trustedLoginDevice: {
+          async updateMany() {
+            return { count: 0 };
           },
         },
       });

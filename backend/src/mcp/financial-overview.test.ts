@@ -1,7 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { calculateMonthlyCash } from './financial-overview';
+import { calculateMonthlyCash, eachPage, MCP_FINANCIAL_READ_PAGE } from './financial-overview';
+
+test('MCP page reader visits every record exactly once with bounded stable cursors', async () => {
+  const ids = Array.from({ length: 2 * MCP_FINANCIAL_READ_PAGE + 9 }, (_, i) => String(i).padStart(4, '0'));
+  const seen: string[] = [];
+  const limits: number[] = [];
+  await eachPage(async (cursor) => {
+    const start = cursor === undefined ? 0 : ids.indexOf(cursor) + 1;
+    const page = ids.slice(start, start + MCP_FINANCIAL_READ_PAGE).map((id) => ({ id }));
+    limits.push(page.length);
+    return page;
+  }, (rows) => {
+    seen.push(...rows.map(({ id }) => id));
+  });
+  assert.deepEqual(limits, [128, 128, 9]);
+  assert.deepEqual(seen, ids);
+  await assert.rejects(eachPage(async () => ids.slice(0, 129).map((id) => ({ id })), () => {}),
+    /page exceeded row budget/);
+});
 
 test('dashboard balance includes scheduled income, cash expense and linked piggy transfers', () => {
   const result = calculateMonthlyCash({

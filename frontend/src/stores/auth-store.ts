@@ -20,6 +20,14 @@ type RegisterResult = {
   recoveryCode: string;
 };
 
+export type TrustedDevice = {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string;
+};
+
 type AuthState = {
   user: AuthUser | null;
   /** Volatile one-time code, cleared only by acknowledgement or session exit. */
@@ -30,11 +38,20 @@ type AuthState = {
   setUser: (user: AuthUser | null) => void;
   fetchMe: () => Promise<AuthUser | null>;
   login: (email: string, password: string) => Promise<AuthUser>;
+  trustedDeviceLogin: (email: string, password: string) => Promise<AuthUser>;
+  listTrustedDevices: () => Promise<TrustedDevice[]>;
+  enrollTrustedDevice: (currentPassword: string, label: string) => Promise<void>;
+  revokeTrustedDevice: (deviceId: string, currentPassword: string) => Promise<void>;
   register: (
     name: string,
     email: string,
     password: string,
   ) => Promise<RegisterResult>;
+  recoverWithCode: (
+    email: string,
+    recoveryCode: string,
+    newPassword: string,
+  ) => Promise<string>;
   acknowledgeRecoveryCode: () => void;
   updateProfile: (input: UpdateProfileInput) => Promise<AuthUser>;
   generateRecoveryCode: (currentPassword: string) => Promise<string>;
@@ -143,6 +160,34 @@ export const useAuthStore = create<AuthState>((set, get) => {
       return data.user;
     },
 
+    trustedDeviceLogin: async (email, password) => {
+      ++meRequestVersion;
+      // The HttpOnly possession cookie is never read by JavaScript. Both
+      // requests are origin-checked and the server burns the challenge once.
+      const { data: challenge } = await api.post<{
+        challengeId: string; nonce: string;
+      }>('/auth/trusted-device/challenge', {});
+      const { data } = await api.post<{ user: AuthUser }>('/auth/trusted-device/login', {
+        email, password, challengeId: challenge.challengeId, nonce: challenge.nonce,
+      });
+      ++meRequestVersion;
+      setLocalLogoutPending(false);
+      setSessionUser(data.user, true);
+      publishAuthSessionChange();
+      return data.user;
+    },
+
+    listTrustedDevices: async () => {
+      const { data } = await api.get<{ devices: TrustedDevice[] }>('/auth/trusted-device');
+      return data.devices;
+    },
+    enrollTrustedDevice: async (currentPassword, label) => {
+      await api.post('/auth/trusted-device/enroll', { currentPassword, label });
+    },
+    revokeTrustedDevice: async (deviceId, currentPassword) => {
+      await api.post('/auth/trusted-device/revoke', { deviceId, currentPassword });
+    },
+
     register: async (name, email, password) => {
       ++meRequestVersion;
       const { data } = await api.post<RegisterResult>('/auth/register', {
@@ -155,6 +200,20 @@ export const useAuthStore = create<AuthState>((set, get) => {
       setSessionUser(data.user, true, data.recoveryCode);
       publishAuthSessionChange();
       return data;
+    },
+    recoverWithCode: async (email, recoveryCode, newPassword) => {
+      ++meRequestVersion;
+      const { data } = await api.post<RegisterResult>(
+        '/auth/recover-password',
+        { email, recoveryCode, newPassword },
+      );
+      ++meRequestVersion;
+      setLocalLogoutPending(false);
+      // App keys its RouterProvider by sessionRevision. Keep the rotated
+      // one-time code in volatile store before that remount, just like signup.
+      setSessionUser(data.user, true, data.recoveryCode);
+      publishAuthSessionChange();
+      return data.recoveryCode;
     },
     acknowledgeRecoveryCode: () => {
       set({ pendingRecoveryCode: null });

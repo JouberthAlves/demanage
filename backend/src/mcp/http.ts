@@ -8,6 +8,10 @@ import { isAllowedBrowserOrigin } from '@/lib/request-origin';
 import { createMcpBearerGuard, type McpTokenVerifier } from './auth';
 import { registerFinanceTools } from './tools';
 
+// The SDK Node adapter already counts streamed bytes and returns HTTP 413;
+// make our MCP policy explicit (separate from the browser JSON parser).
+export const MCP_REQUEST_BODY_MAX_BYTES = 256 * 1024;
+
 export type McpHttpOptions = {
   verifyBearer: McpTokenVerifier;
   resourceUrl: string;
@@ -59,7 +63,7 @@ export function createMcpHttpRouter({
       oauthGrantId: typeof oauthGrantId === 'string' ? oauthGrantId : undefined });
     return server;
   }, { responseMode: 'json' });
-  const nodeHandler = toNodeHandler(handler);
+  const nodeHandler = toNodeHandler(handler, { maxRequestBodySize: MCP_REQUEST_BODY_MAX_BYTES });
 
   router.get('/.well-known/oauth-protected-resource', (_req, res) => {
     res.json({
