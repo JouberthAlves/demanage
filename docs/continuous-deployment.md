@@ -51,6 +51,52 @@ deploy`. Por isso qualquer mudança nas migrations, schema, entrypoint ou Compos
 é **bloqueada** pela promoção e exige um plano/manual de migração separado.
 Rollback de código não é rollback de schema. Não permitir mudanças DB silenciosas.
 
+### DEM-01 — compatibilidade do rollback depois de uma migração
+
+O gate de SQL aditivo, a prova de ensaio em PostgreSQL isolado, os checks do SHA
+exato e a aprovação separada do proprietário continuam obrigatórios. **DDL
+aditivo não prova, sozinho, que o backend antigo é compatível com todo o schema
+novo**: constraints e novos comportamentos de escrita também precisam ser
+revisados. O endpoint `/health`, mesmo quando retorna sucesso, não exercita
+todas as consultas e operações financeiras antigas.
+
+Antes de qualquer migração manual ou promoção que altere o schema, o operador
+precisa demonstrar num **PostgreSQL 18 descartável**, criado a partir de uma
+cópia aprovada, que a imagem anterior continua executando as operações de
+leitura e escrita afetadas **após** a migração, e que a imagem candidata executa
+o fluxo pretendido. Registrar quais operações e versões foram verificadas,
+junto à prova de migração e ao hash do backup. Se não houver essa evidência,
+**NO-GO para migração/promoção** até revisão manual. O ensaio existente que
+executa apenas `prisma migrate deploy` na cópia isolada não constitui essa prova
+de compatibilidade reversa.
+
+O deploy-agent agora registra, no diário de intenção, o estado de
+`_prisma_migrations` (incluindo migrações iniciadas, concluídas e revertidas)
+antes de trocar os containers. Quando a nova versão falha, compara esse estado
+**antes** de iniciar a imagem antiga e novamente **após** restaurá-la:
+
+- Se não houve alteração no histórico, pode restaurar as imagens anteriores,
+  verificar saúde/identidade do banco e limpar o diário.
+- Se houve alteração, a consulta falha ou o snapshot está ausente, **não há
+  confirmação automática de rollback seguro**. O agente preserva o diário em
+  `rollback-failed` e exige intervenção do operador; não inicia a imagem antiga
+  quando detecta a mudança antes do rollback. Após um reinício inesperado,
+  também recusa limpar o diário quando encontra imagens antigas e histórico
+  diferente/desconhecido.
+
+O snapshot detecta alterações **durante a tentativa de deploy**. Se uma migração
+foi aplicada manualmente **antes** de o agente iniciar, seu snapshot já refletirá
+o schema novo; por isso o ensaio de compatibilidade com a imagem anterior é
+obrigatório previamente. Nenhum desses checks demonstra compatibilidade de
+SQL alterado fora do histórico do Prisma.
+
+Em bloqueio: suspender novas promoções, preservar diário e backup, conferir
+`_prisma_migrations` e verificar a compatibilidade da versão anterior com o
+schema efetivo em ambiente isolado. Planejar recuperação manual somente após
+essa prova e autorização. **Jamais restaurar automaticamente o dump de antes da
+migração**: isso pode apagar transações realizadas desde o backup. O processo
+não muda volume PostgreSQL nem Cloudflare Tunnel.
+
 ### Exceção única revisada do PR #105 (02/11/2026)
 
 A migration aditiva `20261102192000_expense_voided_at` foi executada **fora do

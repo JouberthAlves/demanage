@@ -2,12 +2,22 @@ import { Router } from 'express';
 
 import { bodyOf, requireUserId } from '@/http/request';
 import {
-  clearAuthCookie,
   setAuthCookie,
   signAuthToken,
   toPublicUser,
 } from '@/lib/auth';
 import { createLogoutHandler } from '@/lib/logout-handler';
+import {
+  authenticateTrustedDevice,
+  beginTrustedDeviceChallenge,
+  clearTrustedDeviceCookie,
+  denyTrustedLogin,
+  enrollTrustedDevice,
+  listTrustedDevices,
+  revokeTrustedDevice,
+  setTrustedDeviceCookie,
+} from '@/lib/trusted-device-login';
+import { strictBrowserOrigin } from '@/middlewares/csrf-protection';
 import { requireAuth } from '@/middlewares/require-auth';
 import {
   authenticate,
@@ -16,7 +26,7 @@ import {
   parseLogin,
   parseRecoverPassword,
   parseRegister,
-  recoverPassword,
+  recoverPasswordWithSession,
   registerUser,
   rotateRecoveryCode,
 } from '@/services/auth';
@@ -27,6 +37,46 @@ import {
 } from '@/services/profile';
 
 const authRoutes = Router();
+
+// A trusted-device cookie remains after routine logout. The global browser
+// CSRF guard only applies when an auth JWT cookie exists, so these POSTs must
+// require a trusted browser Origin or Referer independently.
+authRoutes.use('/auth/trusted-device', (req, res, next) => {
+  res.setHeader('Cache-Control', 'private, no-store');
+  if (req.method === 'POST') return strictBrowserOrigin(req, res, next);
+  next();
+});
+
+authRoutes.post('/auth/trusted-device/enroll', requireAuth, async (req, res) => {
+  const { id, label, expiresAt, cookie } = await enrollTrustedDevice(req);
+  setTrustedDeviceCookie(res, cookie, req);
+  res.status(201).json({ id, label, expiresAt });
+});
+
+authRoutes.get('/auth/trusted-device', requireAuth, async (req, res) => {
+  res.json({ devices: await listTrustedDevices(requireUserId(req)) });
+});
+
+authRoutes.post('/auth/trusted-device/revoke', requireAuth, async (req, res) => {
+  if (await revokeTrustedDevice(req)) clearTrustedDeviceCookie(res, req);
+  res.json({ ok: true });
+});
+
+authRoutes.post('/auth/trusted-device/challenge', async (req, res) => {
+  res.json(await beginTrustedDeviceChallenge(req));
+});
+
+authRoutes.post('/auth/trusted-device/login', async (req, res) => {
+  const proof = await authenticateTrustedDevice(req);
+  if (proof.kind !== 'ok') return denyTrustedLogin(proof.kind);
+  const user = await (await import('@/lib/prisma')).prisma.user.findUnique({
+    where: { id: proof.userId },
+  });
+  if (!user) return denyTrustedLogin('denied');
+  setAuthCookie(res, signAuthToken(user.id, proof.sessionVersion), req);
+  const salaryReceiveDay = await salaryReceiveDayOf(user.id);
+  res.json({ user: toPublicUser(user, salaryReceiveDay) });
+});
 
 authRoutes.post('/auth/register', async (req, res) => {
   const input = parseRegister(bodyOf(req));
@@ -55,10 +105,14 @@ authRoutes.post('/auth/recovery-code', requireAuth, async (req, res) => {
 });
 
 authRoutes.post('/auth/recover-password', async (req, res) => {
-  const recoveryCode = await recoverPassword(parseRecoverPassword(bodyOf(req)));
-
-  clearAuthCookie(res, req);
-  res.json({ ok: true, recoveryCode });
+  const { user, recoveryCode } = await recoverPasswordWithSession(
+    parseRecoverPassword(bodyOf(req)),
+  );
+  // Recovery code is already a one-time high-entropy account credential.
+  // A new session needs no further password check, which would be blocked
+  // by an attacker exhausting the independent failed-login budget.
+  setAuthCookie(res, signAuthToken(user.id, user.sessionVersion), req);
+  res.json({ ok: true, recoveryCode, user: toPublicUser(user, null) });
 });
 
 authRoutes.post('/auth/logout', createLogoutHandler());

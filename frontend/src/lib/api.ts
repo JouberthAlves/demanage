@@ -17,6 +17,7 @@ const SESSION_EXEMPT_PATHS = [
   '/auth/register',
   '/auth/recover-password',
   '/auth/recovery-code',
+  '/auth/trusted-device/',
 ];
 
 let unauthorizedHandler: (() => void) | null = null;

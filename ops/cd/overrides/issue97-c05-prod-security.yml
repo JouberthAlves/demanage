@@ -2,10 +2,12 @@
 # Harden the actual server Compose without changing its port, routing or image.
 # Stage this override in the Debian CD compose_files list; only the protected
 # GitHub Actions-approved CD agent is authorized to recreate containers.
+# Compose v2.24.4+ !override replaces list values instead of appending duplicate
+# security options when the newer production base already hardens frontend.
 services:
   frontend:
     read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    tmpfs:
+    cap_drop: !override [ALL]
+    security_opt: !override [no-new-privileges:true]
+    tmpfs: !override
       - /tmp:rw,noexec,nosuid,size=16m

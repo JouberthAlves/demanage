@@ -5,9 +5,10 @@ import rateLimit from 'express-rate-limit';
 import helmet from 'helmet';
 
 import { errorHandler, notFoundHandler } from '@/http/errors';
+import { createLoginFailureLimiter } from '@/lib/login-failure-limiter';
 import { isAllowedBrowserOrigin } from '@/lib/request-origin';
 import { createMcpHttpRouter } from '@/mcp/http';
-import { csrfProtection } from '@/middlewares/csrf-protection';
+import { csrfProtection, sessionCreationOrigin } from '@/middlewares/csrf-protection';
 import { requestLogger } from '@/middlewares/request-logger';
 import { startOAuthArtifactCleanup } from '@/oauth/cleanup';
 import { getOAuthGrantSubject, oauthSettings } from '@/oauth/provider';
@@ -26,6 +27,10 @@ const AUTH_WRITE_PATHS = new Set([
   '/auth/register',
   '/auth/recovery-code',
   '/auth/recover-password',
+  '/auth/trusted-device/enroll',
+  '/auth/trusted-device/challenge',
+  '/auth/trusted-device/login',
+  '/auth/trusted-device/revoke',
 ]);
 
 /** Browsing and reloading never consumes the mutation budget. The login/
@@ -121,6 +126,9 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
       isProduction,
     }));
   }
+  // Without an existing auth cookie, these browser requests can still set one.
+  // Native clients with no browser headers retain the JSON API contract.
+  app.post(['/auth/login', '/auth/register', '/auth/recover-password'], sessionCreationOrigin);
   app.use(csrfProtection);
   app.use(express.json({ limit: '256kb' }));
 
@@ -143,6 +151,7 @@ export function createApp({ logRequests = true }: CreateAppOptions = {}) {
   for (const path of AUTH_WRITE_PATHS) {
     app.use(path, authLimiter);
   }
+  app.post('/auth/login', createLoginFailureLimiter());
 
   app.use(api);
   app.use(notFoundHandler);

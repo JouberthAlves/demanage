@@ -19,6 +19,10 @@ const ABNT2_PASSWORD_MESSAGE =
   'Use apenas caracteres do teclado ABNT2 na senha';
 const EMAIL_TAKEN_MESSAGE = 'E-mail já cadastrado';
 const INVALID_RECOVERY_MESSAGE = 'E-mail ou código de recuperação inválidos';
+// bcrypt cost 10, generated once offline. No request ever hashes a dummy
+// password at runtime; missing and existing accounts both compare one hash.
+const DUMMY_LOGIN_PASSWORD_HASH =
+  '$2b$10$X.PHm9ikr7jqfq5BRg096emZR7SXrSmVLLYBol4HTz75XO30hQu4K';
 
 /** String do corpo, ou `''` quando ausente/não-string (nunca lança). */
 function stringField(value: unknown) {
@@ -93,9 +97,17 @@ export function parseLogin(body: Record<string, unknown>) {
   return { email, password };
 }
 
-export async function authenticate(email: string, password: string) {
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user || !(await comparePassword(password, user.passwordHash))) {
+export async function authenticate(
+  email: string,
+  password: string,
+  userStore: Pick<typeof prisma.user, 'findUnique'> = prisma.user,
+) {
+  const user = await userStore.findUnique({ where: { email } });
+  const matches = await comparePassword(
+    password,
+    user?.passwordHash ?? DUMMY_LOGIN_PASSWORD_HASH,
+  );
+  if (!user || !matches) {
     throw unauthorized('E-mail ou senha inválidos');
   }
   return user;
@@ -281,8 +293,12 @@ export function parseRecoverPassword(
   return { email, recoveryCode, newPassword };
 }
 
-/** Troca a senha com o código de recuperação, revoga sessões e gira o código. */
-export async function recoverPassword(
+/**
+ * Consumes the offline recovery proof exactly once. The returned session
+ * version is tied to the successful CAS, never a later read: a concurrent
+ * logout/recovery must invalidate this token instead of minting a newer one.
+ */
+export async function recoverPasswordWithSession(
   input: RecoverPasswordInput,
   database: Pick<typeof prisma, 'user' | '$transaction'> = prisma,
 ) {
@@ -296,19 +312,33 @@ export async function recoverPassword(
 
   const passwordHash = await hashPassword(input.newPassword);
   const nextRecoveryCode = generateRecoveryCode();
+  const nextSessionVersion = user.sessionVersion + 1;
   await database.$transaction(async (tx) => {
     // Password, session epoch and OAuth revocation either commit together or
     // all roll back. Updating User first locks its row against consent writes.
     const { count } = await tx.user.updateMany({
-      where: { id: user.id, recoveryCodeHash: user.recoveryCodeHash },
+      where: {
+        id: user.id,
+        recoveryCodeHash: user.recoveryCodeHash,
+        sessionVersion: user.sessionVersion,
+      },
       data: {
         passwordHash,
         recoveryCodeHash: hashRecoveryCode(nextRecoveryCode),
         recoveryCodeCreatedAt: new Date(),
         sessionVersion: { increment: 1 },
+        trustedDeviceVersion: { increment: 1 },
+        trustedProofFailures: 0,
+        trustedProofWindowAt: null,
       },
     });
     if (count !== 1) throw unauthorized(INVALID_RECOVERY_MESSAGE);
+
+    // Password recovery revokes the independent possession factor atomically
+    // with the session epoch and OAuth grants. Routine logout does not.
+    await tx.trustedLoginDevice.updateMany({
+      where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() },
+    });
 
     const connections = await tx.oAuthConnection.findMany({
       where: { userId: user.id },
@@ -330,5 +360,17 @@ export async function recoverPassword(
       });
     }
   });
-  return nextRecoveryCode;
+  return {
+    recoveryCode: nextRecoveryCode,
+    user: { ...user, sessionVersion: nextSessionVersion },
+  };
+}
+
+/** Backward-compatible password recovery for service and OAuth callers. */
+export async function recoverPassword(
+  input: RecoverPasswordInput,
+  database: Pick<typeof prisma, 'user' | '$transaction'> = prisma,
+) {
+  const result = await recoverPasswordWithSession(input, database);
+  return result.recoveryCode;
 }
