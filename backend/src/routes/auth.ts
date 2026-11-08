@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { bodyOf, requireUserId } from '@/http/request';
 import {
+  clearAuthCookie,
   setAuthCookie,
   signAuthToken,
   toPublicUser,
@@ -21,6 +22,7 @@ import { strictBrowserOrigin } from '@/middlewares/csrf-protection';
 import { requireAuth } from '@/middlewares/require-auth';
 import {
   authenticate,
+  deleteAccount,
   parseCurrentPassword,
   parseLogin,
   parseRecoverPassword,
@@ -127,6 +129,14 @@ authRoutes.patch('/auth/me', requireAuth, async (req, res) => {
   const user = await updateProfile(userId, input);
 
   res.json({ user: toPublicUser(user, await salaryReceiveDayOf(userId)) });
+});
+
+authRoutes.delete('/auth/me', requireAuth, async (req, res) => {
+  const currentPassword = parseCurrentPassword(bodyOf(req));
+  await deleteAccount(requireUserId(req), currentPassword);
+
+  clearAuthCookie(res, req);
+  res.json({ ok: true });
 });
 
 export default authRoutes;
