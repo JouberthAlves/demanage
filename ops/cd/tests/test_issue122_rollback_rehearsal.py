@@ -24,22 +24,30 @@ class Issue122RehearsalTests(unittest.TestCase):
 
     def test_test_containers_are_isolated_and_removed(self):
         completed = subprocess.CompletedProcess([], 0, "", "")
-        with mock.patch.object(rehearsal, "run", return_value=""), mock.patch.object(
+        with mock.patch.object(rehearsal, "run", return_value="") as run_command, mock.patch.object(
             rehearsal.subprocess, "run", return_value=completed
         ) as process:
             rehearsal.prove_rollback_compatibility(
                 "isolated-test-network", "postgresql://demanage:fake@db/demanage",
                 rehearsal.REVIEWED_OLD_BACKEND, rehearsal.REVIEWED_NEW_BACKEND
             )
-        commands = [x.args[0] for x in process.call_args_list]
-        backend_runs = [x for x in commands if x[:2] == ["docker", "exec"]]
-        self.assertEqual(len(backend_runs), 2)
-        calls = [x.args[0] for x in rehearsal.run.call_args_list] if hasattr(
-            rehearsal.run, "call_args_list"
-        ) else []
-        # The mock has been restored; reconstruct the container constraints by
-        # inspecting the actual call arguments in the second test below.
-        self.assertTrue(all(x[0:2] == ["docker", "exec"] for x in backend_runs))
+            all_calls = [list(x.args) for x in run_command.call_args_list]
+        containers = [x for x in all_calls if x[:2] == ["docker", "run"]]
+        self.assertEqual(len(containers), 2)
+        for args in containers:
+            self.assertIn("--network", args)
+            self.assertIn("isolated-test-network", args)
+            self.assertIn("--read-only", args)
+            self.assertIn("--cap-drop", args)
+            self.assertIn("ALL", args)
+            self.assertNotIn("--publish", args)
+            self.assertNotIn("-p", args)
+        self.assertEqual(
+            sum(1 for x in all_calls if x[:3] == ["docker", "rm", "-f"]), 2
+        )
+        self.assertEqual(
+            sum(1 for x in process.call_args_list if x.args[0][:2] == ["docker", "exec"]), 2
+        )
 
     def test_runtime_probe_has_auth_financial_read_and_write_checks(self):
         script = rehearsal.OLD_NEW_HTTP_PROBE
