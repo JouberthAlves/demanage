@@ -325,3 +325,53 @@ test('a delayed 401 from session A does not log out session B', async () => {
     useAuthStore.getState().setUser(null);
   }
 });
+
+test('deleteAccount keeps the session when the password is rejected (403)', async () => {
+  const originalAdapter = api.defaults.adapter;
+
+  try {
+    api.defaults.adapter = async (config) => {
+      if (config.url === '/auth/login') return response(config, { user: user('a') });
+      if (config.url === '/auth/me' && config.method === 'delete') {
+        throw failure(config, 403);
+      }
+      throw new Error(`Unexpected request: ${config.url}`);
+    };
+
+    await useAuthStore.getState().login('a@example.com', 'password');
+    await assert.rejects(useAuthStore.getState().deleteAccount('wrong'));
+    assert.equal(useAuthStore.getState().user?.id, 'a');
+  } finally {
+    api.defaults.adapter = originalAdapter;
+    useAuthStore.getState().setUser(null);
+  }
+});
+
+test('deleteAccount sends the password and ends the session on success', async () => {
+  const originalAdapter = api.defaults.adapter;
+  let sentPassword: string | undefined;
+
+  try {
+    api.defaults.adapter = async (config) => {
+      if (config.url === '/auth/login') return response(config, { user: user('a') });
+      if (config.url === '/auth/me' && config.method === 'delete') {
+        sentPassword = (JSON.parse(String(config.data)) as {
+          currentPassword: string;
+        }).currentPassword;
+        return response(config, { ok: true });
+      }
+      throw new Error(`Unexpected request: ${config.url}`);
+    };
+
+    await useAuthStore.getState().login('a@example.com', 'password');
+    const revision = useAuthStore.getState().sessionRevision;
+    await useAuthStore.getState().deleteAccount('secret');
+
+    assert.equal(sentPassword, 'secret');
+    assert.equal(useAuthStore.getState().user, null);
+    assert.ok(useAuthStore.getState().sessionRevision > revision);
+  } finally {
+    api.defaults.adapter = originalAdapter;
+    useAuthStore.getState().setUser(null);
+  }
+});
