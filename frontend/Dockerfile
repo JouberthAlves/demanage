@@ -2,7 +2,7 @@
 # deManage frontend — Vite build + nginx (same-origin /api proxy)
 ###############################
 
-FROM node:26.12.0-trixie-slim@sha256:0d1e33586362bb9e608c4e751e7a9e7edb55c9ac11461ed5666af696cc461dd4 AS builder
+FROM node:26.13.0-trixie-slim@sha256:5adad64f9a1fca2d51972caa65983634c8a774eb300d72b20f7f2a0f60368072 AS builder
 
 WORKDIR /app
 ENV TZ=UTC

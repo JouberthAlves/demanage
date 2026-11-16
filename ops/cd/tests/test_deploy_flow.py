@@ -6,6 +6,7 @@ first container mutation.
 """
 
 import contextlib
+import hashlib
 import io
 import itertools
 import json
@@ -35,6 +36,20 @@ INITIAL_MIGRATIONS = [['baseline', 'checksum-a', '2026-10-01T00:00:00+00:00',
                        '2026-10-01T00:00:01+00:00', None]]
 EXTRA_MIGRATION = ['additive', 'checksum-b', '2026-10-02T00:00:00+00:00',
                    '2026-10-02T00:00:01+00:00', None]
+ISSUE122_PREVIOUS = '15237faaf0bbd380d27494a1bfd87993ca8e28ca'
+ISSUE122_TARGET = '13f860b851d1e2a8ae8789bfe2aeb99909d73be4'
+ISSUE122_MIGRATION = '20261105183000_trusted_login_device'
+ISSUE122_SQL_SHA256 = 'f1d96022c5a9647eec7f1242c4f6d79be412d07d8c7595b9a86da5d58ff8d296'
+ISSUE122_REFS = {
+    'backend': 'ghcr.io/bielxdh3/demanage-backend@sha256:' + 'a' * 64,
+    'frontend': 'ghcr.io/bielxdh3/demanage-frontend@sha256:' + 'b' * 64,
+}
+ISSUE122_MIGRATIONS = [
+    [f'prior-{i}', f'checksum-{i}', '2026-11-01T00:00:00+00:00',
+     '2026-11-01T00:00:01+00:00', None]
+    for i in range(37)
+] + [[ISSUE122_MIGRATION, ISSUE122_SQL_SHA256,
+      '2026-11-08T22:50:00+00:00', '2026-11-08T22:51:00+00:00', None]]
 
 
 def release_manifest():
@@ -241,6 +256,27 @@ class DeployFlowTest(unittest.TestCase):
             fetch=fetch,
         )
 
+    def issue122_fake(self, *, rows=None, running=OLD):
+        fake = self.make_fake(running=running)
+        fake.add_image(ISSUE122_REFS['backend'], NEW['backend'], ISSUE122_TARGET)
+        fake.add_image(ISSUE122_REFS['frontend'], NEW['frontend'], ISSUE122_TARGET)
+        fake.add_image(OLD['backend'], OLD['backend'], ISSUE122_PREVIOUS)
+        fake.add_image(OLD['frontend'], OLD['frontend'], ISSUE122_PREVIOUS)
+        fake.migrations = [list(row) for row in (ISSUE122_MIGRATIONS if rows is None else rows)]
+        return fake
+
+    def issue122_release(self):
+        return {**release_manifest(), 'previous_commit': ISSUE122_PREVIOUS,
+                'source_commit': ISSUE122_TARGET, **ISSUE122_REFS}
+
+    def issue122_journal(self, rows):
+        self._journal(new=NEW, previous=OLD)
+        journal = state.read_journal(self.journal_file)
+        journal['target'] = ISSUE122_TARGET
+        journal['previous'] = ISSUE122_PREVIOUS
+        journal['prisma_migrations'] = [list(row) for row in rows]
+        state.write_journal(self.journal_file, journal)
+
     def test_readiness_fails_closed_even_if_public_liveness_is_healthy(self):
         fake = self.make_fake()
         ctx = self.make_ctx(fake)
@@ -398,6 +434,113 @@ class DeployFlowTest(unittest.TestCase):
 
         self.assertEqual(fake.journal_present_at_up, [])
         self.assertEqual(fake.running, OLD)
+        self.assertFalse(self.journal_file.exists())
+
+    def test_issue122_source_sql_matches_pinned_prisma_sha256(self):
+        sql = Path(__file__).resolve().parents[3] / 'backend/prisma/migrations' / (
+            ISSUE122_MIGRATION + '/migration.sql'
+        )
+        self.assertEqual(hashlib.sha256(sql.read_bytes()).hexdigest(), ISSUE122_SQL_SHA256)
+
+    def test_issue122_requires_exact_preapplied_38_migrations_before_up(self):
+        valid = [list(row) for row in ISSUE122_MIGRATIONS]
+        cases = {
+            'missing-target-37': valid[:-1],
+            'wrong-checksum': valid[:-1] + [[ISSUE122_MIGRATION, 'bad' * 21 + 'x',
+                                            valid[-1][2], valid[-1][3], None]],
+            'duplicate-target': [list(valid[-1])] + valid[1:],
+            'unfinished-target': valid[:-1] + [[*valid[-1][:3], None, None]],
+            'rolledback-target': valid[:-1] + [[*valid[-1][:4], '2026-11-08T22:52:00Z']],
+            'unfinished-earlier-migration': [[*valid[0][:3], None, None]] + valid[1:],
+            'unrelated-38': valid[:-1] + [['not-target', *valid[-1][1:]]],
+            'extra-39': valid + [list(EXTRA_MIGRATION)],
+        }
+        for reason, rows in cases.items():
+            with self.subTest(reason=reason):
+                self.write_state(ISSUE122_PREVIOUS, OLD)
+                fake = self.issue122_fake(rows=rows)
+                ctx = self.make_ctx(fake, fetch=self.issue122_release)
+                with self.assertRaisesRegex(RuntimeError, 'Issue122|migration'):
+                    cli.run_agent(ctx)
+                self.assertFalse(any('up' in args for args in fake.calls))
+                self.assertEqual(fake.running, OLD)
+                self.assertFalse(self.journal_file.exists())
+
+    def test_issue122_preapplied_snapshot_stays_identical_after_success(self):
+        self.write_state(ISSUE122_PREVIOUS, OLD)
+        fake = self.issue122_fake()
+        ctx = self.make_ctx(fake, fetch=self.issue122_release)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_agent(ctx), 0)
+        self.assertEqual(fake.migrations, ISSUE122_MIGRATIONS)
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], ISSUE122_TARGET)
+        self.assertFalse(self.journal_file.exists())
+
+    def test_issue122_new_image_migration_drift_cannot_commit_success(self):
+        self.write_state(ISSUE122_PREVIOUS, OLD)
+        fake = self.issue122_fake()
+        fake.migrate_on_new_up = True
+        ctx = self.make_ctx(fake, fetch=self.issue122_release)
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, 'migration'):
+                cli.run_agent(ctx)
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], ISSUE122_PREVIOUS)
+        self.assertEqual(state.read_journal(self.journal_file)['phase'], state.ROLLBACK_FAILED)
+
+    def test_issue122_drift_after_journal_before_overlay_does_not_swap_images(self):
+        self.write_state(ISSUE122_PREVIOUS, OLD)
+        fake = self.issue122_fake()
+        original_run = fake.run
+        queries = 0
+
+        def mutate_at_second_snapshot(args, **kwargs):
+            nonlocal queries
+            if args[:4] == ['docker', 'exec', 'demanage-db', 'psql']:
+                queries += 1
+                if queries == 2:
+                    fake.migrations.append(list(EXTRA_MIGRATION))
+            return original_run(args, **kwargs)
+
+        fake.run = mutate_at_second_snapshot
+        ctx = self.make_ctx(fake, fetch=self.issue122_release)
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaisesRegex(RuntimeError, 'migration'):
+                cli.run_agent(ctx)
+        self.assertGreaterEqual(queries, 2)
+        self.assertFalse(any('up' in args for args in fake.calls))
+        self.assertEqual(fake.running, OLD)
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], ISSUE122_PREVIOUS)
+        self.assertEqual(state.read_journal(self.journal_file)['phase'], state.ROLLBACK_FAILED)
+
+    def test_issue122_reconcile_new_images_must_preserve_ledger(self):
+        self.write_state(ISSUE122_PREVIOUS, OLD)
+        self.issue122_journal(ISSUE122_MIGRATIONS)
+        fake = self.issue122_fake(rows=ISSUE122_MIGRATIONS + [EXTRA_MIGRATION], running=NEW)
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+        with self.assertRaisesRegex(RuntimeError, 'migration'):
+            cli.run_agent(ctx)
+        self.assertTrue(self.journal_file.exists())
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], ISSUE122_PREVIOUS)
+
+    def test_issue122_reconcile_rejects_preflight_ledger_37_even_if_unchanged(self):
+        self.write_state(ISSUE122_PREVIOUS, OLD)
+        rows = ISSUE122_MIGRATIONS[:-1]
+        self.issue122_journal(rows)
+        fake = self.issue122_fake(rows=rows, running=NEW)
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+        with self.assertRaisesRegex(RuntimeError, 'Issue122|migration'):
+            cli.run_agent(ctx)
+        self.assertTrue(self.journal_file.exists())
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], ISSUE122_PREVIOUS)
+
+    def test_issue122_reconcile_accepts_identical_38_ledger(self):
+        self.write_state(ISSUE122_PREVIOUS, OLD)
+        self.issue122_journal(ISSUE122_MIGRATIONS)
+        fake = self.issue122_fake(running=NEW)
+        ctx = self.make_ctx(fake, fetch=lambda: None)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cli.run_agent(ctx), 0)
+        self.assertEqual(state.load_state(self.state_file)['source_commit'], ISSUE122_TARGET)
         self.assertFalse(self.journal_file.exists())
 
     def test_failed_rollback_keeps_journal_and_blocks_next_run(self):
