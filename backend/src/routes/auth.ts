@@ -2,6 +2,7 @@ import { Router } from 'express';
 
 import { bodyOf, requireUserId } from '@/http/request';
 import {
+  clearAuthCookie,
   setAuthCookie,
   signAuthToken,
   toPublicUser,

@@ -47,6 +47,22 @@ on:
         description: 'Issue 97 only: separate completed live salary schema migration proof SHA256'
         required: false
         type: string
+      reviewed_issue122_backup_sha256:
+        description: 'Issue 122 exact release: independently verified fresh production backup SHA256'
+        required: false
+        type: string
+      reviewed_issue122_rehearsal_sha256:
+        description: 'Issue 122 exact release: isolated PostgreSQL 18 migration rehearsal receipt SHA256'
+        required: false
+        type: string
+      reviewed_issue122_rollback_sha256:
+        description: 'Issue 122 exact release: old/new HTTP rollback compatibility receipt SHA256'
+        required: false
+        type: string
+      reviewed_issue122_live_migration_sha256:
+        description: 'Issue 122 exact release: separately completed live migration receipt SHA256'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -79,6 +95,10 @@ jobs:
       REVIEWED_ISSUE97_BACKUP_SHA256: ${{ inputs.reviewed_issue97_backup_sha256 }}
       REVIEWED_ISSUE97_REHEARSAL_SHA256: ${{ inputs.reviewed_issue97_rehearsal_sha256 }}
       REVIEWED_ISSUE97_LIVE_MIGRATION_SHA256: ${{ inputs.reviewed_issue97_live_migration_sha256 }}
+      REVIEWED_ISSUE122_BACKUP_SHA256: ${{ inputs.reviewed_issue122_backup_sha256 }}
+      REVIEWED_ISSUE122_REHEARSAL_SHA256: ${{ inputs.reviewed_issue122_rehearsal_sha256 }}
+      REVIEWED_ISSUE122_ROLLBACK_SHA256: ${{ inputs.reviewed_issue122_rollback_sha256 }}
+      REVIEWED_ISSUE122_LIVE_MIGRATION_SHA256: ${{ inputs.reviewed_issue122_live_migration_sha256 }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -165,6 +185,14 @@ jobs:
               exit 1
             fi
           fi
+          if [[ -n "$REVIEWED_ISSUE122_BACKUP_SHA256" || -n "$REVIEWED_ISSUE122_REHEARSAL_SHA256" ||
+                -n "$REVIEWED_ISSUE122_ROLLBACK_SHA256" || -n "$REVIEWED_ISSUE122_LIVE_MIGRATION_SHA256" ]]; then
+            if [[ "$PREVIOUS_SHA" != '15237faaf0bbd380d27494a1bfd87993ca8e28ca' ||
+                  "$TARGET_SHA" != '13f860b851d1e2a8ae8789bfe2aeb99909d73be4' ]]; then
+              echo "::error::Issue122 proof inputs cannot be reused on another release."
+              exit 1
+            fi
+          fi
           if ! git diff --quiet "$PREVIOUS_SHA" "$TARGET_SHA" -- \
             backend/prisma backend/prisma.config.ts backend/entrypoint.sh docker-compose.prod.yml; then
             # Strictly scoped, single-release exception: this exact SHA was
@@ -196,6 +224,14 @@ jobs:
                     -n "$REVIEWED_ISSUE97_LIVE_MIGRATION_SHA256" ]]; then
               echo "ISSUE97_IMAGE_CHECK_REQUIRED=1" >> "$GITHUB_ENV"
               echo "::notice::Issue97 exact pre-migrated salary schema candidate; verifying reviewed bytes, three proofs and immutable OCI digests."
+            elif [[ "$PREVIOUS_SHA" == '15237faaf0bbd380d27494a1bfd87993ca8e28ca' &&
+                    "$TARGET_SHA" == '13f860b851d1e2a8ae8789bfe2aeb99909d73be4' &&
+                    -n "$REVIEWED_ISSUE122_BACKUP_SHA256" &&
+                    -n "$REVIEWED_ISSUE122_REHEARSAL_SHA256" &&
+                    -n "$REVIEWED_ISSUE122_ROLLBACK_SHA256" &&
+                    -n "$REVIEWED_ISSUE122_LIVE_MIGRATION_SHA256" ]]; then
+              echo "ISSUE122_IMAGE_CHECK_REQUIRED=1" >> "$GITHUB_ENV"
+              echo "::notice::Issue122 pre-migrated DB release: verifying exact reviewed blobs, four private receipts and both OCI digests."
             else
               echo "::error::Migrations, entrypoint or base Compose changed; production promotion blocked. A separate reviewed migration is required."
               exit 1
@@ -238,6 +274,15 @@ jobs:
               --dump-sha256 "$REVIEWED_ISSUE97_BACKUP_SHA256" \
               --rehearsal-sha256 "$REVIEWED_ISSUE97_REHEARSAL_SHA256" \
               --live-migration-sha256 "$REVIEWED_ISSUE97_LIVE_MIGRATION_SHA256" \
+              --backend "$BACKEND_IMAGE" --frontend "$FRONTEND_IMAGE"
+          fi
+          if [[ "${ISSUE122_IMAGE_CHECK_REQUIRED:-}" == 1 ]]; then
+            python3 ops/cd/issue122_release_gate.py \
+              --repo . --previous "$PREVIOUS_SHA" --target "$TARGET_SHA" \
+              --backup-sha256 "$REVIEWED_ISSUE122_BACKUP_SHA256" \
+              --rehearsal-sha256 "$REVIEWED_ISSUE122_REHEARSAL_SHA256" \
+              --rollback-sha256 "$REVIEWED_ISSUE122_ROLLBACK_SHA256" \
+              --live-migration-sha256 "$REVIEWED_ISSUE122_LIVE_MIGRATION_SHA256" \
               --backend "$BACKEND_IMAGE" --frontend "$FRONTEND_IMAGE"
           fi
       - name: Prepare exact production pointer bytes
